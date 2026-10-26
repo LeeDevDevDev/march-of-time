@@ -1,12 +1,10 @@
-import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import {
-  SkillTreeBranchNode,
-  buildSkillTreeHierarchy,
   getTreeArchetypeIcon,
 } from '../../core/compendium/compendium.model';
+import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
 import {
   ARMOR_TIERS,
   ATTRIBUTE_LIST,
@@ -14,7 +12,6 @@ import {
   AttributeName,
   COMBAT_SKILL_LIST,
   CombatSkillName,
-  CombatTag,
   FIELD_SKILL_LIST,
   FieldSkillName,
   PerkNodeModel,
@@ -23,7 +20,6 @@ import {
   SkillTreeModel,
   WeaponModel,
   computeDerivedStats,
-  formatRuleHookBadges,
 } from './models/character.model';
 import { CharacterStore } from './store/character.store';
 
@@ -32,9 +28,13 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
 @Component({
   selector: 'app-character-creator',
   standalone: true,
-  imports: [FormsModule, RouterLink, NgTemplateOutlet],
+  imports: [FormsModule, RouterLink, SkillTreeCanvasComponent],
   template: `
-    <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
+    <div
+      class="mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6 transition-all"
+      [class.max-w-5xl]="step() !== 5 || !activeCreatorTree()"
+      [class.max-w-[1560px]]="step() === 5 && !!activeCreatorTree()"
+    >
       <!-- Top Builder Header & Step Progress -->
       <section
         class="overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
@@ -562,130 +562,30 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
               </div>
             }
 
-            <!-- Interactive Branching Skill Tree View -->
+            <!-- Interactive Draggable Skill Tree + Right-Side Inspector -->
             @if (activeCreatorTree(); as tree) {
-              <div
-                class="overflow-x-auto rounded-2xl border border-[#243B37] bg-[#0D1615] p-6 text-[#EBF5F3]"
-                style="background-image: radial-gradient(#243B37 1px, transparent 1px); background-size: 24px 24px;"
-              >
-                <div
-                  class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[#243B37] pb-4"
-                >
-                  <div class="flex items-center gap-3">
-                    <button
-                      type="button"
-                      (click)="activeCreatorTreeId.set(null)"
-                      class="rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-bold text-[#EBF5F3] hover:border-[#C4491A]"
-                    >
-                      ← All Skill Trees
-                    </button>
-                    <div>
-                      <h3 class="font-display text-lg font-bold text-white">
-                        {{ tree.name }}
-                      </h3>
-                      <p class="text-xs text-[#8AB0AB]">{{ tree.description }}</p>
-                    </div>
-                  </div>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    (click)="activeCreatorTreeId.set(null)"
+                    class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    ← Back to Skill Tree Cards
+                  </button>
                 </div>
 
-                <div class="flex min-w-max items-start justify-center gap-8 pb-2">
-                  @for (rootBranch of activeCreatorTreeBranches(); track rootBranch.node.id) {
-                    <ng-container
-                      *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: rootBranch }"
-                    ></ng-container>
-                  }
-                </div>
+                <app-skill-tree-canvas
+                  [tree]="tree"
+                  [allNodes]="characterStore.perkNodes()"
+                  mode="character"
+                  [unlockedIds]="unlockedPerkIds()"
+                  [perkSpent]="liveDerived().perkSpent"
+                  [perkBudget]="liveDerived().perkBudget"
+                  (toggleUnlock)="togglePerk($event)"
+                />
               </div>
             }
-
-            <ng-template #creatorBranchTpl let-branch>
-              <div class="flex flex-col items-center">
-                <div
-                  class="w-68 rounded-2xl border bg-[#122220] p-4 text-left transition-all"
-                  [class.border-[#C4491A]]="isPerkSelected(branch.node.id)"
-                  [class.border-[#243B37]]="!isPerkSelected(branch.node.id)"
-                >
-                  <div class="flex items-start justify-between gap-2">
-                    <div>
-                      <span class="font-mono-num text-[11px] font-bold text-[#8AB0AB]">
-                        Tier {{ branch.node.tier }} ·
-                        {{ branch.node.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
-                      </span>
-                      <div class="font-display text-sm font-bold text-white">
-                        {{ branch.node.name }}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      (click)="togglePerk(branch.node)"
-                      [disabled]="!canTogglePerk(branch.node)"
-                      [class]="
-                        isPerkSelected(branch.node.id)
-                          ? 'btn-copper rounded-lg px-2.5 py-1 text-xs font-semibold'
-                          : 'rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-40'
-                      "
-                    >
-                      {{ isPerkSelected(branch.node.id) ? 'Unlocked' : 'Unlock' }}
-                    </button>
-                  </div>
-
-                  @if (branch.node.node_type === 'combat_art') {
-                    <div class="mt-2 font-mono-num text-xs text-[#FF8C5A] tabular-nums">
-                      {{ branch.node.ap_cost ?? 1 }} AP · CD {{ branch.node.cooldown_rounds ?? 2 }} Rnds
-                      @if (branch.node.combat_tag && branch.node.combat_tag !== 'None') {
-                        · [{{ branch.node.combat_tag }}]
-                      }
-                    </div>
-                  }
-
-                  <p class="mt-1.5 text-xs text-[#8AB0AB]">
-                    {{ branch.node.description }}
-                  </p>
-
-                  @if (getHookBadges(branch.node).length > 0) {
-                    <div class="mt-2.5 flex flex-wrap gap-1.5">
-                      @for (badge of getHookBadges(branch.node); track badge) {
-                        <span
-                          class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A]"
-                        >
-                          {{ badge }}
-                        </span>
-                      }
-                    </div>
-                  }
-                </div>
-
-                @if (branch.children.length > 0) {
-                  <div
-                    class="h-6 w-0.5"
-                    [class.bg-[#C4491A]]="isPerkSelected(branch.node.id)"
-                    [class.bg-[#243B37]]="!isPerkSelected(branch.node.id)"
-                  ></div>
-
-                  @if (branch.children.length === 1) {
-                    <ng-container
-                      *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: branch.children[0] }"
-                    ></ng-container>
-                  } @else {
-                    <div class="relative flex items-start gap-6 pt-3">
-                      <div
-                        class="absolute left-1/2 top-0 h-0.5 -translate-x-1/2 bg-[#243B37]"
-                        style="width: calc(100% - 17rem);"
-                      ></div>
-                      @for (child of branch.children; track child.node.id) {
-                        <div class="relative flex flex-col items-center">
-                          <div class="-mt-3 h-3 w-0.5 bg-[#243B37]"></div>
-                          <ng-container
-                            *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: child }"
-                          ></ng-container>
-                        </div>
-                      }
-                    </div>
-                  }
-                }
-              </div>
-            </ng-template>
           </div>
         }
 
@@ -774,12 +674,6 @@ export class CharacterCreatorComponent {
     const id = this.activeCreatorTreeId();
     if (!id) return null;
     return this.characterStore.skillTrees().find((t) => t.id === id) ?? null;
-  });
-
-  readonly activeCreatorTreeBranches = computed<SkillTreeBranchNode[]>(() => {
-    const tree = this.activeCreatorTree();
-    if (!tree) return [];
-    return buildSkillTreeHierarchy(tree.id, this.characterStore.perkNodes());
   });
 
   readonly attributeList = ATTRIBUTE_LIST;
@@ -888,31 +782,6 @@ export class CharacterCreatorComponent {
     return this.characterStore
       .perkNodes()
       .filter((p) => p.tree_id === treeId && selected.has(p.id)).length;
-  }
-
-  getParentNodeName(parentId: string | null | undefined): string | null {
-    if (!parentId) return null;
-    return this.characterStore.perkNodes().find((p) => p.id === parentId)?.name ?? null;
-  }
-
-  isParentUnlocked(node: PerkNodeModel): boolean {
-    if (!node.parent_node_id) return true;
-    return this.unlockedPerkIds().includes(node.parent_node_id);
-  }
-
-  canTogglePerk(node: PerkNodeModel): boolean {
-    if (this.isPerkSelected(node.id)) return true;
-    if (!this.isParentUnlocked(node)) return false;
-    const cost = node.perk_cost ?? 1;
-    return this.liveDerived().perkSpent + cost <= this.liveDerived().perkBudget;
-  }
-
-  getHookBadges(node: PerkNodeModel): string[] {
-    return formatRuleHookBadges(node.rule_hooks);
-  }
-
-  isPerkSelected(perkId: string): boolean {
-    return this.unlockedPerkIds().includes(perkId);
   }
 
   togglePerk(node: PerkNodeModel): void {

@@ -1,30 +1,47 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  OnInit,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgTemplateOutlet } from '@angular/common';
 import {
   CombatTag,
   EditableRuleHookKey,
+  KeywordDefinition,
   PerkNodeModel,
-  PerkRuleHooks,
   RULE_HOOK_DEFINITIONS,
   RuleHookDefinition,
   RuleHookRow,
-  SkillTreeBranchNode,
   SkillTreeModel,
-  buildSkillTreeHierarchy,
   formatRuleHookBadges,
   getTreeArchetypeIcon,
   hooksObjectToRows,
   rowsToHooksObject,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
+import { KeywordTextComponent } from '../../shared/keyword-text/keyword-text.component';
+import { KeywordTextareaComponent } from '../../shared/keyword-text/keyword-textarea.component';
+import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
 
 @Component({
   selector: 'app-content-manager',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet],
+  imports: [
+    FormsModule,
+    SkillTreeCanvasComponent,
+    KeywordTextareaComponent,
+    KeywordTextComponent,
+  ],
   template: `
-    <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
+    <div
+      class="mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6 transition-all"
+      [class.max-w-6xl]="!activeTree()"
+      [class.max-w-[1600px]]="!!activeTree()"
+    >
       <!-- Feedback Banners -->
       @if (compendiumStore.error()) {
         <div
@@ -43,10 +60,9 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
       }
 
       <!-- ================================================================= -->
-      <!-- VIEW 1: SKILL TREE GALLERY CARDS (When no tree is opened)         -->
+      <!-- VIEW 1: TOP ADMIN STUDIO (Skill Trees Gallery OR Keywords Tab)    -->
       <!-- ================================================================= -->
       @if (!activeTree()) {
-        <!-- Top Admin Header Banner -->
         <section
           class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 sm:p-8 text-[#EBF5F3]"
         >
@@ -54,7 +70,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
             <div>
               <div class="flex flex-wrap items-center gap-2.5">
                 <h1 class="font-display text-2xl font-bold text-white sm:text-3xl">
-                  Content Manager — Skill Trees
+                  Content Manager
                 </h1>
                 <span
                   class="rounded-md border border-[#C4491A] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
@@ -63,172 +79,276 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                 </span>
               </div>
               <p class="mt-1.5 max-w-2xl text-sm text-[#8AB0AB]">
-                Select a martial Skill Tree below to open its interactive branching tree, or create a new path.
+                Manage interactive martial Skill Trees, Combat Arts, and the Special Words dictionary used for <code>[</code> autocomplete and hover tooltips.
               </p>
             </div>
 
             <div class="flex flex-wrap items-center gap-2.5">
-              <button
-                type="button"
-                (click)="openNewTreeModal()"
-                class="btn-copper rounded-lg px-4 py-2.5 text-xs font-semibold"
-              >
-                + New Skill Tree
-              </button>
+              <!-- Studio Section Switcher -->
+              <div class="flex items-center rounded-xl border border-[#243B37] bg-[#0D1615] p-1">
+                <button
+                  type="button"
+                  (click)="studioTab.set('trees')"
+                  class="rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors"
+                  [class.bg-[#C4491A]]="studioTab() === 'trees'"
+                  [class.text-white]="studioTab() === 'trees'"
+                  [class.text-[#8AB0AB]]="studioTab() !== 'trees'"
+                >
+                  Skill Trees ({{ compendiumStore.skillTrees().length }})
+                </button>
+                <button
+                  type="button"
+                  (click)="studioTab.set('keywords')"
+                  class="rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors"
+                  [class.bg-[#C4491A]]="studioTab() === 'keywords'"
+                  [class.text-white]="studioTab() === 'keywords'"
+                  [class.text-[#8AB0AB]]="studioTab() !== 'keywords'"
+                >
+                  Special Words ({{ compendiumStore.keywords().length }})
+                </button>
+              </div>
+
+              @if (studioTab() === 'trees') {
+                <button
+                  type="button"
+                  (click)="openNewTreeModal()"
+                  class="btn-copper rounded-lg px-4 py-2.5 text-xs font-semibold"
+                >
+                  + New Skill Tree
+                </button>
+              } @else {
+                <button
+                  type="button"
+                  (click)="openNewKeywordModal()"
+                  class="btn-copper rounded-lg px-4 py-2.5 text-xs font-semibold"
+                >
+                  + New Special Word
+                </button>
+              }
             </div>
           </div>
         </section>
 
-        <!-- Skill Tree Cards Grid -->
-        <section class="grid grid-cols-1 gap-5 md:grid-cols-3">
-          @for (tree of compendiumStore.skillTrees(); track tree.id) {
-            <article
-              class="group flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 transition-all hover:border-[#C4491A]"
-            >
-              <div>
-                <!-- Icon Emblem & Node Count Pill -->
-                <div class="flex items-start justify-between gap-3">
-                  <div
-                    class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A] transition-colors group-hover:border-[#C4491A] group-hover:bg-[#C4491A] group-hover:text-white"
-                  >
-                    @switch (getArchetypeIcon(tree)) {
-                      @case ('breaker') {
-                        <!-- Warhammer / Shatter Crest -->
-                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                          <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
-                          <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
-                          <path d="M3 21L5.5 18.5" />
-                        </svg>
+        <!-- TAB A: SKILL TREE CARDS GALLERY -->
+        @if (studioTab() === 'trees') {
+          <section class="grid grid-cols-1 gap-5 md:grid-cols-3">
+            @for (tree of compendiumStore.skillTrees(); track tree.id) {
+              <article
+                class="group flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 transition-all hover:border-[#C4491A]"
+              >
+                <div>
+                  <div class="flex items-start justify-between gap-3">
+                    <div
+                      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A] transition-colors group-hover:border-[#C4491A] group-hover:bg-[#C4491A] group-hover:text-white"
+                    >
+                      @switch (getArchetypeIcon(tree)) {
+                        @case ('breaker') {
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                            <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
+                            <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
+                            <path d="M3 21L5.5 18.5" />
+                          </svg>
+                        }
+                        @case ('veil') {
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                            <path d="M19 3L9 13L11 15L21 5L19 3Z" />
+                            <path d="M7 11L13 17" />
+                            <path d="M5 19L9 15" />
+                            <path d="M3 14L10 7" />
+                          </svg>
+                        }
+                        @case ('gale') {
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                            <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
+                            <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
+                            <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
+                          </svg>
+                        }
+                        @default {
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                          </svg>
+                        }
                       }
-                      @case ('veil') {
-                        <!-- Twin Daggers / Veil Crest -->
-                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                          <path d="M19 3L9 13L11 15L21 5L19 3Z" />
-                          <path d="M7 11L13 17" />
-                          <path d="M5 19L9 15" />
-                          <path d="M3 14L10 7" />
-                        </svg>
-                      }
-                      @case ('gale') {
-                        <!-- Crescent Gale / Wind Swirl Crest -->
-                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                          <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
-                          <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
-                          <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
-                        </svg>
-                      }
-                      @default {
-                        <!-- Sentinel Shield Crest -->
-                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        </svg>
-                      }
-                    }
+                    </div>
+
+                    <span
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+                    >
+                      {{ getPerksForTree(tree.id).length }}
+                      {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
+                    </span>
                   </div>
 
-                  <span
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
-                  >
-                    {{ getPerksForTree(tree.id).length }}
-                    {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
-                  </span>
+                  <h2 class="mt-4 font-display text-xl font-bold text-[var(--mot-text)]">
+                    {{ tree.name }}
+                  </h2>
+                  <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                    {{ tree.description }}
+                  </p>
+
+                  <div class="mt-4 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                    <span
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-accent-text)]"
+                    >
+                      {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
+                    </span>
+                    <span
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)]"
+                    >
+                      {{ countNodeType(tree.id, 'passive_upgrade') }} Passives
+                    </span>
+                  </div>
                 </div>
 
-                <!-- Tree Name & Description -->
-                <h2 class="mt-4 font-display text-xl font-bold text-[var(--mot-text)]">
-                  {{ tree.name }}
+                <div class="mt-6 flex items-center justify-between gap-2 border-t border-[var(--mot-border)] pt-4">
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="openEditTreeModal(tree)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      (click)="confirmDeleteTree(tree)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    (click)="openSkillTreeView(tree.id)"
+                    class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+                  >
+                    View Skill Tree →
+                  </button>
+                </div>
+              </article>
+            }
+          </section>
+        }
+
+        <!-- TAB B: SPECIAL WORDS & GLOSSARY MANAGER -->
+        @if (studioTab() === 'keywords') {
+          <section
+            class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+          >
+            <div
+              class="flex flex-col justify-between gap-3 rounded-t-2xl border-b border-[var(--mot-border)] bg-[var(--mot-well)] px-6 py-4 sm:flex-row sm:items-center"
+            >
+              <div>
+                <h2 class="font-display text-lg font-bold text-[var(--mot-text)]">
+                  Special Words &amp; Hover Definitions
                 </h2>
-                <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
-                  {{ tree.description }}
+                <p class="text-xs text-[var(--mot-muted)]">
+                  Any word listed here appears in the <code>[</code> autocomplete menu when writing descriptions and automatically shows its rule tooltip when hovered.
                 </p>
-
-                <!-- Breakdown Pills (Combat Arts vs Passives) -->
-                <div class="mt-4 flex flex-wrap items-center gap-2 font-mono-num text-xs">
-                  <span
-                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-accent-text)]"
-                  >
-                    {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
-                  </span>
-                  <span
-                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)]"
-                  >
-                    {{ countNodeType(tree.id, 'passive_upgrade') }} Passives
-                  </span>
-                </div>
               </div>
 
-              <!-- Card Footer Actions -->
-              <div class="mt-6 flex items-center justify-between gap-2 border-t border-[var(--mot-border)] pt-4">
-                <div class="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    (click)="openEditTreeModal(tree)"
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    (click)="confirmDeleteTree(tree)"
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
-                  >
-                    Delete
-                  </button>
-                </div>
+              <div class="w-full sm:w-64">
+                <input
+                  type="text"
+                  [ngModel]="keywordSearch()"
+                  (ngModelChange)="keywordSearch.set($event)"
+                  placeholder="Search special words..."
+                  class="mot-input px-3 py-1.5 text-xs font-semibold"
+                />
+              </div>
+            </div>
 
-                <button
-                  type="button"
-                  (click)="openSkillTreeView(tree.id)"
-                  class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+            <div class="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
+              @for (kw of filteredKeywords(); track kw.term) {
+                <article
+                  class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 transition-colors hover:border-[#C4491A]"
                 >
-                  View Skill Tree →
-                </button>
-              </div>
-            </article>
-          }
-        </section>
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <span
+                        class="font-display text-base font-bold text-[var(--mot-accent-text)] underline decoration-dotted underline-offset-4"
+                      >
+                        {{ kw.term }}
+                      </span>
+                      <span
+                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-semibold text-[var(--mot-muted)]"
+                      >
+                        {{ kw.category }}
+                      </span>
+                    </div>
+                    <div class="mt-2">
+                      <app-keyword-text
+                        [text]="kw.summary"
+                        [excludeTerm]="kw.term"
+                        [showHintWhenIdle]="false"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="mt-4 flex items-center justify-end gap-2 border-t border-[var(--mot-border)] pt-3">
+                    <button
+                      type="button"
+                      (click)="openEditKeywordModal(kw)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Edit Word
+                    </button>
+                    <button
+                      type="button"
+                      (click)="deleteKeyword(kw)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              }
+            </div>
+          </section>
+        }
       }
 
       <!-- ================================================================= -->
-      <!-- VIEW 2: INTERACTIVE VISUAL SKILL TREE CANVAS                      -->
+      <!-- VIEW 2: EXPANSIVE DRAGGABLE ICON SKILL TREE + INSPECTOR           -->
       <!-- ================================================================= -->
       @if (activeTree(); as tree) {
-        <!-- Tree Studio Header -->
         <section
-          class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 text-[#EBF5F3]"
+          class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
         >
           <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div class="flex items-start gap-4">
+            <div class="flex items-center gap-4">
               <button
                 type="button"
                 (click)="closeSkillTreeView()"
-                class="mt-0.5 flex h-10 items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
+                class="flex h-9 items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
               >
                 ← All Trees
               </button>
 
               <div>
-                <div class="flex flex-wrap items-center gap-2.5">
-                  <h1 class="font-display text-2xl font-bold text-white">
-                    {{ tree.name }}
-                  </h1>
-                  <span
-                    class="rounded-md border border-[#243B37] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
-                  >
-                    {{ getPerksForTree(tree.id).length }} Nodes
-                  </span>
-                </div>
-                <p class="mt-1 text-xs text-[#8AB0AB]">
+                <h1 class="font-display text-lg font-bold text-white sm:text-xl">
+                  {{ tree.name }}
+                </h1>
+                <p class="text-xs text-[#8AB0AB]">
                   {{ tree.description }}
                 </p>
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2.5">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                (click)="openNewKeywordModal()"
+                class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#FF8C5A] hover:border-[#C4491A]"
+              >
+                + New Special Word
+              </button>
               <button
                 type="button"
                 (click)="openEditTreeModal(tree)"
-                class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3.5 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+                class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
               >
                 Edit Tree Info
               </button>
@@ -237,227 +357,23 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                 (click)="openNewNodeModal(tree.id)"
                 class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
               >
-                + Add Root Node (Tier 1)
+                + Add Tier 1 Root Node
               </button>
             </div>
           </div>
         </section>
 
-        <!-- Visual Branching Skill Tree Canvas -->
-        <section
-          class="overflow-x-auto rounded-2xl border border-[#243B37] bg-[#0D1615] p-6 sm:p-10 text-[#EBF5F3]"
-          style="background-image: radial-gradient(#243B37 1px, transparent 1px); background-size: 24px 24px;"
-        >
-          @if (activeTreeBranches().length === 0) {
-            <div
-              class="mx-auto max-w-md rounded-2xl border border-dashed border-[#243B37] bg-[#122220]/90 p-8 text-center"
-            >
-              <h2 class="font-display text-lg font-bold text-white">
-                This Skill Tree Is Empty
-              </h2>
-              <p class="mt-1 text-xs text-[#8AB0AB]">
-                Start by placing a Tier 1 root Combat Art or Passive Upgrade, then branch child nodes directly off it.
-              </p>
-              <button
-                type="button"
-                (click)="openNewNodeModal(tree.id)"
-                class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
-              >
-                + Place First Tier 1 Node
-              </button>
-            </div>
-          } @else {
-            <!-- Legend Bar -->
-            <div
-              class="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-[#243B37] pb-4 text-xs text-[#8AB0AB]"
-            >
-              <div class="flex flex-wrap items-center gap-4">
-                <span class="flex items-center gap-2">
-                  <span class="h-3 w-3 rounded-sm bg-[#C4491A]"></span>
-                  <strong class="text-white">Combat Art</strong> (Active AP &amp; Cooldown)
-                </span>
-                <span class="flex items-center gap-2">
-                  <span class="h-3 w-3 rounded-full bg-[#38B29A]"></span>
-                  <strong class="text-white">Passive Upgrade</strong> (Permanent Stat Bonus)
-                </span>
-              </div>
-              <span class="font-mono-num">
-                Click <strong>+ Branch</strong> on any node to grow a connected child node below it.
-              </span>
-            </div>
-
-            <!-- Root Columns (Each Root Node & Its Connected Descendants) -->
-            <div class="flex min-w-max items-start justify-center gap-10 pb-4">
-              @for (rootBranch of activeTreeBranches(); track rootBranch.node.id) {
-                <ng-container
-                  *ngTemplateOutlet="branchTemplate; context: { $implicit: rootBranch }"
-                ></ng-container>
-              }
-            </div>
-          }
-        </section>
+        <!-- Full-Width Pannable Icon Tree Canvas + Right-Side Inspector -->
+        <app-skill-tree-canvas
+          [tree]="tree"
+          [allNodes]="compendiumStore.perkNodes()"
+          mode="admin"
+          (addRootNode)="openNewNodeModal(tree.id)"
+          (branchChildNode)="openBranchChildModal($event)"
+          (editNode)="openEditNodeModal($event)"
+          (deleteNode)="confirmDeleteNode($event)"
+        />
       }
-
-      <!-- ================================================================= -->
-      <!-- RECURSIVE VISUAL TREE BRANCH TEMPLATE                             -->
-      <!-- ================================================================= -->
-      <ng-template #branchTemplate let-branch>
-        <div class="flex flex-col items-center">
-          <!-- The Skill Node Card -->
-          <div
-            class="relative w-72 rounded-2xl border bg-[#122220] p-4 text-left transition-all"
-            [class.border-[#C4491A]]="branch.node.node_type === 'combat_art'"
-            [class.border-[#2A6F62]]="branch.node.node_type === 'passive_upgrade'"
-          >
-            <!-- Top Row: Node Medallion + Tier + Cost -->
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <!-- Medallion Icon -->
-                @if (branch.node.node_type === 'combat_art') {
-                  <span
-                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#C4491A] text-white"
-                    title="Active Combat Art"
-                  >
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                    </svg>
-                  </span>
-                } @else {
-                  <span
-                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#38B29A] bg-[#0D1615] text-[#38B29A]"
-                    title="Passive Upgrade"
-                  >
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    </svg>
-                  </span>
-                }
-
-                <div>
-                  <span class="block font-mono-num text-[11px] font-bold text-[#8AB0AB]">
-                    Tier {{ branch.node.tier }} ·
-                    {{ branch.node.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
-                  </span>
-                  <h3 class="font-display text-base font-bold leading-tight text-white">
-                    {{ branch.node.name }}
-                  </h3>
-                </div>
-              </div>
-
-              <span
-                class="rounded-md border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#EBF5F3]"
-              >
-                {{ branch.node.perk_cost }} {{ branch.node.perk_cost === 1 ? 'Pt' : 'Pts' }}
-              </span>
-            </div>
-
-            <!-- Action Economy & Combat Tag Bar (For Combat Arts) -->
-            @if (branch.node.node_type === 'combat_art') {
-              <div class="mt-3 flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
-                @if (branch.node.combat_tag && branch.node.combat_tag !== 'None') {
-                  <span
-                    class="rounded border border-[#C4491A] bg-[#0D1615] px-2 py-0.5 font-bold text-[#FF8C5A]"
-                  >
-                    [{{ branch.node.combat_tag }}]
-                  </span>
-                }
-                <span
-                  class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-bold text-white"
-                >
-                  {{ branch.node.ap_cost ?? 1 }} AP
-                </span>
-                @if (branch.node.cooldown_rounds) {
-                  <span
-                    class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 text-[#8AB0AB]"
-                  >
-                    {{ branch.node.cooldown_rounds }}R CD
-                  </span>
-                }
-              </div>
-            }
-
-            <!-- Node Description -->
-            <p class="mt-2.5 text-xs leading-relaxed text-[#8AB0AB]">
-              {{ branch.node.description }}
-            </p>
-
-            <!-- Compiled Rule Hook Badges -->
-            @if (getHookBadges(branch.node.rule_hooks).length > 0) {
-              <div class="mt-3 flex flex-wrap gap-1.5">
-                @for (badge of getHookBadges(branch.node.rule_hooks); track badge) {
-                  <span
-                    class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A]"
-                  >
-                    {{ badge }}
-                  </span>
-                }
-              </div>
-            }
-
-            <!-- Node Action Bar: Branch Child, Edit, Delete -->
-            <div
-              class="mt-4 flex items-center justify-between gap-1.5 border-t border-[#243B37] pt-3"
-            >
-              <button
-                type="button"
-                (click)="openBranchChildModal(branch.node)"
-                class="rounded-lg border border-[#C4491A] bg-[#0D1615] px-2.5 py-1 font-mono-num text-xs font-bold text-[#FF8C5A] transition-colors hover:bg-[#C4491A] hover:text-white"
-              >
-                + Branch Tier {{ branch.node.tier + 1 }}
-              </button>
-
-              <div class="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  (click)="openEditNodeModal(branch.node)"
-                  class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  (click)="confirmDeleteNode(branch.node)"
-                  class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#F26464] hover:border-[#F26464]"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Visual Tree Connector Lines to Children -->
-          @if (branch.children.length > 0) {
-            <!-- Vertical Stem Down from Parent -->
-            <div class="h-7 w-0.5 bg-[#C4491A]"></div>
-
-            @if (branch.children.length === 1) {
-              <!-- Single Child: Direct Vertical Line -->
-              <ng-container
-                *ngTemplateOutlet="branchTemplate; context: { $implicit: branch.children[0] }"
-              ></ng-container>
-            } @else {
-              <!-- Multiple Children: Horizontal Crossbar + Vertical Drops -->
-              <div class="relative flex items-start gap-8 pt-4">
-                <!-- Horizontal Bar across children -->
-                <div
-                  class=" absolute left-1/2 top-0 h-0.5 -translate-x-1/2 bg-[#C4491A]"
-                  style="width: calc(100% - 18rem);"
-                ></div>
-
-                @for (childBranch of branch.children; track childBranch.node.id) {
-                  <div class="relative flex flex-col items-center">
-                    <!-- Short Vertical Drop from Crossbar to Child -->
-                    <div class="-mt-4 h-4 w-0.5 bg-[#C4491A]"></div>
-                    <ng-container
-                      *ngTemplateOutlet="branchTemplate; context: { $implicit: childBranch }"
-                    ></ng-container>
-                  </div>
-                }
-              </div>
-            }
-          }
-        </div>
-      </ng-template>
 
       <!-- =================================================================== -->
       <!-- MODAL 1: CREATE / EDIT SKILL TREE                                   -->
@@ -468,11 +384,11 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
           (click)="closeTreeModal()"
         >
           <div
-            class="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+            class="w-full max-w-lg rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
             (click)="$event.stopPropagation()"
           >
             <div
-              class="flex items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+              class="flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
             >
               <h2 class="font-display text-lg font-bold">
                 {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
@@ -540,6 +456,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
 
       <!-- =================================================================== -->
       <!-- MODAL 2: CREATE / EDIT COMBAT ART OR PASSIVE PERK NODE              -->
+      <!-- (Includes [ Triggered Special Word Search & Autocomplete!)          -->
       <!-- =================================================================== -->
       @if (nodeModalOpen()) {
         <div
@@ -558,7 +475,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                   {{ editingNodeId() ? 'Edit Skill Tree Node' : 'Create Skill Tree Node' }}
                 </h2>
                 <p class="text-xs text-[#8AB0AB]">
-                  Configure action costs, tags, and composable rule hooks for automatic sheet math.
+                  Type <code class="rounded bg-[#0D1615] px-1.5 py-0.5 text-[#FF8C5A]">[</code> in the description to search and insert special words.
                 </p>
               </div>
               <button
@@ -668,19 +585,16 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                   </select>
                 </div>
 
+                <!-- Rules Description with [ Special Word Autocomplete -->
                 <div class="sm:col-span-2">
-                  <label for="nodeDesc" class="block text-xs font-bold text-[var(--mot-text)]">
-                    Rules Description
-                  </label>
-                  <textarea
-                    id="nodeDesc"
-                    name="nodeDesc"
-                    rows="2"
-                    required
-                    [(ngModel)]="nodeForm.description"
-                    placeholder="Clear tactical summary shown in Character Creation and on the Character Sheet..."
-                    class="mot-input mt-1.5 px-3.5 py-2 text-sm"
-                  ></textarea>
+                  <app-keyword-textarea
+                    inputId="nodeDesc"
+                    label="Rules Description"
+                    [value]="nodeForm.description"
+                    (valueChange)="nodeForm.description = $event"
+                    (requestCreateKeyword)="openNewKeywordModal($event)"
+                    placeholder="Type [ to search special words (e.g. [Crushing], [Parry], [Sundered])..."
+                  />
                 </div>
               </div>
 
@@ -746,7 +660,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                 </div>
               }
 
-              <!-- Section 3: Composable Rule Hook Builder (Foundry VTT / D&D Beyond Style) -->
+              <!-- Section 3: Composable Rule Hook Builder -->
               <div
                 class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-4"
               >
@@ -775,7 +689,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                     class="rounded-lg border border-dashed border-[var(--mot-border)] bg-[var(--mot-surface)] px-4 py-4 text-center text-xs text-[var(--mot-muted)]"
                   >
                     No custom stat or on-hit modifiers attached yet. Click
-                    <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to attach automatic bonuses (e.g. +2 Max SP, +2 SP DMG, Push 1 Tile).
+                    <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to attach automatic bonuses.
                   </div>
                 } @else {
                   <div class="space-y-2.5">
@@ -783,7 +697,6 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                       <div
                         class="flex flex-col gap-2 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] p-3 sm:flex-row sm:items-center"
                       >
-                        <!-- Hook Type Selector -->
                         <div class="flex-1">
                           <select
                             [name]="'hookKey_' + idx"
@@ -804,7 +717,6 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                           </select>
                         </div>
 
-                        <!-- Hook Value Input (Number or Status Select) -->
                         <div class="w-full sm:w-40">
                           @if (getHookDef(row.key)?.valueType === 'status') {
                             <select
@@ -829,7 +741,6 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                           }
                         </div>
 
-                        <!-- Remove Hook Button -->
                         <button
                           type="button"
                           (click)="removeRuleHookRow(idx)"
@@ -842,7 +753,6 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                   </div>
                 }
 
-                <!-- Live Compiled Badges Preview -->
                 @if (liveCompiledBadges().length > 0) {
                   <div class="flex flex-wrap items-center gap-1.5 border-t border-[var(--mot-border)] pt-3">
                     <span class="text-xs font-semibold text-[var(--mot-muted)]">
@@ -879,11 +789,125 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
           </div>
         </div>
       }
+
+      <!-- =================================================================== -->
+      <!-- MODAL 3: CREATE / EDIT SPECIAL WORD (KEYWORD GLOSSARY)              -->
+      <!-- =================================================================== -->
+      @if (keywordModalOpen()) {
+        <div
+          class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          (click)="closeKeywordModal()"
+        >
+          <div
+            class="w-full max-w-lg rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+            (click)="$event.stopPropagation()"
+          >
+            <div
+              class="flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+            >
+              <div>
+                <h2 class="font-display text-lg font-bold">
+                  {{ editingKeywordId() ? 'Edit Special Word' : 'Create Special Word' }}
+                </h2>
+                <p class="text-xs text-[#8AB0AB]">
+                  Available in the <code>[</code> autocomplete menu and highlighted automatically in descriptions.
+                </p>
+              </div>
+              <button
+                type="button"
+                (click)="closeKeywordModal()"
+                class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+
+            <form (ngSubmit)="saveKeyword()" class="p-6 space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-[var(--mot-text)]">
+                  Special Word / Term
+                </label>
+                <input
+                  type="text"
+                  name="kwTerm"
+                  required
+                  [(ngModel)]="keywordFormTerm"
+                  placeholder="e.g. Overcharge, Exposed, or Riposte"
+                  class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-bold"
+                />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-[var(--mot-text)]">
+                  Category
+                </label>
+                <select
+                  name="kwCategory"
+                  [(ngModel)]="keywordFormCategory"
+                  class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
+                >
+                  <option value="Defense Triangle Tag">Defense Triangle Tag</option>
+                  <option value="Active Defense">Active Defense</option>
+                  <option value="Combat Status">Combat Status</option>
+                  <option value="Core Mechanic">Core Mechanic</option>
+                  <option value="Custom Rule">Custom Rule</option>
+                </select>
+              </div>
+
+              <div>
+                <app-keyword-textarea
+                  inputId="kwSummary"
+                  label="Hover Rule Explanation (Chain Other Keywords with [ )"
+                  [value]="keywordFormSummary"
+                  (valueChange)="keywordFormSummary = $event"
+                  [excludeTerm]="keywordFormTerm"
+                  [showNewWordButton]="false"
+                  placeholder="Type [ to chain related keywords inside this explanation (e.g. The defender must declare [Parry] or [Shield Block])..."
+                />
+
+                @if (keywordFormSummary.trim()) {
+                  <div
+                    class="mt-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3"
+                  >
+                    <p class="mb-1.5 font-mono-num text-[11px] font-bold text-[var(--mot-muted)]">
+                      Live Chained Preview (Hover underlined words below to test):
+                    </p>
+                    <app-keyword-text
+                      [text]="keywordFormSummary"
+                      [excludeTerm]="keywordFormTerm"
+                      [showHintWhenIdle]="false"
+                      placement="top"
+                    />
+                  </div>
+                }
+              </div>
+
+              <div class="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  (click)="closeKeywordModal()"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn-copper rounded-lg px-5 py-2 text-xs font-semibold"
+                >
+                  {{ editingKeywordId() ? 'Save Word Changes' : 'Create Special Word' }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      }
     </div>
   `,
 })
 export class ContentManagerComponent implements OnInit {
   readonly compendiumStore = inject(CompendiumStore);
+
+  @ViewChild('descTextarea') descTextarea?: ElementRef<HTMLTextAreaElement>;
 
   readonly ruleHookDefinitions = RULE_HOOK_DEFINITIONS;
   readonly sheetStatHookDefs = RULE_HOOK_DEFINITIONS.filter(
@@ -893,7 +917,23 @@ export class ContentManagerComponent implements OnInit {
     (d) => d.category === 'Combat Art Effect'
   );
 
-  // Null = Gallery of Skill Tree Cards; String = Viewing that Skill Tree's visual branching diagram
+  // Studio Tab: 'trees' vs 'keywords'
+  readonly studioTab = signal<'trees' | 'keywords'>('trees');
+  readonly keywordSearch = signal<string>('');
+
+  readonly filteredKeywords = computed(() => {
+    const q = this.keywordSearch().trim().toLowerCase();
+    const all = this.compendiumStore.keywords();
+    if (!q) return all;
+    return all.filter(
+      (kw) =>
+        kw.term.toLowerCase().includes(q) ||
+        kw.category.toLowerCase().includes(q) ||
+        kw.summary.toLowerCase().includes(q)
+    );
+  });
+
+  // Active Skill Tree Studio View
   readonly activeTreeId = signal<string | null>(null);
 
   readonly activeTree = computed(() => {
@@ -902,10 +942,17 @@ export class ContentManagerComponent implements OnInit {
     return this.compendiumStore.skillTrees().find((t) => t.id === id) ?? null;
   });
 
-  readonly activeTreeBranches = computed<SkillTreeBranchNode[]>(() => {
-    const tree = this.activeTree();
-    if (!tree) return [];
-    return buildSkillTreeHierarchy(tree.id, this.compendiumStore.perkNodes());
+  // `[` Bracket Autocomplete State in Description Textarea
+  readonly bracketMenuOpen = signal(false);
+  readonly bracketQuery = signal('');
+  readonly bracketStartIndex = signal<number>(-1);
+  readonly bracketSelectedIndex = signal<number>(0);
+
+  readonly matchingBracketKeywords = computed(() => {
+    const q = this.bracketQuery().trim().toLowerCase();
+    const all = this.compendiumStore.keywords();
+    if (!q) return all;
+    return all.filter((kw) => kw.term.toLowerCase().includes(q));
   });
 
   // Tree Modal State
@@ -913,6 +960,13 @@ export class ContentManagerComponent implements OnInit {
   readonly editingTreeId = signal<string | null>(null);
   treeFormName = '';
   treeFormDescription = '';
+
+  // Keyword Modal State
+  readonly keywordModalOpen = signal(false);
+  readonly editingKeywordId = signal<string | null>(null);
+  keywordFormTerm = '';
+  keywordFormCategory = 'Combat Status';
+  keywordFormSummary = '';
 
   // Node Modal State
   readonly nodeModalOpen = signal(false);
@@ -983,10 +1037,6 @@ export class ContentManagerComponent implements OnInit {
       .filter((p) => p.tree_id === treeId && p.node_type === type).length;
   }
 
-  getHookBadges(hooks: PerkRuleHooks | undefined | null): string[] {
-    return formatRuleHookBadges(hooks);
-  }
-
   getHookDef(key: EditableRuleHookKey): RuleHookDefinition | undefined {
     return RULE_HOOK_DEFINITIONS.find((d) => d.key === key);
   }
@@ -1003,19 +1053,188 @@ export class ContentManagerComponent implements OnInit {
       );
   }
 
-  // Composable Rule Hook Row Actions
+  // ===========================================================================
+  // `[` BRACKET KEYWORD AUTOCOMPLETE LOGIC
+  // ===========================================================================
+  onDescriptionChange(value: string, textarea: HTMLTextAreaElement): void {
+    this.nodeForm.description = value;
+    this.evaluateBracketAutocomplete(textarea);
+  }
+
+  onDescriptionCursorActivity(
+    textarea: HTMLTextAreaElement,
+    event?: KeyboardEvent
+  ): void {
+    if (
+      event &&
+      (event.key === 'ArrowDown' ||
+        event.key === 'ArrowUp' ||
+        event.key === 'Enter' ||
+        event.key === 'Escape')
+    ) {
+      return;
+    }
+    this.evaluateBracketAutocomplete(textarea);
+  }
+
+  private evaluateBracketAutocomplete(textarea: HTMLTextAreaElement): void {
+    const cursor = textarea.selectionStart ?? this.nodeForm.description.length;
+    const textBeforeCursor = this.nodeForm.description.slice(0, cursor);
+    const lastOpenBracket = textBeforeCursor.lastIndexOf('[');
+    const lastCloseBracket = textBeforeCursor.lastIndexOf(']');
+
+    if (lastOpenBracket !== -1 && lastOpenBracket > lastCloseBracket) {
+      const query = textBeforeCursor.slice(lastOpenBracket + 1);
+      // Only keep autocomplete open if query doesn't contain newlines
+      if (!query.includes('\n')) {
+        this.bracketStartIndex.set(lastOpenBracket);
+        this.bracketQuery.set(query);
+        this.bracketSelectedIndex.set(0);
+        this.bracketMenuOpen.set(true);
+        return;
+      }
+    }
+
+    this.bracketMenuOpen.set(false);
+  }
+
+  onDescriptionKeydown(
+    event: KeyboardEvent,
+    textarea: HTMLTextAreaElement
+  ): void {
+    if (!this.bracketMenuOpen()) return;
+    const matches = this.matchingBracketKeywords();
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (matches.length > 0) {
+        this.bracketSelectedIndex.update((i) => (i + 1) % matches.length);
+      }
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (matches.length > 0) {
+        this.bracketSelectedIndex.update(
+          (i) => (i - 1 + matches.length) % matches.length
+        );
+      }
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      if (matches.length > 0) {
+        event.preventDefault();
+        const chosen = matches[this.bracketSelectedIndex()] ?? matches[0];
+        this.insertKeywordFromMenu(chosen, textarea);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.bracketMenuOpen.set(false);
+    }
+  }
+
+  insertKeywordFromMenu(
+    kw: KeywordDefinition,
+    textarea: HTMLTextAreaElement
+  ): void {
+    const start = this.bracketStartIndex();
+    const cursor = textarea.selectionStart ?? this.nodeForm.description.length;
+    if (start < 0) return;
+
+    const before = this.nodeForm.description.slice(0, start);
+    const after = this.nodeForm.description.slice(cursor);
+    const inserted = `[${kw.term}]`;
+
+    this.nodeForm.description = `${before}${inserted}${after}`;
+    this.bracketMenuOpen.set(false);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = before.length + inserted.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  }
+
+  appendKeywordChip(kw: KeywordDefinition, textarea: HTMLTextAreaElement): void {
+    const cursor = textarea.selectionStart ?? this.nodeForm.description.length;
+    const before = this.nodeForm.description.slice(0, cursor);
+    const after = this.nodeForm.description.slice(cursor);
+    const needsSpace = before.length > 0 && !before.endsWith(' ') ? ' ' : '';
+    const inserted = `${needsSpace}[${kw.term}] `;
+
+    this.nodeForm.description = `${before}${inserted}${after}`;
+    this.bracketMenuOpen.set(false);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = before.length + inserted.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  }
+
+  // ===========================================================================
+  // SPECIAL WORD / KEYWORD MODAL ACTIONS
+  // ===========================================================================
+  openNewKeywordModal(prefillTerm = ''): void {
+    this.editingKeywordId.set(null);
+    this.keywordFormTerm = prefillTerm.trim();
+    this.keywordFormCategory = 'Combat Status';
+    this.keywordFormSummary = '';
+    this.keywordModalOpen.set(true);
+  }
+
+  openEditKeywordModal(kw: KeywordDefinition): void {
+    this.editingKeywordId.set(kw.id ?? kw.term);
+    this.keywordFormTerm = kw.term;
+    this.keywordFormCategory = kw.category;
+    this.keywordFormSummary = kw.summary;
+    this.keywordModalOpen.set(true);
+  }
+
+  closeKeywordModal(): void {
+    this.keywordModalOpen.set(false);
+  }
+
+  async saveKeyword(): Promise<void> {
+    const editId = this.editingKeywordId();
+    if (editId) {
+      const ok = await this.compendiumStore.updateKeyword(editId, {
+        term: this.keywordFormTerm,
+        category: this.keywordFormCategory,
+        summary: this.keywordFormSummary,
+      });
+      if (ok) this.closeKeywordModal();
+    } else {
+      const created = await this.compendiumStore.createKeyword({
+        term: this.keywordFormTerm,
+        category: this.keywordFormCategory,
+        summary: this.keywordFormSummary,
+      });
+      if (created) {
+        this.closeKeywordModal();
+      }
+    }
+  }
+
+  async deleteKeyword(kw: KeywordDefinition): Promise<void> {
+    await this.compendiumStore.deleteKeyword(kw);
+  }
+
+  // ===========================================================================
+  // COMPOSABLE RULE HOOK ROW ACTIONS
+  // ===========================================================================
   addRuleHookRow(): void {
     const usedKeys = new Set(this.hookRows().map((r) => r.key));
     const nextDef =
-      RULE_HOOK_DEFINITIONS.find((d) => !usedKeys.has(d.key)) ?? RULE_HOOK_DEFINITIONS[0];
+      RULE_HOOK_DEFINITIONS.find((d) => !usedKeys.has(d.key)) ??
+      RULE_HOOK_DEFINITIONS[0];
 
     this.hookRows.update((rows) => [
       ...rows,
       {
         key: nextDef.key,
-        numValue: typeof nextDef.defaultValue === 'number' ? nextDef.defaultValue : 1,
+        numValue:
+          typeof nextDef.defaultValue === 'number' ? nextDef.defaultValue : 1,
         statusValue:
-          typeof nextDef.defaultValue === 'string' ? nextDef.defaultValue : 'Sundered',
+          typeof nextDef.defaultValue === 'string'
+            ? nextDef.defaultValue
+            : 'Sundered',
       },
     ]);
   }
@@ -1031,9 +1250,12 @@ export class ContentManagerComponent implements OnInit {
         i === index
           ? {
               key: newKey,
-              numValue: typeof def?.defaultValue === 'number' ? def.defaultValue : 1,
+              numValue:
+                typeof def?.defaultValue === 'number' ? def.defaultValue : 1,
               statusValue:
-                typeof def?.defaultValue === 'string' ? def.defaultValue : 'Sundered',
+                typeof def?.defaultValue === 'string'
+                  ? def.defaultValue
+                  : 'Sundered',
             }
           : row
       )
@@ -1042,7 +1264,9 @@ export class ContentManagerComponent implements OnInit {
 
   updateRowNum(index: number, value: number): void {
     this.hookRows.update((rows) =>
-      rows.map((row, i) => (i === index ? { ...row, numValue: Number(value) } : row))
+      rows.map((row, i) =>
+        i === index ? { ...row, numValue: Number(value) } : row
+      )
     );
   }
 
@@ -1101,6 +1325,7 @@ export class ContentManagerComponent implements OnInit {
   openNewNodeModal(defaultTreeId?: string): void {
     this.compendiumStore.clearMessages();
     this.editingNodeId.set(null);
+    this.bracketMenuOpen.set(false);
     const firstTreeId =
       defaultTreeId ??
       this.activeTreeId() ??
@@ -1123,12 +1348,10 @@ export class ContentManagerComponent implements OnInit {
     this.nodeModalOpen.set(true);
   }
 
-  /**
-   * Opens the Create Node Modal pre-linked as a child branch below `parentNode`.
-   */
   openBranchChildModal(parentNode: PerkNodeModel): void {
     this.compendiumStore.clearMessages();
     this.editingNodeId.set(null);
+    this.bracketMenuOpen.set(false);
 
     this.nodeForm = {
       tree_id: parentNode.tree_id,
@@ -1149,6 +1372,7 @@ export class ContentManagerComponent implements OnInit {
   openEditNodeModal(node: PerkNodeModel): void {
     this.compendiumStore.clearMessages();
     this.editingNodeId.set(node.id);
+    this.bracketMenuOpen.set(false);
 
     this.nodeForm = {
       tree_id: node.tree_id,
@@ -1168,6 +1392,7 @@ export class ContentManagerComponent implements OnInit {
   }
 
   closeNodeModal(): void {
+    this.bracketMenuOpen.set(false);
     this.nodeModalOpen.set(false);
   }
 

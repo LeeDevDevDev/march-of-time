@@ -489,7 +489,7 @@ import { CharacterStore } from './store/character.store';
                               <span
                                 class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-accent-text)]"
                               >
-                                [{{ perk.combat_tag }}]
+                                {{ perk.combat_tag }}
                               </span>
                             }
                             @if (perk.ap_cost) {

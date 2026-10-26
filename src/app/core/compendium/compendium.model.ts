@@ -3,6 +3,227 @@ export type CombatSkillName = 'Strike' | 'Shoot' | 'Parry' | 'Dodge';
 export type CombatTag = 'Crushing' | 'Sweeping' | 'Piercing' | 'None';
 export type CombatStatusEffect = 'None' | 'Sundered' | 'Staggered' | 'Bleeding' | 'Pinned';
 
+export type KeywordCategory =
+  | 'Defense Triangle Tag'
+  | 'Active Defense'
+  | 'Combat Status'
+  | 'Core Mechanic'
+  | 'Custom Rule';
+
+export interface KeywordDefinition {
+  id?: string;
+  term: string;
+  category: KeywordCategory | string;
+  summary: string;
+}
+
+/**
+ * Default starter March of Time Keywords (used as seed/fallback alongside `public.compendium_keywords`).
+ */
+export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
+  {
+    id: 'kw-crushing',
+    term: 'Crushing',
+    category: 'Defense Triangle Tag',
+    summary:
+      'Overwhelming momentum that cannot be Parried. The defender must declare [Dodge] or [Shield Block], or take the full hit.',
+  },
+  {
+    id: 'kw-piercing',
+    term: 'Piercing',
+    category: 'Defense Triangle Tag',
+    summary:
+      'Needle-point thrust that bypasses shields and cannot be Blocked. The defender must declare [Parry] or [Dodge].',
+  },
+  {
+    id: 'kw-sweeping',
+    term: 'Sweeping',
+    category: 'Defense Triangle Tag',
+    summary:
+      'Wide horizontal arc that covers adjacent escape lanes and cannot be Dodged. The defender must declare [Parry] or [Shield Block].',
+  },
+  {
+    id: 'kw-parry',
+    term: 'Parry',
+    category: 'Active Defense',
+    summary:
+      'Costs 1 AP before the attack roll (2d10 + Technique + Parry). Beats the attack to negate all damage; winning by +5 or more triggers a Flawless Counter (2 + Parry Mod [SP] damage).',
+  },
+  {
+    id: 'kw-dodge',
+    term: 'Dodge',
+    category: 'Active Defense',
+    summary:
+      'Costs 1 AP before the attack roll (2d10 + Agility + Dodge) and shifts you 1 Tile. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent.',
+  },
+  {
+    id: 'kw-shield-block',
+    term: 'Shield Block',
+    category: 'Active Defense',
+    summary:
+      'Costs 1 AP with an equipped shield (2d10 + Iron + [Parry]). Even if the attack hits, reduces incoming [SP] damage by Shield Value + Iron.',
+  },
+  {
+    id: 'kw-sundered',
+    term: 'Sundered',
+    category: 'Combat Status',
+    summary:
+      'Armor plates and guard are compromised: target suffers -2 [Armor DR] and -2 to [Shield Block] rolls until the end of their next turn.',
+  },
+  {
+    id: 'kw-staggered',
+    term: 'Staggered',
+    category: 'Combat Status',
+    summary:
+      'Rattled posture: target starts their next round with -1 AP (3 AP instead of 4 AP) and cannot trigger Flawless reactions.',
+  },
+  {
+    id: 'kw-bleeding',
+    term: 'Bleeding',
+    category: 'Combat Status',
+    summary:
+      'Lacerated vital vessels: target loses 1 [HP] directly (bypassing [SP] and [Armor DR]) at the end of each turn until bandaged or stabilized.',
+  },
+  {
+    id: 'kw-pinned',
+    term: 'Pinned',
+    category: 'Combat Status',
+    summary:
+      'Locked in place: target cannot spend AP to Move or declare [Dodge] reactions until they spend 1 AP to break free.',
+  },
+  {
+    id: 'kw-sp',
+    term: 'SP',
+    category: 'Core Mechanic',
+    summary:
+      'Stamina & Poise (10 + Iron×2 + MAX([Parry],[Dodge])×2). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP].',
+  },
+  {
+    id: 'kw-hp',
+    term: 'HP',
+    category: 'Core Mechanic',
+    summary:
+      'Physical Health (5 + Iron×2). Protected by [Armor DR] once your [SP] is broken.',
+  },
+  {
+    id: 'kw-armor-dr',
+    term: 'Armor DR',
+    category: 'Core Mechanic',
+    summary:
+      'Flat reduction applied to incoming [HP] damage when your [SP] is at 0 (Light 1, Medium 2, Heavy 4).',
+  },
+];
+
+export interface DescriptionSegment {
+  text: string;
+  keyword: KeywordDefinition | null;
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Builds a case-insensitive keyword map from the active `keywordsList`, including common verb inflections.
+ */
+export function buildKeywordLookupMap(
+  keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
+): Map<string, KeywordDefinition> {
+  const map = new Map<string, KeywordDefinition>();
+  for (const kw of keywordsList) {
+    const lower = kw.term.trim().toLowerCase();
+    if (!lower) continue;
+    map.set(lower, kw);
+
+    // Helpful verb/inflection aliases
+    if (lower === 'parry') map.set('parried', kw);
+    if (lower === 'dodge') map.set('dodged', kw);
+    if (lower === 'shield block') {
+      map.set('block', kw);
+      map.set('blocked', kw);
+      map.set('shield blocked', kw);
+    }
+  }
+  return map;
+}
+
+/**
+ * Strips `[` and `]` around `[Special Word]` tags and splits text into plain text + hoverable Keyword segments
+ * using the live `keywordsList` from `CompendiumStore`.
+ */
+export function tokenizeTextWithKeywords(
+  rawText: string,
+  keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
+): DescriptionSegment[] {
+  if (!rawText) return [];
+  const lookup = buildKeywordLookupMap(keywordsList);
+  const cleaned = rawText.replace(/\[([^\]]+)\]/g, '$1');
+
+  const allKeys = Array.from(lookup.keys()).sort((a, b) => b.length - a.length);
+  if (allKeys.length === 0) {
+    return [{ text: cleaned, keyword: null }];
+  }
+
+  const pattern = new RegExp(`\\b(${allKeys.map(escapeRegExp).join('|')})\\b`, 'gi');
+  const segments: DescriptionSegment[] = [];
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(cleaned)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        text: cleaned.slice(lastIndex, match.index),
+        keyword: null,
+      });
+    }
+    const matchedWord = match[0];
+    const def = lookup.get(matchedWord.toLowerCase()) ?? null;
+    segments.push({
+      text: matchedWord,
+      keyword: def,
+    });
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < cleaned.length) {
+    segments.push({
+      text: cleaned.slice(lastIndex),
+      keyword: null,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Slay the Spire-style Chained Keyword Resolver:
+ * Given a hovered root Keyword (e.g. `Sweeping`), returns all distinct Keywords referenced
+ * inside `rootKeyword.summary` (e.g. `Dodge`, `Parry`, `Shield Block`) in order of appearance,
+ * with cycle protection so self-references or mutual references never loop.
+ */
+export function resolveChainedKeywords(
+  rootKeyword: KeywordDefinition | null,
+  keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
+): KeywordDefinition[] {
+  if (!rootKeyword) return [];
+
+  const seenTerms = new Set<string>([rootKeyword.term.trim().toLowerCase()]);
+  const chained: KeywordDefinition[] = [];
+
+  const segments = tokenizeTextWithKeywords(rootKeyword.summary, keywordsList);
+  for (const seg of segments) {
+    if (!seg.keyword) continue;
+    const key = seg.keyword.term.trim().toLowerCase();
+    if (!seenTerms.has(key)) {
+      seenTerms.add(key);
+      chained.push(seg.keyword);
+    }
+  }
+
+  return chained;
+}
+
 export interface PerkRuleHooks {
   // Automatic Character Sheet Stat Bonuses
   bonus_max_hp?: number;

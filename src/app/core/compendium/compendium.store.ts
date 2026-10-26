@@ -2,6 +2,8 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { AuthStore } from '../auth/auth.store';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
+  DEFAULT_KEYWORDS,
+  KeywordDefinition,
   PerkNodeModel,
   SkillTreeModel,
   WeaponModel,
@@ -11,9 +13,35 @@ interface CompendiumState {
   weapons: WeaponModel[];
   skillTrees: SkillTreeModel[];
   perkNodes: PerkNodeModel[];
+  keywords: KeywordDefinition[];
   isLoading: boolean;
   error: string | null;
   statusMessage: string | null;
+}
+
+const LOCAL_KEYWORDS_STORAGE_KEY = 'mot.compendium.keywords';
+
+function loadFallbackKeywords(): KeywordDefinition[] {
+  try {
+    const saved = localStorage.getItem(LOCAL_KEYWORDS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as KeywordDefinition[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return DEFAULT_KEYWORDS;
+}
+
+function saveFallbackKeywords(list: KeywordDefinition[]): void {
+  try {
+    localStorage.setItem(LOCAL_KEYWORDS_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 function slugifyText(value: string): string {
@@ -35,6 +63,7 @@ export class CompendiumStore {
     weapons: [],
     skillTrees: [],
     perkNodes: [],
+    keywords: loadFallbackKeywords(),
     isLoading: false,
     error: null,
     statusMessage: null,
@@ -44,6 +73,7 @@ export class CompendiumStore {
   readonly weapons = computed(() => this.#state().weapons);
   readonly skillTrees = computed(() => this.#state().skillTrees);
   readonly perkNodes = computed(() => this.#state().perkNodes);
+  readonly keywords = computed(() => this.#state().keywords);
   readonly isLoading = computed(() => this.#state().isLoading);
   readonly error = computed(() => this.#state().error);
   readonly statusMessage = computed(() => this.#state().statusMessage);
@@ -73,7 +103,7 @@ export class CompendiumStore {
   async loadCompendium(): Promise<void> {
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
     try {
-      const [wepsRes, treesRes, perksRes] = await Promise.all([
+      const [wepsRes, treesRes, perksRes, kwRes] = await Promise.all([
         this.supabase.from('weapons').select('*').order('name'),
         this.supabase.from('skill_trees').select('*').order('name'),
         this.supabase
@@ -81,18 +111,153 @@ export class CompendiumStore {
           .select('*')
           .order('tier', { ascending: true })
           .order('name', { ascending: true }),
+        this.supabase.from('compendium_keywords').select('*').order('term'),
       ]);
+
+      const dbKeywords =
+        !kwRes.error && kwRes.data && kwRes.data.length > 0
+          ? (kwRes.data as KeywordDefinition[])
+          : loadFallbackKeywords();
+
+      saveFallbackKeywords(dbKeywords);
 
       this.#state.update((s) => ({
         ...s,
         weapons: (wepsRes.data as WeaponModel[]) ?? [],
         skillTrees: (treesRes.data as SkillTreeModel[]) ?? [],
         perkNodes: (perksRes.data as PerkNodeModel[]) ?? [],
+        keywords: dbKeywords,
         isLoading: false,
       }));
     } catch {
       this.#state.update((s) => ({ ...s, isLoading: false }));
     }
+  }
+
+  // ===========================================================================
+  // ADMIN CONTENT MANAGER CRUD: SPECIAL KEYWORDS & GLOSSARY
+  // ===========================================================================
+
+  async createKeyword(input: {
+    term: string;
+    category: string;
+    summary: string;
+  }): Promise<KeywordDefinition | null> {
+    const term = input.term.trim();
+    const category = input.category.trim() || 'Core Mechanic';
+    const summary = input.summary.trim();
+    if (!term || !summary) return null;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    const { data, error } = await this.supabase
+      .from('compendium_keywords')
+      .insert({ term, category, summary })
+      .select('*')
+      .single();
+
+    const created: KeywordDefinition =
+      !error && data
+        ? (data as KeywordDefinition)
+        : {
+            id: `kw-${slugifyText(term)}-${Date.now()}`,
+            term,
+            category,
+            summary,
+          };
+
+    const nextKeywords = [...this.#state().keywords, created].sort((a, b) =>
+      a.term.localeCompare(b.term)
+    );
+    saveFallbackKeywords(nextKeywords);
+
+    this.#state.update((s) => ({
+      ...s,
+      keywords: nextKeywords,
+      isLoading: false,
+      statusMessage: `Saved keyword "${created.term}".`,
+    }));
+
+    return created;
+  }
+
+  async updateKeyword(
+    idOrTerm: string,
+    input: { term: string; category: string; summary: string }
+  ): Promise<boolean> {
+    const term = input.term.trim();
+    const category = input.category.trim() || 'Core Mechanic';
+    const summary = input.summary.trim();
+    if (!term || !summary) return false;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    // Try updating in Supabase by id if UUID, or by term
+    if (idOrTerm && !idOrTerm.startsWith('kw-')) {
+      await this.supabase
+        .from('compendium_keywords')
+        .update({
+          term,
+          category,
+          summary,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', idOrTerm);
+    } else {
+      await this.supabase
+        .from('compendium_keywords')
+        .upsert({ term, category, summary }, { onConflict: 'term' });
+    }
+
+    const nextKeywords = this.#state()
+      .keywords.map((kw) =>
+        kw.id === idOrTerm || kw.term.toLowerCase() === idOrTerm.toLowerCase()
+          ? { ...kw, term, category, summary }
+          : kw
+      )
+      .sort((a, b) => a.term.localeCompare(b.term));
+
+    saveFallbackKeywords(nextKeywords);
+
+    this.#state.update((s) => ({
+      ...s,
+      keywords: nextKeywords,
+      isLoading: false,
+      statusMessage: `Updated keyword "${term}".`,
+    }));
+    return true;
+  }
+
+  async deleteKeyword(kw: KeywordDefinition): Promise<void> {
+    if (kw.id && !kw.id.startsWith('kw-')) {
+      await this.supabase.from('compendium_keywords').delete().eq('id', kw.id);
+    } else {
+      await this.supabase
+        .from('compendium_keywords')
+        .delete()
+        .eq('term', kw.term);
+    }
+
+    const nextKeywords = this.#state().keywords.filter(
+      (item) => item.term.toLowerCase() !== kw.term.toLowerCase()
+    );
+    saveFallbackKeywords(nextKeywords);
+
+    this.#state.update((s) => ({
+      ...s,
+      keywords: nextKeywords,
+      statusMessage: `Deleted keyword "${kw.term}".`,
+    }));
   }
 
   // ===========================================================================
