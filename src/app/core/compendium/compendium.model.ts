@@ -188,6 +188,71 @@ export interface PerkNodeModel {
   parent_node_id?: string | null;
 }
 
+export interface SkillTreeBranchNode {
+  node: PerkNodeModel;
+  children: SkillTreeBranchNode[];
+}
+
+/**
+ * Builds a hierarchical forest of root nodes and their recursive child branches
+ * for rendering a connected visual Skill Tree.
+ */
+export function buildSkillTreeHierarchy(
+  treeId: string,
+  allNodes: PerkNodeModel[]
+): SkillTreeBranchNode[] {
+  const treeNodes = allNodes
+    .filter((n) => n.tree_id === treeId)
+    .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
+
+  const nodeIds = new Set(treeNodes.map((n) => n.id));
+  const childrenMap = new Map<string, PerkNodeModel[]>();
+
+  const roots: PerkNodeModel[] = [];
+
+  for (const n of treeNodes) {
+    if (n.parent_node_id && nodeIds.has(n.parent_node_id)) {
+      const list = childrenMap.get(n.parent_node_id) ?? [];
+      list.push(n);
+      childrenMap.set(n.parent_node_id, list);
+    } else {
+      roots.push(n);
+    }
+  }
+
+  const buildBranch = (current: PerkNodeModel, visited = new Set<string>()): SkillTreeBranchNode => {
+    visited.add(current.id);
+    const directChildren = (childrenMap.get(current.id) ?? []).filter(
+      (c) => !visited.has(c.id)
+    );
+    return {
+      node: current,
+      children: directChildren.map((child) => buildBranch(child, new Set(visited))),
+    };
+  };
+
+  return roots.map((r) => buildBranch(r));
+}
+
+/**
+ * Determines an emblem archetype ('breaker' | 'veil' | 'gale' | 'sentinel') from a tree's slug or name.
+ */
+export function getTreeArchetypeIcon(
+  tree: Pick<SkillTreeModel, 'slug' | 'name'>
+): 'breaker' | 'veil' | 'gale' | 'sentinel' {
+  const key = `${tree.slug} ${tree.name}`.toLowerCase();
+  if (key.includes('juggernaut') || key.includes('breaker') || key.includes('brawn')) {
+    return 'breaker';
+  }
+  if (key.includes('phantom') || key.includes('veil') || key.includes('shadow')) {
+    return 'veil';
+  }
+  if (key.includes('tempest') || key.includes('gale') || key.includes('wind')) {
+    return 'gale';
+  }
+  return 'sentinel';
+}
+
 /**
  * Converts a stored JSONB `PerkRuleHooks` object into composable UI rows for the Admin editor.
  */

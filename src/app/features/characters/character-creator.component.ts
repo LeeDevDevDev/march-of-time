@@ -1,6 +1,12 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import {
+  SkillTreeBranchNode,
+  buildSkillTreeHierarchy,
+  getTreeArchetypeIcon,
+} from '../../core/compendium/compendium.model';
 import {
   ARMOR_TIERS,
   ATTRIBUTE_LIST,
@@ -14,6 +20,7 @@ import {
   PerkNodeModel,
   SHIELD_TIERS,
   ShieldTier,
+  SkillTreeModel,
   WeaponModel,
   computeDerivedStats,
   formatRuleHookBadges,
@@ -25,7 +32,7 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
 @Component({
   selector: 'app-character-creator',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, NgTemplateOutlet],
   template: `
     <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
       <!-- Top Builder Header & Step Progress -->
@@ -472,7 +479,7 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
                   Choose Skill Tree Perks &amp; Combat Arts
                 </h2>
                 <p class="text-xs text-[var(--mot-muted)]">
-                  Combat Arts carry cooldowns and Defense Triangle tags ([Crushing] no Parry, [Sweeping] no Dodge, [Piercing] no Block).
+                  Select a martial Skill Tree card below to view its branching tree and unlock Combat Arts or Passive Upgrades.
                 </p>
               </div>
               <span
@@ -482,99 +489,203 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
               </span>
             </div>
 
-            <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
-              @for (tree of characterStore.skillTrees(); track tree.id) {
-                <div
-                  class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3"
-                >
-                  <div>
-                    <h3 class="font-display text-base font-bold text-[var(--mot-text)]">
-                      {{ tree.name }}
-                    </h3>
-                    <p class="mt-0.5 text-xs text-[var(--mot-muted)]">{{ tree.description }}</p>
-                  </div>
-
-                  <div class="space-y-2.5">
-                    @for (node of getNodesForTree(tree.id); track node.id) {
-                      <div
-                        class="rounded-xl border p-3.5 transition-colors"
-                        [class]="
-                          isPerkSelected(node.id)
-                            ? 'border-[#C4491A] bg-[var(--mot-surface)]'
-                            : 'border-[var(--mot-border)] bg-[var(--mot-surface-raised)]'
-                        "
-                      >
-                        <div class="flex items-start justify-between gap-2">
-                          <div>
-                            <div class="flex flex-wrap items-center gap-1.5">
-                              <span
-                                class="rounded bg-[#122220] px-1.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
-                              >
-                                T{{ node.tier }}
-                              </span>
-                              <span class="text-sm font-bold text-[var(--mot-text)]">
-                                {{ node.name }}
-                              </span>
-                            </div>
-
-                            <div class="mt-1 font-mono-num text-xs text-[var(--mot-muted)] tabular-nums">
-                              @if (node.node_type === 'combat_art') {
-                                {{ node.ap_cost ?? 1 }} AP · CD {{ node.cooldown_rounds ?? 2 }} Rnds
-                                @if (node.combat_tag && node.combat_tag !== 'None') {
-                                  · [{{ node.combat_tag }}]
-                                }
-                              } @else {
-                                Passive Upgrade · {{ node.perk_cost }}
-                                {{ node.perk_cost === 1 ? 'Perk' : 'Perks' }}
-                              }
-                            </div>
-
-                            @if (getParentNodeName(node.parent_node_id); as parentName) {
-                              <div
-                                class="mt-0.5 font-mono-num text-xs font-semibold"
-                                [class.text-[var(--mot-accent-text)]]="!isParentUnlocked(node)"
-                                [class.text-[var(--mot-sp-text)]]="isParentUnlocked(node)"
-                              >
-                                Requires: {{ parentName }}
-                              </div>
+            <!-- Skill Tree Cards Overview (When no specific tree is opened) -->
+            @if (!activeCreatorTree()) {
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                @for (tree of characterStore.skillTrees(); track tree.id) {
+                  <article
+                    class="flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-5 transition-colors hover:border-[#C4491A]"
+                  >
+                    <div>
+                      <div class="flex items-start justify-between gap-3">
+                        <div
+                          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A]"
+                        >
+                          @switch (getArchetypeIcon(tree)) {
+                            @case ('breaker') {
+                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                                <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
+                                <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
+                              </svg>
                             }
-                          </div>
-
-                          <button
-                            type="button"
-                            (click)="togglePerk(node)"
-                            [disabled]="!canTogglePerk(node)"
-                            [class]="
-                              isPerkSelected(node.id)
-                                ? 'btn-copper rounded-lg px-2.5 py-1 text-xs font-semibold'
-                                : 'rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40'
-                            "
-                          >
-                            {{ isPerkSelected(node.id) ? 'Selected' : 'Select' }}
-                          </button>
+                            @case ('veil') {
+                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                                <path d="M19 3L9 13L11 15L21 5L19 3Z" />
+                                <path d="M7 11L13 17" />
+                                <path d="M5 19L9 15" />
+                              </svg>
+                            }
+                            @case ('gale') {
+                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                                <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
+                                <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
+                                <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
+                              </svg>
+                            }
+                            @default {
+                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                              </svg>
+                            }
+                          }
                         </div>
 
-                        <p class="mt-2 text-xs text-[var(--mot-muted)]">
-                          {{ node.description }}
-                        </p>
-
-                        @if (getHookBadges(node).length > 0) {
-                          <div class="mt-2.5 flex flex-wrap gap-1.5">
-                            @for (badge of getHookBadges(node); track badge) {
-                              <span
-                                class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-sp-text)]"
-                              >
-                                {{ badge }}
-                              </span>
-                            }
-                          </div>
-                        }
+                        <span
+                          class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+                        >
+                          {{ getNodesForTree(tree.id).length }} Nodes
+                        </span>
                       </div>
-                    }
+
+                      <h3 class="mt-3.5 font-display text-lg font-bold text-[var(--mot-text)]">
+                        {{ tree.name }}
+                      </h3>
+                      <p class="mt-1 text-xs leading-relaxed text-[var(--mot-muted)]">
+                        {{ tree.description }}
+                      </p>
+                    </div>
+
+                    <div class="mt-5 flex items-center justify-between border-t border-[var(--mot-border)] pt-3.5">
+                      <span class="font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                        {{ countSelectedInTree(tree.id) }} Unlocked
+                      </span>
+                      <button
+                        type="button"
+                        (click)="activeCreatorTreeId.set(tree.id)"
+                        class="btn-copper rounded-lg px-3.5 py-1.5 text-xs font-semibold"
+                      >
+                        View Skill Tree →
+                      </button>
+                    </div>
+                  </article>
+                }
+              </div>
+            }
+
+            <!-- Interactive Branching Skill Tree View -->
+            @if (activeCreatorTree(); as tree) {
+              <div
+                class="overflow-x-auto rounded-2xl border border-[#243B37] bg-[#0D1615] p-6 text-[#EBF5F3]"
+                style="background-image: radial-gradient(#243B37 1px, transparent 1px); background-size: 24px 24px;"
+              >
+                <div
+                  class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[#243B37] pb-4"
+                >
+                  <div class="flex items-center gap-3">
+                    <button
+                      type="button"
+                      (click)="activeCreatorTreeId.set(null)"
+                      class="rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-bold text-[#EBF5F3] hover:border-[#C4491A]"
+                    >
+                      ← All Skill Trees
+                    </button>
+                    <div>
+                      <h3 class="font-display text-lg font-bold text-white">
+                        {{ tree.name }}
+                      </h3>
+                      <p class="text-xs text-[#8AB0AB]">{{ tree.description }}</p>
+                    </div>
                   </div>
                 </div>
-              }
-            </div>
+
+                <div class="flex min-w-max items-start justify-center gap-8 pb-2">
+                  @for (rootBranch of activeCreatorTreeBranches(); track rootBranch.node.id) {
+                    <ng-container
+                      *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: rootBranch }"
+                    ></ng-container>
+                  }
+                </div>
+              </div>
+            }
+
+            <ng-template #creatorBranchTpl let-branch>
+              <div class="flex flex-col items-center">
+                <div
+                  class="w-68 rounded-2xl border bg-[#122220] p-4 text-left transition-all"
+                  [class.border-[#C4491A]]="isPerkSelected(branch.node.id)"
+                  [class.border-[#243B37]]="!isPerkSelected(branch.node.id)"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <div>
+                      <span class="font-mono-num text-[11px] font-bold text-[#8AB0AB]">
+                        Tier {{ branch.node.tier }} ·
+                        {{ branch.node.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
+                      </span>
+                      <div class="font-display text-sm font-bold text-white">
+                        {{ branch.node.name }}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      (click)="togglePerk(branch.node)"
+                      [disabled]="!canTogglePerk(branch.node)"
+                      [class]="
+                        isPerkSelected(branch.node.id)
+                          ? 'btn-copper rounded-lg px-2.5 py-1 text-xs font-semibold'
+                          : 'rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-40'
+                      "
+                    >
+                      {{ isPerkSelected(branch.node.id) ? 'Unlocked' : 'Unlock' }}
+                    </button>
+                  </div>
+
+                  @if (branch.node.node_type === 'combat_art') {
+                    <div class="mt-2 font-mono-num text-xs text-[#FF8C5A] tabular-nums">
+                      {{ branch.node.ap_cost ?? 1 }} AP · CD {{ branch.node.cooldown_rounds ?? 2 }} Rnds
+                      @if (branch.node.combat_tag && branch.node.combat_tag !== 'None') {
+                        · [{{ branch.node.combat_tag }}]
+                      }
+                    </div>
+                  }
+
+                  <p class="mt-1.5 text-xs text-[#8AB0AB]">
+                    {{ branch.node.description }}
+                  </p>
+
+                  @if (getHookBadges(branch.node).length > 0) {
+                    <div class="mt-2.5 flex flex-wrap gap-1.5">
+                      @for (badge of getHookBadges(branch.node); track badge) {
+                        <span
+                          class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A]"
+                        >
+                          {{ badge }}
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+
+                @if (branch.children.length > 0) {
+                  <div
+                    class="h-6 w-0.5"
+                    [class.bg-[#C4491A]]="isPerkSelected(branch.node.id)"
+                    [class.bg-[#243B37]]="!isPerkSelected(branch.node.id)"
+                  ></div>
+
+                  @if (branch.children.length === 1) {
+                    <ng-container
+                      *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: branch.children[0] }"
+                    ></ng-container>
+                  } @else {
+                    <div class="relative flex items-start gap-6 pt-3">
+                      <div
+                        class="absolute left-1/2 top-0 h-0.5 -translate-x-1/2 bg-[#243B37]"
+                        style="width: calc(100% - 17rem);"
+                      ></div>
+                      @for (child of branch.children; track child.node.id) {
+                        <div class="relative flex flex-col items-center">
+                          <div class="-mt-3 h-3 w-0.5 bg-[#243B37]"></div>
+                          <ng-container
+                            *ngTemplateOutlet="creatorBranchTpl; context: { $implicit: child }"
+                          ></ng-container>
+                        </div>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+            </ng-template>
           </div>
         }
 
@@ -657,6 +768,19 @@ export class CharacterCreatorComponent {
   readonly weaponSlot1Id = signal<string | null>(null);
   readonly weaponSlot2Id = signal<string | null>(null);
   readonly unlockedPerkIds = signal<string[]>([]);
+  readonly activeCreatorTreeId = signal<string | null>(null);
+
+  readonly activeCreatorTree = computed(() => {
+    const id = this.activeCreatorTreeId();
+    if (!id) return null;
+    return this.characterStore.skillTrees().find((t) => t.id === id) ?? null;
+  });
+
+  readonly activeCreatorTreeBranches = computed<SkillTreeBranchNode[]>(() => {
+    const tree = this.activeCreatorTree();
+    if (!tree) return [];
+    return buildSkillTreeHierarchy(tree.id, this.characterStore.perkNodes());
+  });
 
   readonly attributeList = ATTRIBUTE_LIST;
   readonly combatSkillList = COMBAT_SKILL_LIST;
@@ -753,6 +877,17 @@ export class CharacterCreatorComponent {
       .perkNodes()
       .filter((p) => p.tree_id === treeId)
       .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
+  }
+
+  getArchetypeIcon(tree: SkillTreeModel) {
+    return getTreeArchetypeIcon(tree);
+  }
+
+  countSelectedInTree(treeId: string): number {
+    const selected = new Set(this.unlockedPerkIds());
+    return this.characterStore
+      .perkNodes()
+      .filter((p) => p.tree_id === treeId && selected.has(p.id)).length;
   }
 
   getParentNodeName(parentId: string | null | undefined): string | null {

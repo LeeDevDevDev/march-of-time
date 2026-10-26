@@ -1,5 +1,6 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { NgTemplateOutlet } from '@angular/common';
 import {
   CombatTag,
   EditableRuleHookKey,
@@ -8,8 +9,11 @@ import {
   RULE_HOOK_DEFINITIONS,
   RuleHookDefinition,
   RuleHookRow,
+  SkillTreeBranchNode,
   SkillTreeModel,
+  buildSkillTreeHierarchy,
   formatRuleHookBadges,
+  getTreeArchetypeIcon,
   hooksObjectToRows,
   rowsToHooksObject,
 } from '../../core/compendium/compendium.model';
@@ -18,49 +22,9 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
 @Component({
   selector: 'app-content-manager',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, NgTemplateOutlet],
   template: `
     <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
-      <!-- Top Admin Header Banner -->
-      <section
-        class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 sm:p-8 text-[#EBF5F3]"
-      >
-        <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-          <div>
-            <div class="flex flex-wrap items-center gap-2.5">
-              <h1 class="font-display text-2xl font-bold text-white sm:text-3xl">
-                Content Manager
-              </h1>
-              <span
-                class="rounded-md border border-[#C4491A] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
-              >
-                Admin Studio
-              </span>
-            </div>
-            <p class="mt-1.5 max-w-2xl text-sm text-[#8AB0AB]">
-              Create and rebalance Skill Trees, Combat Arts, Passive Upgrades, and composable Rule Hooks that automatically drive Character Creation and Sheet math.
-            </p>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              (click)="openNewTreeModal()"
-              class="rounded-lg border border-[#243B37] bg-[#0D1615] px-4 py-2.5 text-xs font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
-            >
-              + New Skill Tree
-            </button>
-            <button
-              type="button"
-              (click)="openNewNodeModal()"
-              class="btn-copper rounded-lg px-4 py-2.5 text-xs font-semibold"
-            >
-              + New Combat Art / Perk
-            </button>
-          </div>
-        </div>
-      </section>
-
       <!-- Feedback Banners -->
       @if (compendiumStore.error()) {
         <div
@@ -78,227 +42,422 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
         </div>
       }
 
-      <!-- Skill Tree Filter Bar -->
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            (click)="selectedTreeId.set('ALL')"
-            class="rounded-lg border px-3.5 py-2 text-xs font-bold transition-colors"
-            [class.border-[#C4491A]]="selectedTreeId() === 'ALL'"
-            [class.bg-[#C4491A]]="selectedTreeId() === 'ALL'"
-            [class.text-white]="selectedTreeId() === 'ALL'"
-            [class.border-[var(--mot-border)]]="selectedTreeId() !== 'ALL'"
-            [class.bg-[var(--mot-surface)]]="selectedTreeId() !== 'ALL'"
-            [class.text-[var(--mot-text)]]="selectedTreeId() !== 'ALL'"
-          >
-            All Skill Trees ({{ compendiumStore.skillTrees().length }})
-          </button>
+      <!-- ================================================================= -->
+      <!-- VIEW 1: SKILL TREE GALLERY CARDS (When no tree is opened)         -->
+      <!-- ================================================================= -->
+      @if (!activeTree()) {
+        <!-- Top Admin Header Banner -->
+        <section
+          class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 sm:p-8 text-[#EBF5F3]"
+        >
+          <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+            <div>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h1 class="font-display text-2xl font-bold text-white sm:text-3xl">
+                  Content Manager — Skill Trees
+                </h1>
+                <span
+                  class="rounded-md border border-[#C4491A] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
+                >
+                  Admin Studio
+                </span>
+              </div>
+              <p class="mt-1.5 max-w-2xl text-sm text-[#8AB0AB]">
+                Select a martial Skill Tree below to open its interactive branching tree, or create a new path.
+              </p>
+            </div>
 
+            <div class="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                (click)="openNewTreeModal()"
+                class="btn-copper rounded-lg px-4 py-2.5 text-xs font-semibold"
+              >
+                + New Skill Tree
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Skill Tree Cards Grid -->
+        <section class="grid grid-cols-1 gap-5 md:grid-cols-3">
           @for (tree of compendiumStore.skillTrees(); track tree.id) {
-            <button
-              type="button"
-              (click)="selectedTreeId.set(tree.id)"
-              class="rounded-lg border px-3.5 py-2 text-xs font-bold transition-colors"
-              [class.border-[#C4491A]]="selectedTreeId() === tree.id"
-              [class.bg-[#C4491A]]="selectedTreeId() === tree.id"
-              [class.text-white]="selectedTreeId() === tree.id"
-              [class.border-[var(--mot-border)]]="selectedTreeId() !== tree.id"
-              [class.bg-[var(--mot-surface)]]="selectedTreeId() !== tree.id"
-              [class.text-[var(--mot-text)]]="selectedTreeId() !== tree.id"
-            >
-              {{ tree.name }} ({{ getPerksForTree(tree.id).length }})
-            </button>
-          }
-        </div>
-
-        <span class="font-mono-num text-xs text-[var(--mot-muted)]">
-          Total Nodes: {{ compendiumStore.perkNodes().length }}
-        </span>
-      </div>
-
-      <!-- Skill Trees & Their Tiered Nodes -->
-      <div class="space-y-6">
-        @for (tree of visibleTrees(); track tree.id) {
-          <section
-            class="overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
-          >
-            <!-- Tree Header -->
-            <div
-              class="flex flex-col justify-between gap-3 border-b border-[var(--mot-border)] bg-[var(--mot-well)] px-6 py-4 sm:flex-row sm:items-center"
+            <article
+              class="group flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 transition-all hover:border-[#C4491A]"
             >
               <div>
-                <div class="flex flex-wrap items-center gap-2.5">
-                  <h2 class="font-display text-xl font-bold text-[var(--mot-text)]">
-                    {{ tree.name }}
-                  </h2>
+                <!-- Icon Emblem & Node Count Pill -->
+                <div class="flex items-start justify-between gap-3">
+                  <div
+                    class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A] transition-colors group-hover:border-[#C4491A] group-hover:bg-[#C4491A] group-hover:text-white"
+                  >
+                    @switch (getArchetypeIcon(tree)) {
+                      @case ('breaker') {
+                        <!-- Warhammer / Shatter Crest -->
+                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                          <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
+                          <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
+                          <path d="M3 21L5.5 18.5" />
+                        </svg>
+                      }
+                      @case ('veil') {
+                        <!-- Twin Daggers / Veil Crest -->
+                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                          <path d="M19 3L9 13L11 15L21 5L19 3Z" />
+                          <path d="M7 11L13 17" />
+                          <path d="M5 19L9 15" />
+                          <path d="M3 14L10 7" />
+                        </svg>
+                      }
+                      @case ('gale') {
+                        <!-- Crescent Gale / Wind Swirl Crest -->
+                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                          <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
+                          <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
+                          <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
+                        </svg>
+                      }
+                      @default {
+                        <!-- Sentinel Shield Crest -->
+                        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                      }
+                    }
+                  </div>
+
                   <span
-                    class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs text-[var(--mot-muted)]"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
                   >
                     {{ getPerksForTree(tree.id).length }}
                     {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
                   </span>
                 </div>
-                <p class="mt-1 text-xs text-[var(--mot-muted)]">
+
+                <!-- Tree Name & Description -->
+                <h2 class="mt-4 font-display text-xl font-bold text-[var(--mot-text)]">
+                  {{ tree.name }}
+                </h2>
+                <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                  {{ tree.description }}
+                </p>
+
+                <!-- Breakdown Pills (Combat Arts vs Passives) -->
+                <div class="mt-4 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                  <span
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-accent-text)]"
+                  >
+                    {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
+                  </span>
+                  <span
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)]"
+                  >
+                    {{ countNodeType(tree.id, 'passive_upgrade') }} Passives
+                  </span>
+                </div>
+              </div>
+
+              <!-- Card Footer Actions -->
+              <div class="mt-6 flex items-center justify-between gap-2 border-t border-[var(--mot-border)] pt-4">
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    (click)="openEditTreeModal(tree)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    (click)="confirmDeleteTree(tree)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  (click)="openSkillTreeView(tree.id)"
+                  class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+                >
+                  View Skill Tree →
+                </button>
+              </div>
+            </article>
+          }
+        </section>
+      }
+
+      <!-- ================================================================= -->
+      <!-- VIEW 2: INTERACTIVE VISUAL SKILL TREE CANVAS                      -->
+      <!-- ================================================================= -->
+      @if (activeTree(); as tree) {
+        <!-- Tree Studio Header -->
+        <section
+          class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 text-[#EBF5F3]"
+        >
+          <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+            <div class="flex items-start gap-4">
+              <button
+                type="button"
+                (click)="closeSkillTreeView()"
+                class="mt-0.5 flex h-10 items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
+              >
+                ← All Trees
+              </button>
+
+              <div>
+                <div class="flex flex-wrap items-center gap-2.5">
+                  <h1 class="font-display text-2xl font-bold text-white">
+                    {{ tree.name }}
+                  </h1>
+                  <span
+                    class="rounded-md border border-[#243B37] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
+                  >
+                    {{ getPerksForTree(tree.id).length }} Nodes
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-[#8AB0AB]">
                   {{ tree.description }}
                 </p>
               </div>
+            </div>
 
-              <div class="flex shrink-0 flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                (click)="openEditTreeModal(tree)"
+                class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3.5 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+              >
+                Edit Tree Info
+              </button>
+              <button
+                type="button"
+                (click)="openNewNodeModal(tree.id)"
+                class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+              >
+                + Add Root Node (Tier 1)
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Visual Branching Skill Tree Canvas -->
+        <section
+          class="overflow-x-auto rounded-2xl border border-[#243B37] bg-[#0D1615] p-6 sm:p-10 text-[#EBF5F3]"
+          style="background-image: radial-gradient(#243B37 1px, transparent 1px); background-size: 24px 24px;"
+        >
+          @if (activeTreeBranches().length === 0) {
+            <div
+              class="mx-auto max-w-md rounded-2xl border border-dashed border-[#243B37] bg-[#122220]/90 p-8 text-center"
+            >
+              <h2 class="font-display text-lg font-bold text-white">
+                This Skill Tree Is Empty
+              </h2>
+              <p class="mt-1 text-xs text-[#8AB0AB]">
+                Start by placing a Tier 1 root Combat Art or Passive Upgrade, then branch child nodes directly off it.
+              </p>
+              <button
+                type="button"
+                (click)="openNewNodeModal(tree.id)"
+                class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+              >
+                + Place First Tier 1 Node
+              </button>
+            </div>
+          } @else {
+            <!-- Legend Bar -->
+            <div
+              class="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-[#243B37] pb-4 text-xs text-[#8AB0AB]"
+            >
+              <div class="flex flex-wrap items-center gap-4">
+                <span class="flex items-center gap-2">
+                  <span class="h-3 w-3 rounded-sm bg-[#C4491A]"></span>
+                  <strong class="text-white">Combat Art</strong> (Active AP &amp; Cooldown)
+                </span>
+                <span class="flex items-center gap-2">
+                  <span class="h-3 w-3 rounded-full bg-[#38B29A]"></span>
+                  <strong class="text-white">Passive Upgrade</strong> (Permanent Stat Bonus)
+                </span>
+              </div>
+              <span class="font-mono-num">
+                Click <strong>+ Branch</strong> on any node to grow a connected child node below it.
+              </span>
+            </div>
+
+            <!-- Root Columns (Each Root Node & Its Connected Descendants) -->
+            <div class="flex min-w-max items-start justify-center gap-10 pb-4">
+              @for (rootBranch of activeTreeBranches(); track rootBranch.node.id) {
+                <ng-container
+                  *ngTemplateOutlet="branchTemplate; context: { $implicit: rootBranch }"
+                ></ng-container>
+              }
+            </div>
+          }
+        </section>
+      }
+
+      <!-- ================================================================= -->
+      <!-- RECURSIVE VISUAL TREE BRANCH TEMPLATE                             -->
+      <!-- ================================================================= -->
+      <ng-template #branchTemplate let-branch>
+        <div class="flex flex-col items-center">
+          <!-- The Skill Node Card -->
+          <div
+            class="relative w-72 rounded-2xl border bg-[#122220] p-4 text-left transition-all"
+            [class.border-[#C4491A]]="branch.node.node_type === 'combat_art'"
+            [class.border-[#2A6F62]]="branch.node.node_type === 'passive_upgrade'"
+          >
+            <!-- Top Row: Node Medallion + Tier + Cost -->
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <!-- Medallion Icon -->
+                @if (branch.node.node_type === 'combat_art') {
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#C4491A] text-white"
+                    title="Active Combat Art"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                  </span>
+                } @else {
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#38B29A] bg-[#0D1615] text-[#38B29A]"
+                    title="Passive Upgrade"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                  </span>
+                }
+
+                <div>
+                  <span class="block font-mono-num text-[11px] font-bold text-[#8AB0AB]">
+                    Tier {{ branch.node.tier }} ·
+                    {{ branch.node.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
+                  </span>
+                  <h3 class="font-display text-base font-bold leading-tight text-white">
+                    {{ branch.node.name }}
+                  </h3>
+                </div>
+              </div>
+
+              <span
+                class="rounded-md border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#EBF5F3]"
+              >
+                {{ branch.node.perk_cost }} {{ branch.node.perk_cost === 1 ? 'Pt' : 'Pts' }}
+              </span>
+            </div>
+
+            <!-- Action Economy & Combat Tag Bar (For Combat Arts) -->
+            @if (branch.node.node_type === 'combat_art') {
+              <div class="mt-3 flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
+                @if (branch.node.combat_tag && branch.node.combat_tag !== 'None') {
+                  <span
+                    class="rounded border border-[#C4491A] bg-[#0D1615] px-2 py-0.5 font-bold text-[#FF8C5A]"
+                  >
+                    [{{ branch.node.combat_tag }}]
+                  </span>
+                }
+                <span
+                  class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-bold text-white"
+                >
+                  {{ branch.node.ap_cost ?? 1 }} AP
+                </span>
+                @if (branch.node.cooldown_rounds) {
+                  <span
+                    class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 text-[#8AB0AB]"
+                  >
+                    {{ branch.node.cooldown_rounds }}R CD
+                  </span>
+                }
+              </div>
+            }
+
+            <!-- Node Description -->
+            <p class="mt-2.5 text-xs leading-relaxed text-[#8AB0AB]">
+              {{ branch.node.description }}
+            </p>
+
+            <!-- Compiled Rule Hook Badges -->
+            @if (getHookBadges(branch.node.rule_hooks).length > 0) {
+              <div class="mt-3 flex flex-wrap gap-1.5">
+                @for (badge of getHookBadges(branch.node.rule_hooks); track badge) {
+                  <span
+                    class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A]"
+                  >
+                    {{ badge }}
+                  </span>
+                }
+              </div>
+            }
+
+            <!-- Node Action Bar: Branch Child, Edit, Delete -->
+            <div
+              class="mt-4 flex items-center justify-between gap-1.5 border-t border-[#243B37] pt-3"
+            >
+              <button
+                type="button"
+                (click)="openBranchChildModal(branch.node)"
+                class="rounded-lg border border-[#C4491A] bg-[#0D1615] px-2.5 py-1 font-mono-num text-xs font-bold text-[#FF8C5A] transition-colors hover:bg-[#C4491A] hover:text-white"
+              >
+                + Branch Tier {{ branch.node.tier + 1 }}
+              </button>
+
+              <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  (click)="openNewNodeModal(tree.id)"
-                  class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold"
+                  (click)="openEditNodeModal(branch.node)"
+                  class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
                 >
-                  + Add Node to Tree
+                  Edit
                 </button>
                 <button
                   type="button"
-                  (click)="openEditTreeModal(tree)"
-                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
-                >
-                  Edit Tree
-                </button>
-                <button
-                  type="button"
-                  (click)="confirmDeleteTree(tree)"
-                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                  (click)="confirmDeleteNode(branch.node)"
+                  class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#F26464] hover:border-[#F26464]"
                 >
                   Delete
                 </button>
               </div>
             </div>
+          </div>
 
-            <!-- Nodes inside this Tree -->
-            <div class="p-6">
-              @if (getPerksForTree(tree.id).length === 0) {
+          <!-- Visual Tree Connector Lines to Children -->
+          @if (branch.children.length > 0) {
+            <!-- Vertical Stem Down from Parent -->
+            <div class="h-7 w-0.5 bg-[#C4491A]"></div>
+
+            @if (branch.children.length === 1) {
+              <!-- Single Child: Direct Vertical Line -->
+              <ng-container
+                *ngTemplateOutlet="branchTemplate; context: { $implicit: branch.children[0] }"
+              ></ng-container>
+            } @else {
+              <!-- Multiple Children: Horizontal Crossbar + Vertical Drops -->
+              <div class="relative flex items-start gap-8 pt-4">
+                <!-- Horizontal Bar across children -->
                 <div
-                  class="rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] p-8 text-center"
-                >
-                  <p class="font-display text-sm font-bold text-[var(--mot-text)]">
-                    No Combat Arts or Passive Nodes in {{ tree.name }} yet
-                  </p>
-                  <p class="mt-1 text-xs text-[var(--mot-muted)]">
-                    Add your first Tier 1 Combat Art or Passive Upgrade to make it selectable during Character Creation.
-                  </p>
-                  <button
-                    type="button"
-                    (click)="openNewNodeModal(tree.id)"
-                    class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
-                  >
-                    + Create First Node
-                  </button>
-                </div>
-              } @else {
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  @for (node of getPerksForTree(tree.id); track node.id) {
-                    <article
-                      class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 transition-colors hover:border-[#C4491A]"
-                    >
-                      <div>
-                        <!-- Top Badges: Tier, Type, Cost, AP, Cooldown, Combat Tag -->
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
-                            <span
-                              class="rounded bg-[#122220] px-2 py-0.5 font-bold text-[#FF8C5A]"
-                            >
-                              Tier {{ node.tier }}
-                            </span>
-                            <span
-                              class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-semibold text-[var(--mot-text)]"
-                            >
-                              {{ node.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
-                            </span>
-                            <span
-                              class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-[var(--mot-muted)]"
-                            >
-                              {{ node.perk_cost }} {{ node.perk_cost === 1 ? 'Perk' : 'Perks' }}
-                            </span>
-                          </div>
+                  class=" absolute left-1/2 top-0 h-0.5 -translate-x-1/2 bg-[#C4491A]"
+                  style="width: calc(100% - 18rem);"
+                ></div>
 
-                          @if (node.node_type === 'combat_art') {
-                            <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
-                              @if (node.combat_tag && node.combat_tag !== 'None') {
-                                <span
-                                  class="rounded border border-[#C4491A] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-accent-text)]"
-                                >
-                                  [{{ node.combat_tag }}]
-                                </span>
-                              }
-                              @if (node.ap_cost !== null) {
-                                <span
-                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-text)]"
-                                >
-                                  {{ node.ap_cost }} AP
-                                </span>
-                              }
-                              @if (node.cooldown_rounds) {
-                                <span
-                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-[var(--mot-muted)]"
-                                >
-                                  {{ node.cooldown_rounds }}R CD
-                                </span>
-                              }
-                            </div>
-                          }
-                        </div>
-
-                        <!-- Node Title & Prerequisite -->
-                        <h3 class="mt-2.5 font-display text-base font-bold text-[var(--mot-text)]">
-                          {{ node.name }}
-                        </h3>
-
-                        @if (getParentNodeName(node.parent_node_id); as parentName) {
-                          <div class="mt-0.5 font-mono-num text-xs font-semibold text-[var(--mot-accent-text)]">
-                            Requires: {{ parentName }}
-                          </div>
-                        }
-
-                        <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
-                          {{ node.description }}
-                        </p>
-
-                        <!-- Structured Rule Hook Badges -->
-                        @if (getHookBadges(node.rule_hooks).length > 0) {
-                          <div class="mt-3 flex flex-wrap gap-1.5">
-                            @for (badge of getHookBadges(node.rule_hooks); track badge) {
-                              <span
-                                class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-sp-text)]"
-                              >
-                                {{ badge }}
-                              </span>
-                            }
-                          </div>
-                        }
-                      </div>
-
-                      <!-- Edit / Delete Controls -->
-                      <div
-                        class="mt-4 flex items-center justify-end gap-2 border-t border-[var(--mot-border)] pt-3"
-                      >
-                        <button
-                          type="button"
-                          (click)="openEditNodeModal(node)"
-                          class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
-                        >
-                          Edit Node
-                        </button>
-                        <button
-                          type="button"
-                          (click)="confirmDeleteNode(node)"
-                          class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </article>
-                  }
-                </div>
-              }
-            </div>
-          </section>
-        }
-      </div>
+                @for (childBranch of branch.children; track childBranch.node.id) {
+                  <div class="relative flex flex-col items-center">
+                    <!-- Short Vertical Drop from Crossbar to Child -->
+                    <div class="-mt-4 h-4 w-0.5 bg-[#C4491A]"></div>
+                    <ng-container
+                      *ngTemplateOutlet="branchTemplate; context: { $implicit: childBranch }"
+                    ></ng-container>
+                  </div>
+                }
+              </div>
+            }
+          }
+        </div>
+      </ng-template>
 
       <!-- =================================================================== -->
       <!-- MODAL 1: CREATE / EDIT SKILL TREE                                   -->
@@ -396,7 +555,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
             >
               <div>
                 <h2 class="font-display text-lg font-bold">
-                  {{ editingNodeId() ? 'Edit Skill Tree Node' : 'Create Combat Art / Perk Node' }}
+                  {{ editingNodeId() ? 'Edit Skill Tree Node' : 'Create Skill Tree Node' }}
                 </h2>
                 <p class="text-xs text-[#8AB0AB]">
                   Configure action costs, tags, and composable rule hooks for automatic sheet math.
@@ -492,7 +651,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
 
                 <div class="sm:col-span-2">
                   <label for="nodeParent" class="block text-xs font-bold text-[var(--mot-text)]">
-                    Prerequisite Parent Node (Optional)
+                    Connected Parent Node (Prerequisite)
                   </label>
                   <select
                     id="nodeParent"
@@ -734,13 +893,19 @@ export class ContentManagerComponent implements OnInit {
     (d) => d.category === 'Combat Art Effect'
   );
 
-  readonly selectedTreeId = signal<string>('ALL');
+  // Null = Gallery of Skill Tree Cards; String = Viewing that Skill Tree's visual branching diagram
+  readonly activeTreeId = signal<string | null>(null);
 
-  readonly visibleTrees = computed(() => {
-    const all = this.compendiumStore.skillTrees();
-    const sel = this.selectedTreeId();
-    if (sel === 'ALL') return all;
-    return all.filter((t) => t.id === sel);
+  readonly activeTree = computed(() => {
+    const id = this.activeTreeId();
+    if (!id) return null;
+    return this.compendiumStore.skillTrees().find((t) => t.id === id) ?? null;
+  });
+
+  readonly activeTreeBranches = computed<SkillTreeBranchNode[]>(() => {
+    const tree = this.activeTree();
+    if (!tree) return [];
+    return buildSkillTreeHierarchy(tree.id, this.compendiumStore.perkNodes());
   });
 
   // Tree Modal State
@@ -791,6 +956,20 @@ export class ContentManagerComponent implements OnInit {
     this.compendiumStore.clearMessages();
   }
 
+  openSkillTreeView(treeId: string): void {
+    this.compendiumStore.clearMessages();
+    this.activeTreeId.set(treeId);
+  }
+
+  closeSkillTreeView(): void {
+    this.compendiumStore.clearMessages();
+    this.activeTreeId.set(null);
+  }
+
+  getArchetypeIcon(tree: SkillTreeModel) {
+    return getTreeArchetypeIcon(tree);
+  }
+
   getPerksForTree(treeId: string): PerkNodeModel[] {
     return this.compendiumStore
       .perkNodes()
@@ -798,9 +977,10 @@ export class ContentManagerComponent implements OnInit {
       .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
   }
 
-  getParentNodeName(parentId: string | null | undefined): string | null {
-    if (!parentId) return null;
-    return this.compendiumStore.perkNodes().find((p) => p.id === parentId)?.name ?? null;
+  countNodeType(treeId: string, type: 'combat_art' | 'passive_upgrade'): number {
+    return this.compendiumStore
+      .perkNodes()
+      .filter((p) => p.tree_id === treeId && p.node_type === type).length;
   }
 
   getHookBadges(hooks: PerkRuleHooks | undefined | null): string[] {
@@ -912,8 +1092,8 @@ export class ContentManagerComponent implements OnInit {
 
   async confirmDeleteTree(tree: SkillTreeModel): Promise<void> {
     await this.compendiumStore.deleteSkillTree(tree.id);
-    if (this.selectedTreeId() === tree.id) {
-      this.selectedTreeId.set('ALL');
+    if (this.activeTreeId() === tree.id) {
+      this.activeTreeId.set(null);
     }
   }
 
@@ -923,9 +1103,9 @@ export class ContentManagerComponent implements OnInit {
     this.editingNodeId.set(null);
     const firstTreeId =
       defaultTreeId ??
-      (this.selectedTreeId() !== 'ALL'
-        ? this.selectedTreeId()
-        : this.compendiumStore.skillTrees()[0]?.id ?? '');
+      this.activeTreeId() ??
+      this.compendiumStore.skillTrees()[0]?.id ??
+      '';
 
     this.nodeForm = {
       tree_id: firstTreeId,
@@ -938,6 +1118,29 @@ export class ContentManagerComponent implements OnInit {
       combat_tag: 'Crushing',
       description: '',
       parent_node_id: null,
+    };
+    this.hookRows.set([]);
+    this.nodeModalOpen.set(true);
+  }
+
+  /**
+   * Opens the Create Node Modal pre-linked as a child branch below `parentNode`.
+   */
+  openBranchChildModal(parentNode: PerkNodeModel): void {
+    this.compendiumStore.clearMessages();
+    this.editingNodeId.set(null);
+
+    this.nodeForm = {
+      tree_id: parentNode.tree_id,
+      name: '',
+      node_type: parentNode.node_type,
+      tier: Math.min(5, parentNode.tier + 1),
+      perk_cost: 1,
+      ap_cost: 2,
+      cooldown_rounds: 3,
+      combat_tag: parentNode.combat_tag ?? 'Crushing',
+      description: '',
+      parent_node_id: parentNode.id,
     };
     this.hookRows.set([]);
     this.nodeModalOpen.set(true);
