@@ -1,12 +1,17 @@
 import { Component, HostListener, inject, signal } from '@angular/core';
-import { Router, RouterLink, RouterOutlet } from '@angular/router';
+import {
+  Router,
+  RouterLink,
+  RouterLinkActive,
+  RouterOutlet,
+} from '@angular/router';
 import { AuthStore } from './core/auth/auth.store';
 import { ThemeStore } from './core/theme/theme.store';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })

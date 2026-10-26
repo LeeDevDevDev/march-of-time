@@ -8,17 +8,56 @@
     <div
       class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8"
     >
-      <!-- Brand Identity -->
-      <a routerLink="/dashboard" class="flex items-center gap-3 no-underline">
-        <div
-          class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#C4491A] font-display text-sm font-bold text-white"
-        >
-          MoT
-        </div>
-        <span class="font-display text-lg font-bold tracking-tight text-white">
-          March of Time
-        </span>
-      </a>
+      <div class="flex items-center gap-6">
+        <!-- Brand Identity -->
+        <a routerLink="/dashboard" class="flex items-center gap-3 no-underline">
+          <div
+            class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#C4491A] font-display text-sm font-bold text-white"
+          >
+            MoT
+          </div>
+          <span class="font-display text-lg font-bold tracking-tight text-white">
+            March of Time
+          </span>
+        </a>
+
+        <!-- Primary Navigation Bar (Games | Characters | Content Manager [Admin]) -->
+        @if (authStore.isAuthenticated()) {
+          <nav aria-label="Primary navigation" class="flex items-center gap-1.5">
+            <a
+              routerLink="/dashboard"
+              routerLinkActive="border-[#C4491A] bg-[#0D1615] text-white"
+              [routerLinkActiveOptions]="{ exact: true }"
+              class="rounded-lg border border-transparent px-3.5 py-1.5 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:text-white"
+            >
+              Games
+            </a>
+
+            <a
+              routerLink="/characters"
+              routerLinkActive="border-[#C4491A] bg-[#0D1615] text-white"
+              class="rounded-lg border border-transparent px-3.5 py-1.5 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:text-white"
+            >
+              Characters
+            </a>
+
+            @if (authStore.isAdmin()) {
+              <a
+                routerLink="/content-manager"
+                routerLinkActive="border-[#C4491A] bg-[#0D1615] text-white"
+                class="flex items-center gap-1.5 rounded-lg border border-transparent px-3.5 py-1.5 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:text-white"
+              >
+                <span>Content Manager</span>
+                <span
+                  class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white"
+                >
+                  Admin
+                </span>
+              </a>
+            }
+          </nav>
+        }
+      </div>
 
       <!-- Top-Right User Context Menu Trigger (Only shown when signed in) -->
       @if (authStore.isAuthenticated()) {

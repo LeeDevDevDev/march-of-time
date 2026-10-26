@@ -2,11 +2,6 @@ import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { AuthStore } from './auth.store';
 
-/**
- * Requires an active Supabase Auth session AND a completed @handle.
- * - Unauthenticated -> /auth
- * - First-time Google sign-in without a @handle -> /onboarding
- */
 export const authGuard: CanActivateFn = async () => {
   const authStore = inject(AuthStore);
   const router = inject(Router);
@@ -24,11 +19,23 @@ export const authGuard: CanActivateFn = async () => {
   return true;
 };
 
-/**
- * Guard for /onboarding:
- * - Unauthenticated -> /auth
- * - Already has a @handle -> /dashboard
- */
+export const adminGuard: CanActivateFn = async () => {
+  const authStore = inject(AuthStore);
+  const router = inject(Router);
+
+  await authStore.waitForInit();
+
+  if (!authStore.isAuthenticated()) {
+    return router.createUrlTree(['/auth']);
+  }
+
+  if (!authStore.isAdmin()) {
+    return router.createUrlTree(['/dashboard']);
+  }
+
+  return true;
+};
+
 export const onboardingGuard: CanActivateFn = async () => {
   const authStore = inject(AuthStore);
   const router = inject(Router);
@@ -46,9 +53,6 @@ export const onboardingGuard: CanActivateFn = async () => {
   return true;
 };
 
-/**
- * Redirects already-authenticated users away from /auth.
- */
 export const guestGuard: CanActivateFn = async () => {
   const authStore = inject(AuthStore);
   const router = inject(Router);

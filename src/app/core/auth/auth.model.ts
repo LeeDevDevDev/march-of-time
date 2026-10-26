@@ -5,6 +5,7 @@ export interface UserProfile {
   display_name: string;
   handle?: string | null;
   avatar_url?: string | null;
+  is_admin?: boolean;
   sheet_theme: ThemeMode;
   vtt_theme: ThemeMode;
 }

@@ -59,6 +59,16 @@ export class AuthStore {
     return null;
   });
 
+  /**
+   * True when the signed-in user has admin privileges (from public.profiles.is_admin
+   * or user_metadata.is_admin), unlocking the Content Manager.
+   */
+  readonly isAdmin = computed<boolean>(() => {
+    const profAdmin = this.#state().profile?.is_admin;
+    if (typeof profAdmin === 'boolean') return profAdmin;
+    return Boolean(this.#state().user?.user_metadata?.['is_admin']);
+  });
+
   readonly needsOnboarding = computed(
     () => this.isAuthenticated() && !this.handle()
   );
@@ -108,8 +118,6 @@ export class AuthStore {
           return;
         }
 
-        // When tabbing back into the browser, Supabase emits TOKEN_REFRESHED or SIGNED_IN
-        // for the already-active user. Keep current state & theme intact without re-hydrating.
         const currentUserId = this.#state().user?.id;
         if (
           currentUserId === usr.id &&
@@ -353,6 +361,37 @@ export class AuthStore {
     } finally {
       this.#state.update((s) => ({ ...s, isLoading: false }));
     }
+  }
+
+  async setAdminAccess(nextAdmin: boolean): Promise<void> {
+    const user = this.#state().user;
+    if (!user) return;
+
+    await this.supabase.auth.updateUser({
+      data: { is_admin: nextAdmin },
+    });
+
+    await this.supabase
+      .from('profiles')
+      .update({ is_admin: nextAdmin, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    this.#state.update((s) => ({
+      ...s,
+      profile: s.profile
+        ? { ...s.profile, is_admin: nextAdmin }
+        : {
+            id: user.id,
+            display_name: this.displayName(),
+            handle: this.handle(),
+            is_admin: nextAdmin,
+            sheet_theme: this.themeStore.sheetTheme(),
+            vtt_theme: this.themeStore.vttTheme(),
+          },
+      statusMessage: nextAdmin
+        ? 'Admin access enabled. Content Manager is now visible in the navigation bar.'
+        : 'Admin access disabled.',
+    }));
   }
 
   async signOut(): Promise<void> {

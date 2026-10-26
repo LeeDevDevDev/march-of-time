@@ -9,7 +9,7 @@ import { AuthStore } from '../../core/auth/auth.store';
   standalone: true,
   imports: [FormsModule, RouterLink],
   template: `
-    <div class="mx-auto max-w-xl px-4 py-10 sm:px-6">
+    <div class="mx-auto max-w-xl px-4 py-10 sm:px-6 space-y-6">
       <section
         class="overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
       >
@@ -118,6 +118,39 @@ import { AuthStore } from '../../core/auth/auth.store';
           </form>
         </div>
       </section>
+
+      <!-- Admin Role Toggle Card -->
+      <section
+        class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 sm:p-8"
+      >
+        <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                Administrator Role
+              </h2>
+              @if (authStore.isAdmin()) {
+                <span
+                  class="rounded border border-[#C4491A] bg-[var(--mot-well)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]"
+                >
+                  Admin Active
+                </span>
+              }
+            </div>
+            <p class="mt-1 text-xs text-[var(--mot-muted)]">
+              Enables the <strong>Content Manager</strong> navigation tab in the top bar for managing system weapons, skill trees, and perks.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            (click)="toggleAdmin()"
+            class="shrink-0 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-bold text-[var(--mot-text)] transition-colors hover:border-[#C4491A]"
+          >
+            {{ authStore.isAdmin() ? 'Disable Admin View' : 'Enable Admin View' }}
+          </button>
+        </div>
+      </section>
     </div>
   `,
 })
@@ -139,5 +172,9 @@ export class ProfileComponent implements OnInit {
 
   async saveProfile(): Promise<void> {
     await this.authStore.saveProfileAndHandle(this.displayName, this.handle);
+  }
+
+  async toggleAdmin(): Promise<void> {
+    await this.authStore.setAdminAccess(!this.authStore.isAdmin());
   }
 }
