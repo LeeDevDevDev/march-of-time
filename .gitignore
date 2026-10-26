@@ -44,3 +44,6 @@ __screenshots__/
 Thumbs.db
 
 mot-playtest.xlsx
+
+supabase/migrations
+**.md

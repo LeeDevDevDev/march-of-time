@@ -1,3 +1,153 @@
-/* You can add global styles to this file, and also import other style files */
-
 @import 'tailwindcss';
+
+:root,
+.theme-light {
+  --mot-bg: #F1F5F4;
+  --mot-surface: #FFFFFF;
+  --mot-surface-raised: #F8FAFA;
+  --mot-well: #E4EDEB;
+  --mot-border: #C6D6D3;
+  --mot-border-strong: #9FB8B3;
+  --mot-shell: #122220;
+  --mot-text: #0F1E1C;
+  --mot-muted: #425E5A;
+  --mot-accent-text: #B53D11;
+  --mot-primary: #C4491A;
+  --mot-primary-hover: #B03E13;
+  --mot-primary-fg: #FFFFFF;
+  --mot-hp: #BE123C;
+  --mot-hp-text: #9F1239;
+  --mot-hp-bg: #FFE4E6;
+  --mot-sp: #0284C7;
+  --mot-sp-text: #0369A1;
+  --mot-sp-bg: #E0F2FE;
+  --mot-guard-bg: #E0F2FE;
+  --mot-guard-border: #7DD3FC;
+  --mot-guard-text: #075985;
+  color-scheme: light;
+}
+
+.theme-dark {
+  --mot-bg: #0D1615;
+  --mot-surface: #142220;
+  --mot-surface-raised: #192B28;
+  --mot-well: #09100F;
+  --mot-border: #243B37;
+  --mot-border-strong: #355650;
+  --mot-shell: #09100F;
+  --mot-text: #EBF5F3;
+  --mot-muted: #8AB0AB;
+  --mot-accent-text: #FB923C;
+  --mot-primary: #C4491A;
+  --mot-primary-hover: #D95522;
+  --mot-primary-fg: #FFFFFF;
+  --mot-hp: #E11D48;
+  --mot-hp-text: #FDA4AF;
+  --mot-hp-bg: #3B1822;
+  --mot-sp: #38BDF8;
+  --mot-sp-text: #7DD3FC;
+  --mot-sp-bg: #112E38;
+  --mot-guard-bg: #102A36;
+  --mot-guard-border: #1E4E63;
+  --mot-guard-text: #BAE6FD;
+  color-scheme: dark;
+}
+
+body {
+  font-family: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--mot-bg);
+  color: var(--mot-text);
+  caret-color: #C4491A;
+  margin: 0;
+}
+
+.font-display {
+  font-family: 'Cinzel', Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Signature Sunfire Copper Primary Action */
+.btn-copper {
+  background-color: var(--mot-primary);
+  color: var(--mot-primary-fg);
+  box-shadow: inset 0 1px 0 rgba(255, 225, 200, 0.25), 0 3px 8px -2px rgba(5, 10, 9, 0.45);
+  transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms ease;
+}
+
+.btn-copper:hover:not(:disabled) {
+  background-color: var(--mot-primary-hover);
+}
+
+.btn-copper:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-copper:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+/* Unified Recessed Form Input */
+.mot-input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--mot-border);
+  background-color: var(--mot-well);
+  color: var(--mot-text);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.mot-input:hover:not(:focus) {
+  border-color: var(--mot-border-strong);
+}
+
+.mot-input:focus,
+.mot-input:focus-visible {
+  outline: none;
+  border-color: #C4491A;
+  box-shadow: 0 0 0 2px rgba(196, 73, 26, 0.28);
+}
+
+/* Browser Surface Theming */
+::selection {
+  background-color: #C4491A;
+  color: #FFFFFF;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 2px solid #C4491A;
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--mot-well);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--mot-border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #C4491A;
+}
