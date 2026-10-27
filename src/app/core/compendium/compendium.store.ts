@@ -20,6 +20,35 @@ interface CompendiumState {
 }
 
 const LOCAL_KEYWORDS_STORAGE_KEY = 'mot.compendium.keywords';
+const LOCAL_TREE_VISUALS_KEY = 'mot.compendium.tree_visuals';
+
+interface StoredVisualOverride {
+  icon?: string | null;
+  icon_color?: string | null;
+  icon_tint_custom?: boolean | null;
+}
+
+function loadTreeVisualOverrides(): Record<string, StoredVisualOverride> {
+  try {
+    const raw = localStorage.getItem(LOCAL_TREE_VISUALS_KEY);
+    if (raw) {
+      return JSON.parse(raw) as Record<string, StoredVisualOverride>;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {};
+}
+
+function saveTreeVisualOverride(treeId: string, visual: StoredVisualOverride): void {
+  try {
+    const current = loadTreeVisualOverrides();
+    current[treeId] = visual;
+    localStorage.setItem(LOCAL_TREE_VISUALS_KEY, JSON.stringify(current));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function loadFallbackKeywords(): KeywordDefinition[] {
   try {
@@ -121,10 +150,21 @@ export class CompendiumStore {
 
       saveFallbackKeywords(dbKeywords);
 
+      const treeVisuals = loadTreeVisualOverrides();
+      const mergedTrees = ((treesRes.data as SkillTreeModel[]) ?? []).map((t) => {
+        const localVis = treeVisuals[t.id];
+        return {
+          ...t,
+          icon: t.icon ?? localVis?.icon ?? null,
+          icon_color: t.icon_color ?? localVis?.icon_color ?? null,
+          icon_tint_custom: t.icon_tint_custom ?? localVis?.icon_tint_custom ?? true,
+        };
+      });
+
       this.#state.update((s) => ({
         ...s,
         weapons: (wepsRes.data as WeaponModel[]) ?? [],
-        skillTrees: (treesRes.data as SkillTreeModel[]) ?? [],
+        skillTrees: mergedTrees,
         perkNodes: (perksRes.data as PerkNodeModel[]) ?? [],
         keywords: dbKeywords,
         isLoading: false,
@@ -268,6 +308,9 @@ export class CompendiumStore {
     name: string;
     slug?: string;
     description: string;
+    icon?: string | null;
+    icon_color?: string | null;
+    icon_tint_custom?: boolean | null;
   }): Promise<SkillTreeModel | null> {
     const trimmedName = input.name.trim();
     if (!trimmedName) return null;
@@ -301,7 +344,30 @@ export class CompendiumStore {
       return null;
     }
 
-    const created = data as SkillTreeModel;
+    const baseCreated = data as SkillTreeModel;
+    const created: SkillTreeModel = {
+      ...baseCreated,
+      icon: input.icon ?? baseCreated.icon ?? 'greatsword',
+      icon_color: input.icon_color ?? baseCreated.icon_color ?? '#FF8C5A',
+      icon_tint_custom: input.icon_tint_custom ?? baseCreated.icon_tint_custom ?? true,
+    };
+
+    saveTreeVisualOverride(created.id, {
+      icon: created.icon,
+      icon_color: created.icon_color,
+      icon_tint_custom: created.icon_tint_custom,
+    });
+
+    // Best-effort save to columns if 0007_tree_and_node_icons.sql has been applied
+    void this.supabase
+      .from('skill_trees')
+      .update({
+        icon: created.icon,
+        icon_color: created.icon_color,
+        icon_tint_custom: created.icon_tint_custom,
+      })
+      .eq('id', created.id);
+
     this.#state.update((s) => ({
       ...s,
       skillTrees: [...s.skillTrees, created],
@@ -313,7 +379,13 @@ export class CompendiumStore {
 
   async updateSkillTree(
     treeId: string,
-    input: { name: string; description: string }
+    input: {
+      name: string;
+      description: string;
+      icon?: string | null;
+      icon_color?: string | null;
+      icon_tint_custom?: boolean | null;
+    }
   ): Promise<boolean> {
     const trimmedName = input.name.trim();
     if (!trimmedName) return false;
@@ -346,7 +418,30 @@ export class CompendiumStore {
       return false;
     }
 
-    const updated = data as SkillTreeModel;
+    const baseUpdated = data as SkillTreeModel;
+    const updated: SkillTreeModel = {
+      ...baseUpdated,
+      icon: input.icon ?? baseUpdated.icon ?? null,
+      icon_color: input.icon_color ?? baseUpdated.icon_color ?? null,
+      icon_tint_custom: input.icon_tint_custom ?? baseUpdated.icon_tint_custom ?? true,
+    };
+
+    saveTreeVisualOverride(treeId, {
+      icon: updated.icon,
+      icon_color: updated.icon_color,
+      icon_tint_custom: updated.icon_tint_custom,
+    });
+
+    // Best-effort save to columns if 0007_tree_and_node_icons.sql has been applied
+    void this.supabase
+      .from('skill_trees')
+      .update({
+        icon: updated.icon,
+        icon_color: updated.icon_color,
+        icon_tint_custom: updated.icon_tint_custom,
+      })
+      .eq('id', treeId);
+
     this.#state.update((s) => ({
       ...s,
       skillTrees: s.skillTrees.map((t) => (t.id === treeId ? updated : t)),
@@ -407,6 +502,13 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
+    const enrichedHooks = {
+      ...(draft.rule_hooks ?? {}),
+      __icon: draft.icon ?? undefined,
+      __icon_color: draft.icon_color ?? undefined,
+      __icon_tint_custom: draft.icon_tint_custom ?? true,
+    };
+
     const { data, error } = await this.supabase
       .from('perk_nodes')
       .insert({
@@ -421,7 +523,7 @@ export class CompendiumStore {
           draft.node_type === 'combat_art' ? draft.cooldown_rounds : null,
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
-        rule_hooks: draft.rule_hooks ?? {},
+        rule_hooks: enrichedHooks,
         parent_node_id: draft.parent_node_id || null,
         is_official: true,
         created_by: this.authStore.user()?.id ?? null,
@@ -441,6 +543,17 @@ export class CompendiumStore {
     }
 
     const created = data as PerkNodeModel;
+
+    // Best-effort save to top-level columns if 0007_tree_and_node_icons.sql has been applied
+    void this.supabase
+      .from('perk_nodes')
+      .update({
+        icon: draft.icon ?? null,
+        icon_color: draft.icon_color ?? null,
+        icon_tint_custom: draft.icon_tint_custom ?? true,
+      })
+      .eq('id', created.id);
+
     this.#state.update((s) => ({
       ...s,
       perkNodes: [...s.perkNodes, created].sort(
@@ -466,6 +579,13 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
+    const enrichedHooks = {
+      ...(draft.rule_hooks ?? {}),
+      __icon: draft.icon ?? undefined,
+      __icon_color: draft.icon_color ?? undefined,
+      __icon_tint_custom: draft.icon_tint_custom ?? true,
+    };
+
     const { data, error } = await this.supabase
       .from('perk_nodes')
       .update({
@@ -479,7 +599,7 @@ export class CompendiumStore {
           draft.node_type === 'combat_art' ? draft.cooldown_rounds : null,
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
-        rule_hooks: draft.rule_hooks ?? {},
+        rule_hooks: enrichedHooks,
         parent_node_id: draft.parent_node_id || null,
       })
       .eq('id', nodeId)
@@ -497,7 +617,22 @@ export class CompendiumStore {
       return false;
     }
 
-    const updated = data as PerkNodeModel;
+    // Best-effort save to top-level columns if 0007_tree_and_node_icons.sql has been applied
+    void this.supabase
+      .from('perk_nodes')
+      .update({
+        icon: draft.icon ?? null,
+        icon_color: draft.icon_color ?? null,
+        icon_tint_custom: draft.icon_tint_custom ?? true,
+      })
+      .eq('id', nodeId);
+
+    const updated: PerkNodeModel = {
+      ...(data as PerkNodeModel),
+      icon: draft.icon ?? null,
+      icon_color: draft.icon_color ?? null,
+      icon_tint_custom: draft.icon_tint_custom ?? true,
+    };
     this.#state.update((s) => ({
       ...s,
       perkNodes: s.perkNodes
@@ -540,5 +675,37 @@ export class CompendiumStore {
       statusMessage: 'Node deleted from Skill Tree.',
     }));
     return true;
+  }
+
+  // ===========================================================================
+  // SUPABASE STORAGE UPLOAD FOR CUSTOM SKILL TREE & NODE ICONS
+  // ===========================================================================
+  async uploadCompendiumIcon(
+    file: File,
+    fallbackDataUrl: string
+  ): Promise<{ url: string; storedInBucket: boolean }> {
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const baseName = slugifyText(file.name.replace(/\.[^.]+$/, '')) || 'icon';
+    const filePath = `icons/${Date.now()}-${baseName}.${ext}`;
+
+    const { error } = await this.supabase.storage
+      .from('compendium-icons')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type || undefined,
+      });
+
+    if (!error) {
+      const { data } = this.supabase.storage
+        .from('compendium-icons')
+        .getPublicUrl(filePath);
+      if (data?.publicUrl) {
+        return { url: data.publicUrl, storedInBucket: true };
+      }
+    }
+
+    // Automatic fallback to compressed 128x128 Data URL if 0007_tree_and_node_icons.sql hasn't been run yet
+    return { url: fallbackDataUrl, storedInBucket: false };
   }
 }

@@ -14,20 +14,24 @@ import {
   DescriptionSegment,
   KeywordDefinition,
   PerkNodeModel,
+  ResolvedCompendiumVisuals,
   SkillTreeBranchNode,
   SkillTreeModel,
   buildKeywordLookupMap,
   buildSkillTreeHierarchy,
   formatRuleHookBadges,
   resolveChainedKeywords,
+  resolveNodeVisuals,
+  resolveTreeVisuals,
   tokenizeTextWithKeywords,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
+import { CompendiumIconComponent } from '../compendium-icon/compendium-icon.component';
 
 @Component({
   selector: 'app-skill-tree-canvas',
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, CompendiumIconComponent],
   template: `
     <div
       class="flex flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-[#EBF5F3] lg:h-[75vh] lg:min-h-[680px] lg:flex-row"
@@ -169,6 +173,7 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
               <div
                 class="relative flex items-center justify-center transition-all duration-150"
                 [class]="getMedallionClasses(branch.node)"
+                [style.border-color]="getNodeVisuals(branch.node).color"
               >
                 <!-- Tier Badge (Top-Left Corner) -->
                 <span
@@ -186,54 +191,35 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
                   </span>
                 } @else if (branch.node.node_type === 'combat_art') {
                   <span
-                    class="absolute -right-2.5 -top-2 rounded border border-[#C4491A] bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#FF8C5A]"
+                    class="absolute -right-2.5 -top-2 rounded border bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                    [style.border-color]="getNodeVisuals(branch.node).color"
+                    [style.color]="getNodeVisuals(branch.node).color"
                   >
                     {{ branch.node.ap_cost ?? 1 }}AP
                   </span>
                 }
 
-                <!-- Inner SVG Icon based on Node Type & Tag -->
-                @if (branch.node.node_type === 'combat_art') {
-                  @switch (branch.node.combat_tag) {
-                    @case ('Crushing') {
-                      <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                        <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
-                        <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
-                      </svg>
-                    }
-                    @case ('Piercing') {
-                      <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                        <path d="M19 3L9 13L11 15L21 5L19 3Z" />
-                        <path d="M5 19L10 14" />
-                        <path d="M3 21L5 19" />
-                      </svg>
-                    }
-                    @case ('Sweeping') {
-                      <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                        <path d="M21 3v5h-5" />
-                      </svg>
-                    }
-                    @default {
-                      <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                      </svg>
-                    }
-                  }
-                } @else {
-                  <svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    <path d="M12 8v8" />
-                    <path d="M8 12h8" />
-                  </svg>
-                }
+                <!-- Custom or Premade Node Icon -->
+                <app-compendium-icon
+                  [icon]="getNodeVisuals(branch.node).icon"
+                  [color]="
+                    selectedNode()?.id === branch.node.id
+                      ? '#FFFFFF'
+                      : getNodeVisuals(branch.node).color
+                  "
+                  [tintCustom]="getNodeVisuals(branch.node).tintCustom"
+                  sizeClass="h-8 w-8"
+                />
               </div>
 
               <!-- Node Name Label Underneath -->
               <span
                 class="mt-2.5 line-clamp-2 px-1 font-display text-xs font-bold leading-snug transition-colors"
-                [class.text-[#FF8C5A]]="selectedNode()?.id === branch.node.id"
-                [class.text-white]="selectedNode()?.id !== branch.node.id"
+                [style.color]="
+                  selectedNode()?.id === branch.node.id
+                    ? getNodeVisuals(branch.node).color
+                    : '#FFFFFF'
+                "
               >
                 {{ branch.node.name }}
               </span>
@@ -289,25 +275,44 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
           <div class="space-y-5">
             <!-- Selected Node Header -->
             <div class="flex items-start justify-between gap-3 border-b border-[#243B37] pb-4">
-              <div>
-                <div class="flex flex-wrap items-center gap-2 font-mono-num text-xs">
-                  <span class="rounded bg-[#0D1615] px-2 py-0.5 font-bold text-[#FF8C5A]">
-                    Tier {{ node.tier }}
-                  </span>
-                  <span class="text-[#8AB0AB]">
-                    {{ node.node_type === 'combat_art' ? 'Combat Art' : 'Passive Upgrade' }}
-                  </span>
+              <div class="flex items-start gap-3">
+                <div
+                  class="flex h-12 w-12 shrink-0 items-center justify-center border-2 bg-[#0D1615]"
+                  [class.rounded-xl]="node.node_type === 'combat_art'"
+                  [class.rounded-full]="node.node_type !== 'combat_art'"
+                  [style.border-color]="getNodeVisuals(node).color"
+                >
+                  <app-compendium-icon
+                    [icon]="getNodeVisuals(node).icon"
+                    [color]="getNodeVisuals(node).color"
+                    [tintCustom]="getNodeVisuals(node).tintCustom"
+                    sizeClass="h-6 w-6"
+                  />
                 </div>
 
-                <h2 class="mt-1.5 font-display text-xl font-bold text-white">
-                  {{ node.name }}
-                </h2>
+                <div>
+                  <div class="flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                    <span
+                      class="rounded bg-[#0D1615] px-2 py-0.5 font-bold"
+                      [style.color]="getNodeVisuals(node).color"
+                    >
+                      Tier {{ node.tier }}
+                    </span>
+                    <span class="text-[#8AB0AB]">
+                      {{ node.node_type === 'combat_art' ? 'Combat Art' : 'Passive Upgrade' }}
+                    </span>
+                  </div>
 
-                @if (parentNodeName(node.parent_node_id); as reqName) {
-                  <p class="mt-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
-                    Prerequisite: <strong class="text-white">{{ reqName }}</strong>
-                  </p>
-                }
+                  <h2 class="mt-1 font-display text-xl font-bold text-white">
+                    {{ node.name }}
+                  </h2>
+
+                  @if (parentNodeName(node.parent_node_id); as reqName) {
+                    <p class="mt-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                      Prerequisite: <strong class="text-white">{{ reqName }}</strong>
+                    </p>
+                  }
+                </div>
               </div>
 
               <span
@@ -657,6 +662,14 @@ export class SkillTreeCanvasComponent implements OnChanges {
 
   stripBrackets(raw: string): string {
     return (raw ?? '').replace(/\[([^\]]+)\]/g, '$1');
+  }
+
+  getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+    return resolveNodeVisuals(node);
+  }
+
+  getTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
+    return resolveTreeVisuals(tree);
   }
 
   getMedallionClasses(node: PerkNodeModel): string {

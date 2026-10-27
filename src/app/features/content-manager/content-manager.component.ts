@@ -14,15 +14,20 @@ import {
   KeywordDefinition,
   PerkNodeModel,
   RULE_HOOK_DEFINITIONS,
+  ResolvedCompendiumVisuals,
   RuleHookDefinition,
   RuleHookRow,
   SkillTreeModel,
   formatRuleHookBadges,
   getTreeArchetypeIcon,
   hooksObjectToRows,
+  resolveNodeVisuals,
+  resolveTreeVisuals,
   rowsToHooksObject,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
+import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
+import { IconPickerComponent } from '../../shared/compendium-icon/icon-picker.component';
 import { KeywordTextComponent } from '../../shared/keyword-text/keyword-text.component';
 import { KeywordTextareaComponent } from '../../shared/keyword-text/keyword-textarea.component';
 import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
@@ -35,6 +40,8 @@ import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-t
     SkillTreeCanvasComponent,
     KeywordTextareaComponent,
     KeywordTextComponent,
+    CompendiumIconComponent,
+    IconPickerComponent,
   ],
   template: `
     <div
@@ -139,37 +146,15 @@ import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-t
                 <div>
                   <div class="flex items-start justify-between gap-3">
                     <div
-                      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A] transition-colors group-hover:border-[#C4491A] group-hover:bg-[#C4491A] group-hover:text-white"
+                      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220] transition-transform group-hover:scale-105"
+                      [style.border-color]="getTreeVisuals(tree).color"
                     >
-                      @switch (getArchetypeIcon(tree)) {
-                        @case ('breaker') {
-                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                            <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
-                            <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
-                            <path d="M3 21L5.5 18.5" />
-                          </svg>
-                        }
-                        @case ('veil') {
-                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                            <path d="M19 3L9 13L11 15L21 5L19 3Z" />
-                            <path d="M7 11L13 17" />
-                            <path d="M5 19L9 15" />
-                            <path d="M3 14L10 7" />
-                          </svg>
-                        }
-                        @case ('gale') {
-                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                            <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
-                            <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
-                            <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
-                          </svg>
-                        }
-                        @default {
-                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                          </svg>
-                        }
-                      }
+                      <app-compendium-icon
+                        [icon]="getTreeVisuals(tree).icon"
+                        [color]="getTreeVisuals(tree).color"
+                        [tintCustom]="getTreeVisuals(tree).tintCustom"
+                        sizeClass="h-6 w-6"
+                      />
                     </div>
 
                     <span
@@ -384,11 +369,11 @@ import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-t
           (click)="closeTreeModal()"
         >
           <div
-            class="w-full max-w-lg rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+            class="my-8 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
             (click)="$event.stopPropagation()"
           >
             <div
-              class="flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+              class="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
             >
               <h2 class="font-display text-lg font-bold">
                 {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
@@ -432,6 +417,17 @@ import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-t
                   class="mot-input mt-1.5 px-3.5 py-2.5 text-sm"
                 ></textarea>
               </div>
+
+              <app-icon-picker
+                label="Skill Tree Crest &amp; Color"
+                shape="square"
+                [icon]="treeFormIcon"
+                (iconChange)="treeFormIcon = $event"
+                [color]="treeFormColor"
+                (colorChange)="treeFormColor = $event"
+                [tintCustom]="treeFormTintCustom"
+                (tintCustomChange)="treeFormTintCustom = $event"
+              />
 
               <div class="flex items-center justify-end gap-2.5 pt-2">
                 <button
@@ -594,6 +590,20 @@ import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-t
                     (valueChange)="nodeForm.description = $event"
                     (requestCreateKeyword)="openNewKeywordModal($event)"
                     placeholder="Type [ to search special words (e.g. [Crushing], [Parry], [Sundered])..."
+                  />
+                </div>
+
+                <!-- Node Medallion Icon & Color Picker -->
+                <div class="sm:col-span-2">
+                  <app-icon-picker
+                    label="Node Medallion Icon &amp; Color"
+                    [shape]="nodeForm.node_type === 'combat_art' ? 'square' : 'circle'"
+                    [icon]="nodeForm.icon"
+                    (iconChange)="nodeForm.icon = $event"
+                    [color]="nodeForm.icon_color"
+                    (colorChange)="nodeForm.icon_color = $event"
+                    [tintCustom]="nodeForm.icon_tint_custom"
+                    (tintCustomChange)="nodeForm.icon_tint_custom = $event"
                   />
                 </div>
               </div>
@@ -960,6 +970,9 @@ export class ContentManagerComponent implements OnInit {
   readonly editingTreeId = signal<string | null>(null);
   treeFormName = '';
   treeFormDescription = '';
+  treeFormIcon = 'greatsword';
+  treeFormColor = '#FF8C5A';
+  treeFormTintCustom = true;
 
   // Keyword Modal State
   readonly keywordModalOpen = signal(false);
@@ -984,6 +997,9 @@ export class ContentManagerComponent implements OnInit {
     combat_tag: CombatTag;
     description: string;
     parent_node_id: string | null;
+    icon: string;
+    icon_color: string;
+    icon_tint_custom: boolean;
   } = {
     tree_id: '',
     name: '',
@@ -995,6 +1011,9 @@ export class ContentManagerComponent implements OnInit {
     combat_tag: 'Crushing',
     description: '',
     parent_node_id: null,
+    icon: 'greatsword',
+    icon_color: '#FF8C5A',
+    icon_tint_custom: true,
   };
 
   readonly liveCompiledBadges = computed(() => {
@@ -1022,6 +1041,10 @@ export class ContentManagerComponent implements OnInit {
 
   getArchetypeIcon(tree: SkillTreeModel) {
     return getTreeArchetypeIcon(tree);
+  }
+
+  getTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
+    return resolveTreeVisuals(tree);
   }
 
   getPerksForTree(treeId: string): PerkNodeModel[] {
@@ -1282,6 +1305,9 @@ export class ContentManagerComponent implements OnInit {
     this.editingTreeId.set(null);
     this.treeFormName = '';
     this.treeFormDescription = '';
+    this.treeFormIcon = 'greatsword';
+    this.treeFormColor = '#FF8C5A';
+    this.treeFormTintCustom = true;
     this.treeModalOpen.set(true);
   }
 
@@ -1290,6 +1316,10 @@ export class ContentManagerComponent implements OnInit {
     this.editingTreeId.set(tree.id);
     this.treeFormName = tree.name;
     this.treeFormDescription = tree.description;
+    const visuals = resolveTreeVisuals(tree);
+    this.treeFormIcon = visuals.icon;
+    this.treeFormColor = visuals.color;
+    this.treeFormTintCustom = visuals.tintCustom;
     this.treeModalOpen.set(true);
   }
 
@@ -1303,12 +1333,18 @@ export class ContentManagerComponent implements OnInit {
       const ok = await this.compendiumStore.updateSkillTree(editId, {
         name: this.treeFormName,
         description: this.treeFormDescription,
+        icon: this.treeFormIcon,
+        icon_color: this.treeFormColor,
+        icon_tint_custom: this.treeFormTintCustom,
       });
       if (ok) this.closeTreeModal();
     } else {
       const created = await this.compendiumStore.createSkillTree({
         name: this.treeFormName,
         description: this.treeFormDescription,
+        icon: this.treeFormIcon,
+        icon_color: this.treeFormColor,
+        icon_tint_custom: this.treeFormTintCustom,
       });
       if (created) this.closeTreeModal();
     }
@@ -1343,6 +1379,9 @@ export class ContentManagerComponent implements OnInit {
       combat_tag: 'Crushing',
       description: '',
       parent_node_id: null,
+      icon: 'greatsword',
+      icon_color: '#FF8C5A',
+      icon_tint_custom: true,
     };
     this.hookRows.set([]);
     this.nodeModalOpen.set(true);
@@ -1353,6 +1392,7 @@ export class ContentManagerComponent implements OnInit {
     this.editingNodeId.set(null);
     this.bracketMenuOpen.set(false);
 
+    const parentVis = resolveNodeVisuals(parentNode);
     this.nodeForm = {
       tree_id: parentNode.tree_id,
       name: '',
@@ -1364,6 +1404,9 @@ export class ContentManagerComponent implements OnInit {
       combat_tag: parentNode.combat_tag ?? 'Crushing',
       description: '',
       parent_node_id: parentNode.id,
+      icon: parentVis.icon,
+      icon_color: parentVis.color,
+      icon_tint_custom: parentVis.tintCustom,
     };
     this.hookRows.set([]);
     this.nodeModalOpen.set(true);
@@ -1374,6 +1417,7 @@ export class ContentManagerComponent implements OnInit {
     this.editingNodeId.set(node.id);
     this.bracketMenuOpen.set(false);
 
+    const visuals = resolveNodeVisuals(node);
     this.nodeForm = {
       tree_id: node.tree_id,
       name: node.name,
@@ -1385,6 +1429,9 @@ export class ContentManagerComponent implements OnInit {
       combat_tag: node.combat_tag ?? 'None',
       description: node.description,
       parent_node_id: node.parent_node_id ?? null,
+      icon: visuals.icon,
+      icon_color: visuals.color,
+      icon_tint_custom: visuals.tintCustom,
     };
 
     this.hookRows.set(hooksObjectToRows(node.rule_hooks));
@@ -1420,6 +1467,9 @@ export class ContentManagerComponent implements OnInit {
       description: this.nodeForm.description,
       rule_hooks: compiledHooks,
       parent_node_id: this.nodeForm.parent_node_id || null,
+      icon: this.nodeForm.icon,
+      icon_color: this.nodeForm.icon_color,
+      icon_tint_custom: this.nodeForm.icon_tint_custom,
     };
 
     const editId = this.editingNodeId();

@@ -243,9 +243,17 @@ export interface PerkRuleHooks {
   push_tiles?: number;
   self_shift_tiles?: number;
   inflict_status?: CombatStatusEffect;
+
+  // Embedded Visual Metadata (persists automatically inside JSONB rule_hooks)
+  __icon?: string;
+  __icon_color?: string;
+  __icon_tint_custom?: boolean;
 }
 
-export type EditableRuleHookKey = Exclude<keyof PerkRuleHooks, 'disallow_defense'>;
+export type EditableRuleHookKey = Exclude<
+  keyof PerkRuleHooks,
+  'disallow_defense' | '__icon' | '__icon_color' | '__icon_tint_custom'
+>;
 
 export interface RuleHookDefinition {
   key: EditableRuleHookKey;
@@ -391,6 +399,9 @@ export interface SkillTreeModel {
   slug: string;
   name: string;
   description: string;
+  icon?: string | null;
+  icon_color?: string | null;
+  icon_tint_custom?: boolean | null;
 }
 
 export interface PerkNodeModel {
@@ -407,6 +418,294 @@ export interface PerkNodeModel {
   description: string;
   rule_hooks: PerkRuleHooks;
   parent_node_id?: string | null;
+  icon?: string | null;
+  icon_color?: string | null;
+  icon_tint_custom?: boolean | null;
+}
+
+export interface CompendiumIconPreset {
+  id: string;
+  label: string;
+  category: 'Weapon' | 'Defense' | 'Element' | 'Mastery';
+  paths: string[];
+}
+
+export const COMPENDIUM_ICON_PRESETS: CompendiumIconPreset[] = [
+  {
+    id: 'greatsword',
+    label: 'Greatsword',
+    category: 'Weapon',
+    paths: [
+      'M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z',
+      'M12.5 8.5L4 17L7 20L15.5 11.5',
+      'M3 21L5.5 18.5',
+    ],
+  },
+  {
+    id: 'twin-daggers',
+    label: 'Twin Daggers',
+    category: 'Weapon',
+    paths: [
+      'M19 3L9 13L11 15L21 5L19 3Z',
+      'M7 11L13 17',
+      'M5 19L9 15',
+      'M3 14L10 7',
+    ],
+  },
+  {
+    id: 'warhammer',
+    label: 'Warhammer',
+    category: 'Weapon',
+    paths: [
+      'M15 4L20 9L16 13L11 8L15 4Z',
+      'M13.5 10.5L4 20',
+      'M12 3L9 6',
+      'M21 12L18 15',
+    ],
+  },
+  {
+    id: 'spear',
+    label: 'Piercing Spear',
+    category: 'Weapon',
+    paths: [
+      'M21 3L13 6L18 11L21 3Z',
+      'M15.5 8.5L3 21',
+      'M11 9L15 13',
+    ],
+  },
+  {
+    id: 'battleaxe',
+    label: 'Battleaxe',
+    category: 'Weapon',
+    paths: [
+      'M14 4C18 4 21 7 21 11C18 11 15 10 13 8',
+      'M10 14C8 12 7 9 7 6C11 6 14 9 14 13',
+      'M3 21L17 7',
+    ],
+  },
+  {
+    id: 'bow',
+    label: 'Recurve Bow',
+    category: 'Weapon',
+    paths: [
+      'M5 4C14 4 20 10 20 19',
+      'M5 4L20 19',
+      'M16 4L20 4L20 8',
+      'M7 17L20 4',
+    ],
+  },
+  {
+    id: 'bastion-shield',
+    label: 'Bastion Shield',
+    category: 'Defense',
+    paths: [
+      'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+      'M12 7v10',
+      'M8 11h8',
+    ],
+  },
+  {
+    id: 'riposte',
+    label: 'Crossed Blades',
+    category: 'Defense',
+    paths: [
+      'M4 20L19 5',
+      'M15 4H20V9',
+      'M20 20L5 5',
+      'M9 4H4V9',
+    ],
+  },
+  {
+    id: 'iron-helm',
+    label: 'Iron War Helm',
+    category: 'Defense',
+    paths: [
+      'M5 13a7 7 0 1 1 14 0v6H5v-6z',
+      'M12 3v10',
+      'M8 15h3',
+      'M13 15h3',
+    ],
+  },
+  {
+    id: 'gale-wind',
+    label: 'Gale Wind',
+    category: 'Element',
+    paths: [
+      'M9.59 4.59A2 2 0 1 1 11 8H2',
+      'M12.59 19.41A2 2 0 1 0 14 16H2',
+      'M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2',
+    ],
+  },
+  {
+    id: 'lightning',
+    label: 'Reflex Bolt',
+    category: 'Element',
+    paths: ['M13 2L3 14h8l-1 8 10-12h-8l1-8z'],
+  },
+  {
+    id: 'sunfire',
+    label: 'Sunfire Flame',
+    category: 'Element',
+    paths: [
+      'M12 2c1.5 3.5 4 5.5 4 9a6 6 0 1 1-12 0c0-2.5 1.5-5 3-6.5 0 2 1.5 3 2.5 3C9.5 5 11 3.5 12 2z',
+    ],
+  },
+  {
+    id: 'sunder-skull',
+    label: 'Sunder Impact',
+    category: 'Mastery',
+    paths: [
+      'M12 3a7 7 0 0 0-7 7c0 2.5 1.5 4.5 3 5.5V19h8v-3.5c1.5-1 3-3 3-5.5a7 7 0 0 0-7-7z',
+      'M9 11h.01',
+      'M15 11h.01',
+      'M10 19v2',
+      'M14 19v2',
+    ],
+  },
+  {
+    id: 'crimson-drop',
+    label: 'Crimson Vitality',
+    category: 'Mastery',
+    paths: ['M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'],
+  },
+  {
+    id: 'tactical-eye',
+    label: 'Precision Eye',
+    category: 'Mastery',
+    paths: [
+      'M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z',
+      'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+    ],
+  },
+  {
+    id: 'grand-crest',
+    label: 'Grandmaster Crest',
+    category: 'Mastery',
+    paths: [
+      'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    ],
+  },
+];
+
+export interface CompendiumColorPreset {
+  hex: string;
+  label: string;
+}
+
+export const COMPENDIUM_COLOR_PRESETS: CompendiumColorPreset[] = [
+  { hex: '#FF8C5A', label: 'Sunfire Copper' },
+  { hex: '#38B29A', label: 'Jade Poise' },
+  { hex: '#F26464', label: 'Crimson Vitality' },
+  { hex: '#F59E0B', label: 'Gilded Amber' },
+  { hex: '#38BDF8', label: 'Glacier Steel' },
+  { hex: '#A78BFA', label: 'Amethyst Veil' },
+  { hex: '#EC4899', label: 'Duelist Rose' },
+  { hex: '#EBF5F3', label: 'Bone Ivory' },
+];
+
+export interface ResolvedCompendiumVisuals {
+  icon: string;
+  color: string;
+  tintCustom: boolean;
+  isCustomUpload: boolean;
+}
+
+export function isCustomIconUrl(icon: string | null | undefined): boolean {
+  if (!icon) return false;
+  const trimmed = icon.trim();
+  return (
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:')
+  );
+}
+
+/**
+ * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Skill Tree.
+ */
+export function resolveTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
+  let defaultIcon = 'bastion-shield';
+  let defaultColor = '#FF8C5A';
+
+  const key = `${tree.slug} ${tree.name}`.toLowerCase();
+  if (key.includes('juggernaut') || key.includes('breaker') || key.includes('brawn')) {
+    defaultIcon = 'greatsword';
+    defaultColor = '#FF8C5A';
+  } else if (key.includes('phantom') || key.includes('veil') || key.includes('shadow')) {
+    defaultIcon = 'twin-daggers';
+    defaultColor = '#A78BFA';
+  } else if (key.includes('tempest') || key.includes('gale') || key.includes('wind')) {
+    defaultIcon = 'gale-wind';
+    defaultColor = '#38B29A';
+  }
+
+  const icon = tree.icon?.trim() || defaultIcon;
+  const color = tree.icon_color?.trim() || defaultColor;
+  const tintCustom = tree.icon_tint_custom ?? true;
+
+  return {
+    icon,
+    color,
+    tintCustom,
+    isCustomUpload: isCustomIconUrl(icon),
+  };
+}
+
+/**
+ * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Perk Node.
+ */
+export function resolveNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+  const nKey = `${node.slug} ${node.name}`.toLowerCase();
+
+  let defaultIcon = node.node_type === 'combat_art' ? 'greatsword' : 'bastion-shield';
+  if (nKey.includes('ram') || nKey.includes('hammer') || nKey.includes('crush')) {
+    defaultIcon = 'warhammer';
+  } else if (nKey.includes('earthshaker') || nKey.includes('sunder') || nKey.includes('skull')) {
+    defaultIcon = 'sunder-skull';
+  } else if (nKey.includes('whirlwind') || nKey.includes('sweep') || nKey.includes('axe')) {
+    defaultIcon = 'battleaxe';
+  } else if (nKey.includes('heartseeker') || nKey.includes('thrust') || nKey.includes('pierc')) {
+    defaultIcon = 'spear';
+  } else if (nKey.includes('shadow') || nKey.includes('dagger') || nKey.includes('lunge')) {
+    defaultIcon = 'twin-daggers';
+  } else if (nKey.includes('gale') || nKey.includes('stride') || nKey.includes('wind')) {
+    defaultIcon = 'gale-wind';
+  } else if (nKey.includes('cyclone') || nKey.includes('riposte') || nKey.includes('parry')) {
+    defaultIcon = 'riposte';
+  } else if (nKey.includes('flicker') || nKey.includes('reflex') || nKey.includes('bolt')) {
+    defaultIcon = 'lightning';
+  } else if (nKey.includes('precision') || nKey.includes('lethal') || nKey.includes('eye')) {
+    defaultIcon = 'tactical-eye';
+  } else if (nKey.includes('titan') || nKey.includes('helm') || nKey.includes('iron')) {
+    defaultIcon = 'iron-helm';
+  } else if (nKey.includes('rhythm') || nKey.includes('flame') || nKey.includes('sunfire')) {
+    defaultIcon = 'sunfire';
+  } else if (nKey.includes('blood') || nKey.includes('bleed') || nKey.includes('conditioning')) {
+    defaultIcon = 'crimson-drop';
+  }
+
+  const defaultColor = node.node_type === 'combat_art' ? '#FF8C5A' : '#38B29A';
+
+  const icon =
+    node.icon?.trim() ||
+    node.rule_hooks?.__icon?.trim() ||
+    defaultIcon;
+  const color =
+    node.icon_color?.trim() ||
+    node.rule_hooks?.__icon_color?.trim() ||
+    defaultColor;
+  const tintCustom =
+    node.icon_tint_custom ??
+    node.rule_hooks?.__icon_tint_custom ??
+    true;
+
+  return {
+    icon,
+    color,
+    tintCustom,
+    isCustomUpload: isCustomIconUrl(icon),
+  };
 }
 
 export interface SkillTreeBranchNode {

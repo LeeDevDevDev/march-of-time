@@ -2,8 +2,11 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import {
+  ResolvedCompendiumVisuals,
   getTreeArchetypeIcon,
+  resolveTreeVisuals,
 } from '../../core/compendium/compendium.model';
+import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
 import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
 import {
   ARMOR_TIERS,
@@ -28,7 +31,7 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
 @Component({
   selector: 'app-character-creator',
   standalone: true,
-  imports: [FormsModule, RouterLink, SkillTreeCanvasComponent],
+  imports: [FormsModule, RouterLink, SkillTreeCanvasComponent, CompendiumIconComponent],
   template: `
     <div
       class="mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6 transition-all"
@@ -499,35 +502,15 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
                     <div>
                       <div class="flex items-start justify-between gap-3">
                         <div
-                          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#122220] text-[#FF8C5A]"
+                          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                          [style.border-color]="getTreeVisuals(tree).color"
                         >
-                          @switch (getArchetypeIcon(tree)) {
-                            @case ('breaker') {
-                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                                <path d="M14.5 3.5L20.5 9.5L17 13L11 7L14.5 3.5Z" />
-                                <path d="M12.5 8.5L4 17L7 20L15.5 11.5" />
-                              </svg>
-                            }
-                            @case ('veil') {
-                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                                <path d="M19 3L9 13L11 15L21 5L19 3Z" />
-                                <path d="M7 11L13 17" />
-                                <path d="M5 19L9 15" />
-                              </svg>
-                            }
-                            @case ('gale') {
-                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                                <path d="M9.59 4.59A2 2 0 1 1 11 8H2" />
-                                <path d="M12.59 19.41A2 2 0 1 0 14 16H2" />
-                                <path d="M17.73 7.73A2.5 2.5 0 1 1 19.5 12H2" />
-                              </svg>
-                            }
-                            @default {
-                              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
-                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                              </svg>
-                            }
-                          }
+                          <app-compendium-icon
+                            [icon]="getTreeVisuals(tree).icon"
+                            [color]="getTreeVisuals(tree).color"
+                            [tintCustom]="getTreeVisuals(tree).tintCustom"
+                            sizeClass="h-5 w-5"
+                          />
                         </div>
 
                         <span
@@ -775,6 +758,10 @@ export class CharacterCreatorComponent {
 
   getArchetypeIcon(tree: SkillTreeModel) {
     return getTreeArchetypeIcon(tree);
+  }
+
+  getTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
+    return resolveTreeVisuals(tree);
   }
 
   countSelectedInTree(treeId: string): number {
