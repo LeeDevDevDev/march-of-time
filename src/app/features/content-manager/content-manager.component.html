@@ -1,0 +1,2100 @@
+<div
+  class="mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6 transition-all"
+  [class.max-w-6xl]="!activeTree()"
+  [class.max-w-[1600px]]="!!activeTree()"
+>
+  <!-- Feedback Banners -->
+  @if (compendiumStore.error()) {
+    <div
+      class="rounded-xl border border-[var(--mot-hp)] bg-[var(--mot-hp-bg)] px-4 py-3 text-xs font-semibold text-[var(--mot-hp-text)]"
+    >
+      {{ compendiumStore.error() }}
+    </div>
+  }
+
+  <!-- ================================================================= -->
+  <!-- VIEW 1: TOP ADMIN STUDIO COMMAND DECK & 3-PILLAR NAVIGATION       -->
+  <!-- ================================================================= -->
+  @if (!activeTree()) {
+    <section
+      class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] text-[#EBF5F3]"
+    >
+      <!-- Top Command Header -->
+      <div
+        class="flex flex-col justify-between gap-4 border-b border-[#243B37] p-6 sm:p-7 lg:flex-row lg:items-center"
+      >
+        <div>
+          <div class="flex flex-wrap items-center gap-3">
+            <h1 class="font-display text-2xl font-bold text-white sm:text-3xl">
+              Content &amp; Rule Forge
+            </h1>
+            <span
+              class="rounded-md border border-[#C4491A] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A] tabular-nums"
+            >
+              {{ compendiumStore.skillTrees().length }} Trees ·
+              {{ compendiumStore.weapons().length }} Weapons ·
+              {{ compendiumStore.keywords().length }} Words
+            </span>
+          </div>
+          <p class="mt-1.5 max-w-2xl text-sm text-[#8AB0AB]">
+            Author branching Skill Trees, forge Weapons with <strong>Two-Handed</strong> &amp; <strong>Heavy</strong> Block rules, and curate Special Words with chained hover tooltips.
+          </p>
+        </div>
+
+        <!-- Live Compendium Sync & Refresh Control -->
+        <div class="flex items-center gap-2.5">
+          @if (compendiumStore.isLoading()) {
+            <div
+              class="inline-flex items-center gap-2 rounded-xl border border-[#C4491A] bg-[#0D1615] px-3.5 py-2 font-mono-num text-xs font-bold text-[#FF8C5A]"
+            >
+              <svg
+                class="h-4 w-4 animate-spin text-[#FF8C5A]"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="3"
+                ></circle>
+                <path
+                  class="opacity-90"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                ></path>
+              </svg>
+              <span>Syncing Compendium...</span>
+            </div>
+          } @else {
+            <button
+              type="button"
+              (click)="compendiumStore.loadCompendium()"
+              class="inline-flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 py-2 text-xs font-semibold text-[#8AB0AB] transition-colors hover:border-[#C4491A] hover:text-white"
+            >
+              <svg
+                class="h-3.5 w-3.5 text-[#FF8C5A]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 16h5v5" />
+              </svg>
+              <span>Refresh Compendium</span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <!-- 3-Pillar Segmented Navigation Deck -->
+      <div class="grid grid-cols-1 gap-3 bg-[#0D1615] p-3 sm:grid-cols-3">
+        <!-- Pillar 1: Martial Skill Trees -->
+        <button
+          type="button"
+          (click)="studioTab.set('trees')"
+          class="group flex items-start justify-between gap-3 rounded-xl border p-4 text-left transition-all"
+          [class.border-[#C4491A]]="studioTab() === 'trees'"
+          [class.bg-[#122220]]="studioTab() === 'trees'"
+          [class.border-[#243B37]]="studioTab() !== 'trees'"
+          [class.bg-[#0D1615]]="studioTab() !== 'trees'"
+        >
+          <div class="flex items-start gap-3">
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors"
+              [class.border-[#C4491A]]="studioTab() === 'trees'"
+              [class.bg-[#C4491A]]="studioTab() === 'trees'"
+              [class.text-white]="studioTab() === 'trees'"
+              [class.border-[#243B37]]="studioTab() !== 'trees'"
+              [class.bg-[#122220]]="studioTab() !== 'trees'"
+              [class.text-[#FF8C5A]]="studioTab() !== 'trees'"
+            >
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2.5" />
+                <circle cx="6" cy="18" r="2.5" />
+                <circle cx="18" cy="18" r="2.5" />
+                <path d="M12 7.5v4.5M12 12L6 15.5M12 12l6 3.5" />
+              </svg>
+            </div>
+            <div>
+              <div class="font-display text-sm font-bold text-white">
+                Martial Skill Trees
+              </div>
+              <p class="mt-0.5 text-xs text-[#8AB0AB]">
+                Branching Combat Arts &amp; Passive Perks
+              </p>
+            </div>
+          </div>
+          <span
+            class="rounded-md border px-2 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+            [class.border-[#C4491A]]="studioTab() === 'trees'"
+            [class.bg-[#0D1615]]="studioTab() === 'trees'"
+            [class.text-[#FF8C5A]]="studioTab() === 'trees'"
+            [class.border-[#243B37]]="studioTab() !== 'trees'"
+            [class.bg-[#122220]]="studioTab() !== 'trees'"
+            [class.text-[#8AB0AB]]="studioTab() !== 'trees'"
+          >
+            {{ compendiumStore.skillTrees().length }}
+          </span>
+        </button>
+
+        <!-- Pillar 2: Armory & Weapons -->
+        <button
+          type="button"
+          (click)="studioTab.set('weapons')"
+          class="group flex items-start justify-between gap-3 rounded-xl border p-4 text-left transition-all"
+          [class.border-[#C4491A]]="studioTab() === 'weapons'"
+          [class.bg-[#122220]]="studioTab() === 'weapons'"
+          [class.border-[#243B37]]="studioTab() !== 'weapons'"
+          [class.bg-[#0D1615]]="studioTab() !== 'weapons'"
+        >
+          <div class="flex items-start gap-3">
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors"
+              [class.border-[#C4491A]]="studioTab() === 'weapons'"
+              [class.bg-[#C4491A]]="studioTab() === 'weapons'"
+              [class.text-white]="studioTab() === 'weapons'"
+              [class.border-[#243B37]]="studioTab() !== 'weapons'"
+              [class.bg-[#122220]]="studioTab() !== 'weapons'"
+              [class.text-[#FF8C5A]]="studioTab() !== 'weapons'"
+            >
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 20L19 5" />
+                <path d="M15 4H20V9" />
+                <path d="M20 20L5 5" />
+                <path d="M9 4H4V9" />
+              </svg>
+            </div>
+            <div>
+              <div class="font-display text-sm font-bold text-white">
+                Weapons &amp; Armory
+              </div>
+              <p class="mt-0.5 text-xs text-[#8AB0AB]">
+                Two-Handed, Heavy Block &amp; Weapon Traits
+              </p>
+            </div>
+          </div>
+          <span
+            class="rounded-md border px-2 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+            [class.border-[#C4491A]]="studioTab() === 'weapons'"
+            [class.bg-[#0D1615]]="studioTab() === 'weapons'"
+            [class.text-[#FF8C5A]]="studioTab() === 'weapons'"
+            [class.border-[#243B37]]="studioTab() !== 'weapons'"
+            [class.bg-[#122220]]="studioTab() !== 'weapons'"
+            [class.text-[#8AB0AB]]="studioTab() !== 'weapons'"
+          >
+            {{ compendiumStore.weapons().length }}
+          </span>
+        </button>
+
+        <!-- Pillar 3: Special Words Glossary -->
+        <button
+          type="button"
+          (click)="studioTab.set('keywords')"
+          class="group flex items-start justify-between gap-3 rounded-xl border p-4 text-left transition-all"
+          [class.border-[#C4491A]]="studioTab() === 'keywords'"
+          [class.bg-[#122220]]="studioTab() === 'keywords'"
+          [class.border-[#243B37]]="studioTab() !== 'keywords'"
+          [class.bg-[#0D1615]]="studioTab() !== 'keywords'"
+        >
+          <div class="flex items-start gap-3">
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors"
+              [class.border-[#C4491A]]="studioTab() === 'keywords'"
+              [class.bg-[#C4491A]]="studioTab() === 'keywords'"
+              [class.text-white]="studioTab() === 'keywords'"
+              [class.border-[#243B37]]="studioTab() !== 'keywords'"
+              [class.bg-[#122220]]="studioTab() !== 'keywords'"
+              [class.text-[#FF8C5A]]="studioTab() !== 'keywords'"
+            >
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                <path d="M9 7h6M9 11h4" />
+              </svg>
+            </div>
+            <div>
+              <div class="font-display text-sm font-bold text-white">
+                Special Words Glossary
+              </div>
+              <p class="mt-0.5 text-xs text-[#8AB0AB]">
+                <code>[</code> Autocomplete &amp; Chained Tooltips
+              </p>
+            </div>
+          </div>
+          <span
+            class="rounded-md border px-2 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+            [class.border-[#C4491A]]="studioTab() === 'keywords'"
+            [class.bg-[#0D1615]]="studioTab() === 'keywords'"
+            [class.text-[#FF8C5A]]="studioTab() === 'keywords'"
+            [class.border-[#243B37]]="studioTab() !== 'keywords'"
+            [class.bg-[#122220]]="studioTab() !== 'keywords'"
+            [class.text-[#8AB0AB]]="studioTab() !== 'keywords'"
+          >
+            {{ compendiumStore.keywords().length }}
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB A: SKILL TREE CARDS GALLERY -->
+    @if (studioTab() === 'trees') {
+      <section class="space-y-4">
+        <!-- Skill Trees Section Command Bar (with + New Skill Tree button inside) -->
+        <div
+          class="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 sm:flex-row sm:items-center"
+        >
+          <div>
+            <h2 class="font-display text-lg font-bold text-[var(--mot-text)]">
+              Martial Skill Trees
+            </h2>
+            <p class="text-xs text-[var(--mot-muted)]">
+              Select a Skill Tree to open its interactive branching node canvas, or create a new martial path.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Active vs Archived Toggle -->
+            <div class="inline-flex rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] p-0.5 text-xs font-bold">
+              <button
+                type="button"
+                (click)="treeStatusFilter.set('active')"
+                class="rounded-md px-2.5 py-1 transition-colors"
+                [class.bg-[#122220]]="treeStatusFilter() === 'active'"
+                [class.text-white]="treeStatusFilter() === 'active'"
+                [class.text-[var(--mot-muted)]]="treeStatusFilter() !== 'active'"
+              >
+                Active ({{ compendiumStore.skillTrees().length }})
+              </button>
+              <button
+                type="button"
+                (click)="treeStatusFilter.set('archived')"
+                class="rounded-md px-2.5 py-1 transition-colors tabular-nums"
+                [class.bg-[#122220]]="treeStatusFilter() === 'archived'"
+                [class.text-[#F59E0B]]="treeStatusFilter() === 'archived'"
+                [class.text-[var(--mot-muted)]]="treeStatusFilter() !== 'archived'"
+              >
+                Archived ({{ archivedTreesCount() }})
+              </button>
+            </div>
+
+            <input
+              type="text"
+              [ngModel]="treeSearch()"
+              (ngModelChange)="treeSearch.set($event)"
+              placeholder="Search skill trees..."
+              class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+            />
+            <button
+              type="button"
+              (click)="openNewTreeModal()"
+              class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>New Skill Tree</span>
+            </button>
+          </div>
+        </div>
+
+        @if (compendiumStore.isLoading() && compendiumStore.skillTrees().length === 0) {
+          <!-- Skill Tree Skeleton Cards -->
+          <div class="grid grid-cols-1 gap-5 md:grid-cols-3" aria-busy="true">
+            @for (sk of [1, 2, 3]; track sk) {
+              <div
+                class="animate-pulse rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 space-y-4"
+              >
+                <div class="flex items-start justify-between">
+                  <div class="h-12 w-12 rounded-xl bg-[var(--mot-well)]"></div>
+                  <div class="h-6 w-16 rounded-lg bg-[var(--mot-well)]"></div>
+                </div>
+                <div class="h-6 w-2/3 rounded bg-[var(--mot-well)]"></div>
+                <div class="space-y-2">
+                  <div class="h-3.5 w-full rounded bg-[var(--mot-well)]"></div>
+                  <div class="h-3.5 w-4/5 rounded bg-[var(--mot-well)]"></div>
+                </div>
+                <div class="flex gap-2 pt-2">
+                  <div class="h-6 w-24 rounded-md bg-[var(--mot-well)]"></div>
+                  <div class="h-6 w-20 rounded-md bg-[var(--mot-well)]"></div>
+                </div>
+                <div class="flex justify-between border-t border-[var(--mot-border)] pt-4">
+                  <div class="h-8 w-24 rounded-lg bg-[var(--mot-well)]"></div>
+                  <div class="h-8 w-32 rounded-lg bg-[var(--mot-well)]"></div>
+                </div>
+              </div>
+            }
+          </div>
+        } @else if (filteredTrees().length === 0) {
+          <div
+            class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-8 text-center"
+          >
+            <p class="font-display text-base font-bold text-[var(--mot-text)]">
+              No Skill Trees Found
+            </p>
+            <p class="mt-1 text-xs text-[var(--mot-muted)]">
+              Create a new Skill Tree or clear your search filter.
+            </p>
+            <button
+              type="button"
+              (click)="openNewTreeModal()"
+              class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+            >
+              + New Skill Tree
+            </button>
+          </div>
+        } @else {
+          <div class="grid grid-cols-1 gap-5 md:grid-cols-3">
+            @for (tree of filteredTrees(); track tree.id) {
+              <article
+                class="group flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 transition-all hover:border-[#C4491A]"
+              >
+                <div>
+                  <div class="flex items-start justify-between gap-3">
+                    <div
+                      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220] transition-transform group-hover:scale-105"
+                      [style.border-color]="getTreeVisuals(tree).color"
+                    >
+                      <app-compendium-icon
+                        [icon]="getTreeVisuals(tree).icon"
+                        [color]="getTreeVisuals(tree).color"
+                        [tintCustom]="getTreeVisuals(tree).tintCustom"
+                        sizeClass="h-6 w-6"
+                      />
+                    </div>
+
+                    <div class="flex items-center gap-1.5">
+                      @if (!isItemActive(tree)) {
+                        <span
+                          class="rounded-lg border border-[#F59E0B]/40 bg-[#F59E0B]/15 px-2.5 py-1 font-mono-num text-xs font-bold text-[#F59E0B]"
+                        >
+                          Archived
+                        </span>
+                      }
+                      <span
+                        class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+                      >
+                        {{ getPerksForTree(tree.id).length }}
+                        {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <h2 class="mt-4 font-display text-xl font-bold text-[var(--mot-text)]">
+                    {{ tree.name }}
+                  </h2>
+                  <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                    {{ tree.description }}
+                  </p>
+
+                  <div class="mt-4 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                    <span
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-accent-text)] tabular-nums"
+                    >
+                      {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
+                    </span>
+                    <span
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)] tabular-nums"
+                    >
+                      {{ countNodeType(tree.id, 'passive_upgrade') }} Passives
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mt-6 flex items-center justify-between gap-2 border-t border-[var(--mot-border)] pt-4">
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="openEditTreeModal(tree)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      (click)="toggleTreeActive(tree)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                      [class.text-[#38B29A]]="!isItemActive(tree)"
+                      [class.hover:border-[#38B29A]]="!isItemActive(tree)"
+                      [class.text-[#F59E0B]]="isItemActive(tree)"
+                      [class.hover:border-[#F59E0B]]="isItemActive(tree)"
+                    >
+                      {{ isItemActive(tree) ? 'Archive' : 'Restore' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="confirmDeleteTree(tree)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    (click)="openSkillTreeView(tree.id)"
+                    class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+                  >
+                    View Skill Tree →
+                  </button>
+                </div>
+              </article>
+            }
+          </div>
+        }
+      </section>
+    }
+
+    <!-- TAB B: SPECIAL WORDS & GLOSSARY MANAGER -->
+    @if (studioTab() === 'keywords') {
+      <section
+        class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+      >
+        <div
+          class="flex flex-col justify-between gap-3 rounded-t-2xl border-b border-[var(--mot-border)] bg-[var(--mot-well)] px-6 py-4 sm:flex-row sm:items-center"
+        >
+          <div>
+            <h2 class="font-display text-lg font-bold text-[var(--mot-text)]">
+              Special Words &amp; Hover Definitions
+            </h2>
+            <p class="text-xs text-[var(--mot-muted)]">
+              Any word listed here appears in the <code>[</code> autocomplete menu when writing descriptions and automatically shows its rule tooltip when hovered.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Active vs Archived Toggle -->
+            <div class="inline-flex rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] p-0.5 text-xs font-bold">
+              <button
+                type="button"
+                (click)="keywordStatusFilter.set('active')"
+                class="rounded-md px-2.5 py-1 transition-colors"
+                [class.bg-[#122220]]="keywordStatusFilter() === 'active'"
+                [class.text-white]="keywordStatusFilter() === 'active'"
+                [class.text-[var(--mot-muted)]]="keywordStatusFilter() !== 'active'"
+              >
+                Active ({{ compendiumStore.keywords().length }})
+              </button>
+              <button
+                type="button"
+                (click)="keywordStatusFilter.set('archived')"
+                class="rounded-md px-2.5 py-1 transition-colors tabular-nums"
+                [class.bg-[#122220]]="keywordStatusFilter() === 'archived'"
+                [class.text-[#F59E0B]]="keywordStatusFilter() === 'archived'"
+                [class.text-[var(--mot-muted)]]="keywordStatusFilter() !== 'archived'"
+              >
+                Archived ({{ archivedKeywordsCount() }})
+              </button>
+            </div>
+
+            <input
+              type="text"
+              [ngModel]="keywordSearch()"
+              (ngModelChange)="keywordSearch.set($event)"
+              placeholder="Search special words..."
+              class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+            />
+            <button
+              type="button"
+              (click)="openNewKeywordModal()"
+              class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>New Special Word</span>
+            </button>
+          </div>
+        </div>
+
+        @if (compendiumStore.isLoading() && compendiumStore.keywords().length === 0) {
+          <!-- Special Words Skeleton Grid -->
+          <div class="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
+            @for (sk of [1, 2, 3, 4]; track sk) {
+              <div
+                class="animate-pulse flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4"
+              >
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="h-5 w-32 rounded bg-[var(--mot-surface)]"></div>
+                    <div class="h-4 w-24 rounded bg-[var(--mot-surface)]"></div>
+                  </div>
+                  <div class="h-3.5 w-full rounded bg-[var(--mot-surface)]"></div>
+                  <div class="h-3.5 w-4/5 rounded bg-[var(--mot-surface)]"></div>
+                </div>
+                <div class="mt-4 flex items-center justify-end gap-2 border-t border-[var(--mot-border)] pt-3">
+                  <div class="h-6 w-16 rounded-lg bg-[var(--mot-surface)]"></div>
+                  <div class="h-6 w-14 rounded-lg bg-[var(--mot-surface)]"></div>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
+            @for (kw of filteredKeywords(); track kw.term) {
+              <article
+                class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 transition-colors hover:border-[#C4491A]"
+              >
+                <div>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                      <span
+                        class="font-display text-base font-bold text-[var(--mot-accent-text)] underline decoration-dotted underline-offset-4"
+                      >
+                        {{ kw.term }}
+                      </span>
+                      @if (!isItemActive(kw)) {
+                        <span
+                          class="rounded border border-[#F59E0B]/40 bg-[#F59E0B]/15 px-1.5 py-0.5 font-mono-num text-[11px] font-bold text-[#F59E0B]"
+                        >
+                          Archived
+                        </span>
+                      }
+                    </div>
+                    <span
+                      class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)]"
+                    >
+                      {{ kw.category }}
+                    </span>
+                  </div>
+                  <div class="mt-2">
+                    <app-keyword-text
+                      [text]="kw.summary"
+                      [excludeTerm]="kw.term"
+                      [showHintWhenIdle]="false"
+                    />
+                  </div>
+                </div>
+
+                <div class="mt-4 flex items-center justify-end gap-2 border-t border-[var(--mot-border)] pt-3">
+                  <button
+                    type="button"
+                    (click)="openEditKeywordModal(kw)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    Edit Word
+                  </button>
+                  <button
+                    type="button"
+                    (click)="toggleKeywordActive(kw)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold transition-colors"
+                    [class.text-[#38B29A]]="!isItemActive(kw)"
+                    [class.hover:border-[#38B29A]]="!isItemActive(kw)"
+                    [class.text-[#F59E0B]]="isItemActive(kw)"
+                    [class.hover:border-[#F59E0B]]="isItemActive(kw)"
+                  >
+                    {{ isItemActive(kw) ? 'Archive' : 'Restore' }}
+                  </button>
+                  <button
+                    type="button"
+                    (click)="deleteKeyword(kw)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
+            }
+          </div>
+        }
+      </section>
+    }
+
+    <!-- TAB C: SPLIT-PANE ARMORY WORKBENCH & TACTICAL WEAPON INSPECTOR -->
+    @if (studioTab() === 'weapons') {
+      <section class="space-y-4">
+        <!-- Armory Filter & Search Command Bar -->
+        <div
+          class="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 sm:flex-row sm:items-center"
+        >
+          <div class="flex flex-wrap items-center gap-1.5">
+            @for (filter of weaponFilterOptions; track filter.id) {
+              <button
+                type="button"
+                (click)="weaponCategoryFilter.set(filter.id)"
+                class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+                [class.btn-copper]="weaponCategoryFilter() === filter.id"
+                [class.border-[var(--mot-border)]]="weaponCategoryFilter() !== filter.id"
+                [class.bg-[var(--mot-well)]]="weaponCategoryFilter() !== filter.id"
+                [class.text-[var(--mot-muted)]]="weaponCategoryFilter() !== filter.id"
+              >
+                {{ filter.label }}
+              </button>
+            }
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Active vs Archived Toggle -->
+            <div class="inline-flex rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] p-0.5 text-xs font-bold">
+              <button
+                type="button"
+                (click)="weaponStatusFilter.set('active')"
+                class="rounded-md px-2.5 py-1 transition-colors"
+                [class.bg-[#122220]]="weaponStatusFilter() === 'active'"
+                [class.text-white]="weaponStatusFilter() === 'active'"
+                [class.text-[var(--mot-muted)]]="weaponStatusFilter() !== 'active'"
+              >
+                Active ({{ compendiumStore.weapons().length }})
+              </button>
+              <button
+                type="button"
+                (click)="weaponStatusFilter.set('archived')"
+                class="rounded-md px-2.5 py-1 transition-colors tabular-nums"
+                [class.bg-[#122220]]="weaponStatusFilter() === 'archived'"
+                [class.text-[#F59E0B]]="weaponStatusFilter() === 'archived'"
+                [class.text-[var(--mot-muted)]]="weaponStatusFilter() !== 'archived'"
+              >
+                Archived ({{ archivedWeaponsCount() }})
+              </button>
+            </div>
+
+            <input
+              type="text"
+              [ngModel]="weaponSearch()"
+              (ngModelChange)="weaponSearch.set($event)"
+              placeholder="Search weapons or traits..."
+              class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+            />
+            <button
+              type="button"
+              (click)="openNewWeaponModal()"
+              class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>Forge Weapon</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Split-Pane Armory Ledger (Left 7 cols) + Live Weapon Inspector (Right 5 cols) -->
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-12">
+          <!-- Left Column: Interactive Armory Roster -->
+          <div class="space-y-2.5 lg:col-span-7">
+            @if (compendiumStore.isLoading() && compendiumStore.weapons().length === 0) {
+              <!-- Armory Skeleton Rows -->
+              @for (sk of [1, 2, 3, 4]; track sk) {
+                <div
+                  class="animate-pulse rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3.5">
+                      <div class="h-11 w-11 rounded-xl bg-[var(--mot-well)]"></div>
+                      <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                          <div class="h-4 w-32 rounded bg-[var(--mot-well)]"></div>
+                          <div class="h-4 w-16 rounded bg-[var(--mot-well)]"></div>
+                          <div class="h-4 w-20 rounded bg-[var(--mot-well)]"></div>
+                        </div>
+                        <div class="h-3.5 w-56 rounded bg-[var(--mot-well)]"></div>
+                      </div>
+                    </div>
+                    <div class="h-7 w-14 rounded-lg bg-[var(--mot-well)]"></div>
+                  </div>
+                </div>
+              }
+            } @else if (filteredWeapons().length === 0) {
+              <div
+                class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-8 text-center"
+              >
+                <p class="font-display text-base font-bold text-[var(--mot-text)]">
+                  No matching weapons in the Armory
+                </p>
+                <p class="mt-1 text-xs text-[var(--mot-muted)]">
+                  Try clearing the filter or forge a new weapon for the compendium.
+                </p>
+                <button
+                  type="button"
+                  (click)="openNewWeaponModal()"
+                  class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+                >
+                  + Forge Weapon
+                </button>
+              </div>
+            } @else {
+              @for (w of filteredWeapons(); track w.id) {
+                <article
+                  (click)="selectedWeaponId.set(w.id)"
+                  class="cursor-pointer rounded-2xl border p-4 transition-all"
+                  [class.border-[#C4491A]]="selectedWeapon()?.id === w.id"
+                  [class.bg-[var(--mot-well)]]="selectedWeapon()?.id === w.id"
+                  [class.border-[var(--mot-border)]]="selectedWeapon()?.id !== w.id"
+                  [class.bg-[var(--mot-surface)]]="selectedWeapon()?.id !== w.id"
+                >
+                  <div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                    <div class="flex items-start gap-3.5">
+                      <div
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                        [style.border-color]="getWeaponVisuals(w).color"
+                      >
+                        <app-compendium-icon
+                          [icon]="getWeaponVisuals(w).icon"
+                          [color]="getWeaponVisuals(w).color"
+                          [tintCustom]="getWeaponVisuals(w).tintCustom"
+                          sizeClass="h-5 w-5"
+                        />
+                      </div>
+
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h3 class="font-display text-base font-bold text-[var(--mot-text)]">
+                            {{ w.name }}
+                          </h3>
+                          <span
+                            class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)]"
+                          >
+                            {{ w.category }}
+                          </span>
+                          <span
+                            class="rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                            [class.border-[#F59E0B]/40]="isTwoHanded(w)"
+                            [class.bg-[#F59E0B]/15]="isTwoHanded(w)"
+                            [class.text-[#F59E0B]]="isTwoHanded(w)"
+                            [class.border-[var(--mot-border)]]="!isTwoHanded(w)"
+                            [class.bg-[var(--mot-surface)]]="!isTwoHanded(w)"
+                            [class.text-[var(--mot-muted)]]="!isTwoHanded(w)"
+                          >
+                            {{ isTwoHanded(w) ? 'Two-Handed' : 'One-Handed' }}
+                          </span>
+                          @if (isHeavy(w)) {
+                            <span
+                              class="rounded border border-[#38B29A]/40 bg-[#38B29A]/15 px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A] tabular-nums"
+                            >
+                              Heavy (Block {{ getHeavyBlockBase(w) }})
+                            </span>
+                          }
+                        </div>
+
+                        <div class="mt-1 flex flex-wrap items-center gap-2 font-mono-num text-xs font-semibold text-[var(--mot-accent-text)] tabular-nums">
+                          <span>{{ w.ap_cost }} AP</span>
+                          <span>·</span>
+                          <span>2d10 + {{ w.gov_attribute }} + {{ w.gov_skill }}</span>
+                          <span>·</span>
+                          <span>Base {{ w.base_damage }} DMG</span>
+                          <span>·</span>
+                          <span>Reach {{ w.reach_tiles }} {{ w.reach_tiles === 1 ? 'Tile' : 'Tiles' }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="flex shrink-0 items-center gap-2" (click)="$event.stopPropagation()">
+                      <button
+                        type="button"
+                        (click)="openEditWeaponModal(w)"
+                        class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              }
+            }
+          </div>
+
+          <!-- Right Column: Sticky Tactical Weapon Inspector -->
+          <div class="lg:col-span-5">
+            @if (selectedWeapon(); as sel) {
+              <aside
+                class="sticky top-6 overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] text-[#EBF5F3]"
+              >
+                <!-- Inspector Header -->
+                <div class="flex items-start justify-between gap-3 border-b border-[#243B37] p-5">
+                  <div class="flex items-center gap-3.5">
+                    <div
+                      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-[#0D1615]"
+                      [style.border-color]="getWeaponVisuals(sel).color"
+                    >
+                      <app-compendium-icon
+                        [icon]="getWeaponVisuals(sel).icon"
+                        [color]="getWeaponVisuals(sel).color"
+                        [tintCustom]="getWeaponVisuals(sel).tintCustom"
+                        sizeClass="h-6 w-6"
+                      />
+                    </div>
+                    <div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="font-display text-xl font-bold text-white">
+                          {{ sel.name }}
+                        </h2>
+                        <span class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                          {{ sel.category }}
+                        </span>
+                        @if (!isItemActive(sel)) {
+                          <span
+                            class="rounded border border-[#F59E0B]/40 bg-[#F59E0B]/15 px-2 py-0.5 font-mono-num text-xs font-bold text-[#F59E0B]"
+                          >
+                            Archived
+                          </span>
+                        }
+                      </div>
+                      <p class="mt-0.5 font-mono-num text-xs text-[#8AB0AB] tabular-nums">
+                        {{ sel.ap_cost }} AP Strike · Governing {{ sel.gov_attribute }} ({{ sel.gov_skill }})
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="openEditWeaponModal(sel)"
+                      class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      (click)="toggleWeaponActive(sel)"
+                      class="rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                      [class.border-[#38B29A]]="!isItemActive(sel)"
+                      [class.bg-[#38B29A]/15]="!isItemActive(sel)"
+                      [class.text-[#38B29A]]="!isItemActive(sel)"
+                      [class.border-[#243B37]]="isItemActive(sel)"
+                      [class.bg-[#0D1615]]="isItemActive(sel)"
+                      [class.text-[#F59E0B]]="isItemActive(sel)"
+                    >
+                      {{ isItemActive(sel) ? 'Archive' : 'Restore' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="confirmDeleteWeapon(sel)"
+                      class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1.5 text-xs font-semibold text-[#F26464] hover:border-[#F26464]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-5 p-5">
+                  <!-- Combat Profile Grid -->
+                  <div class="grid grid-cols-3 gap-2.5 tabular-nums">
+                    <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                      <div class="text-xs font-semibold text-[#8AB0AB]">Attack Roll</div>
+                      <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                        2d10 + {{ sel.gov_attribute }}
+                      </div>
+                      <div class="mt-0.5 text-xs text-[#8AB0AB]">+ {{ sel.gov_skill }} Skill</div>
+                    </div>
+
+                    <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                      <div class="text-xs font-semibold text-[#8AB0AB]">Flat Damage</div>
+                      <div class="mt-1 font-mono-num text-sm font-bold text-[#FF8C5A]">
+                        {{ sel.base_damage }} + {{ sel.gov_attribute }}
+                      </div>
+                      <div class="mt-0.5 text-xs text-[#8AB0AB]">No damage dice</div>
+                    </div>
+
+                    <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                      <div class="text-xs font-semibold text-[#8AB0AB]">Reach &amp; Range</div>
+                      <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                        {{ sel.reach_tiles }} {{ sel.reach_tiles === 1 ? 'Tile' : 'Tiles' }} ({{ sel.reach_tiles * 5 }} ft)
+                      </div>
+                      <div class="mt-0.5 text-xs text-[#8AB0AB]">
+                        {{ sel.thrown_range_tiles ? 'Thrown ' + sel.thrown_range_tiles + ' Tiles' : 'Melee / Primary' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Interactive Two-Handed & Heavy Property Tag Toggles -->
+                  <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-bold text-white">
+                        Weapon Grip &amp; Guard Tags (Click to Toggle)
+                      </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        (click)="toggleWeaponTwoHanded(sel)"
+                        class="flex flex-col justify-between rounded-xl border p-3 text-left transition-colors"
+                        [class.border-[#F59E0B]]="isTwoHanded(sel)"
+                        [class.bg-[#F59E0B]/15]="isTwoHanded(sel)"
+                        [class.border-[#243B37]]="!isTwoHanded(sel)"
+                        [class.bg-[#122220]]="!isTwoHanded(sel)"
+                      >
+                        <div class="flex items-center justify-between w-full">
+                          <span
+                            class="font-mono-num text-xs font-bold"
+                            [class.text-[#F59E0B]]="isTwoHanded(sel)"
+                            [class.text-white]="!isTwoHanded(sel)"
+                          >
+                            Two-Handed
+                          </span>
+                          <span
+                            class="rounded px-1.5 py-0.5 font-mono-num text-xs font-bold"
+                            [class.bg-[#F59E0B]]="isTwoHanded(sel)"
+                            [class.text-[#0D1615]]="isTwoHanded(sel)"
+                            [class.bg-[#0D1615]]="!isTwoHanded(sel)"
+                            [class.text-[#8AB0AB]]="!isTwoHanded(sel)"
+                          >
+                            {{ isTwoHanded(sel) ? 'Active' : 'Off' }}
+                          </span>
+                        </div>
+                        <p class="mt-1.5 text-xs text-[#8AB0AB]">
+                          Cannot use an off-hand Shield while wielding this weapon.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        (click)="toggleWeaponHeavy(sel)"
+                        class="flex flex-col justify-between rounded-xl border p-3 text-left transition-colors"
+                        [class.border-[#38B29A]]="isHeavy(sel)"
+                        [class.bg-[#38B29A]/15]="isHeavy(sel)"
+                        [class.border-[#243B37]]="!isHeavy(sel)"
+                        [class.bg-[#122220]]="!isHeavy(sel)"
+                      >
+                        <div class="flex items-center justify-between w-full">
+                          <span
+                            class="font-mono-num text-xs font-bold"
+                            [class.text-[#38B29A]]="isHeavy(sel)"
+                            [class.text-white]="!isHeavy(sel)"
+                          >
+                            Heavy (Can Block)
+                          </span>
+                          <span
+                            class="rounded px-1.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                            [class.bg-[#38B29A]]="isHeavy(sel)"
+                            [class.text-[#0D1615]]="isHeavy(sel)"
+                            [class.bg-[#0D1615]]="!isHeavy(sel)"
+                            [class.text-[#8AB0AB]]="!isHeavy(sel)"
+                          >
+                            {{ isHeavy(sel) ? 'Base ' + getHeavyBlockBase(sel) : 'Off' }}
+                          </span>
+                        </div>
+                        <p class="mt-1.5 text-xs text-[#8AB0AB]">
+                          Enables 1 AP Guard to Block ({{ getHeavyBlockBase(sel) || 2 }} + Block Skill) vs non-Piercing.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Weapon Trait & Live Chained Keyword Tooltip Preview -->
+                  <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="font-display text-sm font-bold text-[#FF8C5A]">
+                        Trait: {{ sel.trait_name }}
+                      </span>
+                      <span class="text-xs text-[#8AB0AB]">Hover underlined words</span>
+                    </div>
+                    <app-keyword-text
+                      [text]="sel.trait_description"
+                      [showHintWhenIdle]="false"
+                      placement="top"
+                    />
+
+                    @if (getWeaponBadges(sel).length > 0) {
+                      <div class="flex flex-wrap gap-1.5 pt-2">
+                        @for (b of getWeaponBadges(sel); track b) {
+                          <span
+                            class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 font-mono-num text-xs font-bold text-[#38B29A] tabular-nums"
+                          >
+                            {{ b }}
+                          </span>
+                        }
+                      </div>
+                    }
+                  </div>
+                </div>
+              </aside>
+            } @else if (compendiumStore.isLoading()) {
+              <!-- Sticky Weapon Inspector Skeleton -->
+              <aside
+                class="sticky top-6 animate-pulse overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-5 text-[#EBF5F3] space-y-5"
+              >
+                <div class="flex items-center justify-between gap-3 border-b border-[#243B37] pb-4">
+                  <div class="flex items-center gap-3.5">
+                    <div class="h-12 w-12 rounded-xl bg-[#0D1615]"></div>
+                    <div class="space-y-2">
+                      <div class="h-5 w-36 rounded bg-[#0D1615]"></div>
+                      <div class="h-3.5 w-44 rounded bg-[#0D1615]"></div>
+                    </div>
+                  </div>
+                  <div class="h-8 w-24 rounded-lg bg-[#0D1615]"></div>
+                </div>
+                <div class="grid grid-cols-3 gap-2.5">
+                  <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+                  <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+                  <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+                </div>
+                <div class="h-32 rounded-xl bg-[#0D1615]"></div>
+                <div class="h-24 rounded-xl bg-[#0D1615]"></div>
+              </aside>
+            }
+          </div>
+        </div>
+      </section>
+    }
+  }
+
+  <!-- ================================================================= -->
+  <!-- VIEW 2: EXPANSIVE DRAGGABLE ICON SKILL TREE + INSPECTOR           -->
+  <!-- ================================================================= -->
+  @if (activeTree(); as tree) {
+    <section
+      class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
+    >
+      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div class="flex items-center gap-4">
+          <button
+            type="button"
+            (click)="closeSkillTreeView()"
+            class="flex h-9 items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
+          >
+            ← All Trees
+          </button>
+
+          <div>
+            <h1 class="font-display text-lg font-bold text-white sm:text-xl">
+              {{ tree.name }}
+            </h1>
+            <p class="text-xs text-[#8AB0AB]">
+              {{ tree.description }}
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            (click)="openNewKeywordModal()"
+            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#FF8C5A] hover:border-[#C4491A]"
+          >
+            + New Special Word
+          </button>
+          <button
+            type="button"
+            (click)="openEditTreeModal(tree)"
+            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+          >
+            Edit Tree Info
+          </button>
+          <button
+            type="button"
+            (click)="openNewNodeModal(tree.id)"
+            class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+          >
+            + Add Tier 1 Root Node
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Full-Width Pannable Icon Tree Canvas + Right-Side Inspector -->
+    <app-skill-tree-canvas
+      [tree]="tree"
+      [allNodes]="compendiumStore.allPerkNodes()"
+      mode="admin"
+      (addRootNode)="openNewNodeModal(tree.id)"
+      (branchChildNode)="openBranchChildModal($event)"
+      (editNode)="openEditNodeModal($event)"
+      (toggleArchiveNode)="toggleNodeActive($event)"
+      (deleteNode)="confirmDeleteNode($event)"
+    />
+  }
+
+  <!-- =================================================================== -->
+  <!-- MODAL 1: CREATE / EDIT SKILL TREE                                   -->
+  <!-- =================================================================== -->
+  @if (treeModalOpen()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      (click)="closeTreeModal()"
+    >
+      <div
+        class="my-8 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+        (click)="$event.stopPropagation()"
+      >
+        <div
+          class="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+        >
+          <h2 class="font-display text-lg font-bold">
+            {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
+          </h2>
+          <button
+            type="button"
+            (click)="closeTreeModal()"
+            class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+          >
+            Close
+          </button>
+        </div>
+
+        <form (ngSubmit)="saveTree()" class="p-6 space-y-4">
+          <div>
+            <label for="treeName" class="block text-xs font-bold text-[var(--mot-text)]">
+              Skill Tree Name
+            </label>
+            <input
+              id="treeName"
+              type="text"
+              name="treeName"
+              required
+              [(ngModel)]="treeFormName"
+              placeholder="e.g. Path of the Sentinel"
+              class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
+            />
+          </div>
+
+          <div>
+            <label for="treeDesc" class="block text-xs font-bold text-[var(--mot-text)]">
+              Martial Philosophy &amp; Combat Focus
+            </label>
+            <textarea
+              id="treeDesc"
+              name="treeDesc"
+              rows="3"
+              required
+              [(ngModel)]="treeFormDescription"
+              placeholder="Describe what kind of Combat Arts and Passive Upgrades belong to this path..."
+              class="mot-input mt-1.5 px-3.5 py-2.5 text-sm"
+            ></textarea>
+          </div>
+
+          <app-icon-picker
+            label="Skill Tree Crest &amp; Color"
+            shape="square"
+            [icon]="treeFormIcon"
+            (iconChange)="treeFormIcon = $event"
+            [color]="treeFormColor"
+            (colorChange)="treeFormColor = $event"
+            [tintCustom]="treeFormTintCustom"
+            (tintCustomChange)="treeFormTintCustom = $event"
+          />
+
+          <div class="flex items-center justify-end gap-2.5 pt-2">
+            <button
+              type="button"
+              (click)="closeTreeModal()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              [disabled]="compendiumStore.isLoading()"
+              class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              @if (compendiumStore.isLoading()) {
+                <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                  <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Saving...</span>
+              } @else {
+                <span>{{ editingTreeId() ? 'Save Tree Changes' : 'Create Skill Tree' }}</span>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+
+  <!-- =================================================================== -->
+  <!-- MODAL 2: CREATE / EDIT COMBAT ART OR PASSIVE PERK NODE              -->
+  <!-- (Includes [ Triggered Special Word Search & Autocomplete!)          -->
+  <!-- =================================================================== -->
+  @if (nodeModalOpen()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4"
+      (click)="closeNodeModal()"
+    >
+      <div
+        class="my-8 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+        (click)="$event.stopPropagation()"
+      >
+        <div
+          class="sticky top-0 z-10 flex items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+        >
+          <div>
+            <h2 class="font-display text-lg font-bold">
+              {{ editingNodeId() ? 'Edit Skill Tree Node' : 'Create Skill Tree Node' }}
+            </h2>
+            <p class="text-xs text-[#8AB0AB]">
+              Type <code class="rounded bg-[#0D1615] px-1.5 py-0.5 text-[#FF8C5A]">[</code> in the description to search and insert special words.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="closeNodeModal()"
+            class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+          >
+            Close
+          </button>
+        </div>
+
+        <form (ngSubmit)="saveNode()" class="p-6 space-y-6">
+          <!-- Section 1: Core Identity & Placement -->
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label for="nodeName" class="block text-xs font-bold text-[var(--mot-text)]">
+                Node Name
+              </label>
+              <input
+                id="nodeName"
+                type="text"
+                name="nodeName"
+                required
+                [(ngModel)]="nodeForm.name"
+                placeholder="e.g. Sundering Ram or Ironblood Conditioning"
+                class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
+              />
+            </div>
+
+            <div>
+              <label for="nodeTree" class="block text-xs font-bold text-[var(--mot-text)]">
+                Skill Tree
+              </label>
+              <select
+                id="nodeTree"
+                name="nodeTree"
+                [(ngModel)]="nodeForm.tree_id"
+                class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
+              >
+                @for (t of compendiumStore.skillTrees(); track t.id) {
+                  <option [value]="t.id">{{ t.name }}</option>
+                }
+              </select>
+            </div>
+
+            <div>
+              <label for="nodeType" class="block text-xs font-bold text-[var(--mot-text)]">
+                Node Type
+              </label>
+              <select
+                id="nodeType"
+                name="nodeType"
+                [(ngModel)]="nodeForm.node_type"
+                class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
+              >
+                <option value="combat_art">Combat Art (Active Ability)</option>
+                <option value="passive_upgrade">Passive Upgrade (Permanent Stat/Rule)</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="nodeTier" class="block text-xs font-bold text-[var(--mot-text)]">
+                Tree Tier (1–5)
+              </label>
+              <input
+                id="nodeTier"
+                type="number"
+                name="nodeTier"
+                min="1"
+                max="5"
+                [(ngModel)]="nodeForm.tier"
+                class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold"
+              />
+            </div>
+
+            <div>
+              <label for="nodePerkCost" class="block text-xs font-bold text-[var(--mot-text)]">
+                Perk Point Cost
+              </label>
+              <input
+                id="nodePerkCost"
+                type="number"
+                name="nodePerkCost"
+                min="1"
+                max="5"
+                [(ngModel)]="nodeForm.perk_cost"
+                class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold"
+              />
+            </div>
+
+            <div class="sm:col-span-2">
+              <label for="nodeParent" class="block text-xs font-bold text-[var(--mot-text)]">
+                Connected Parent Node (Prerequisite)
+              </label>
+              <select
+                id="nodeParent"
+                name="nodeParent"
+                [(ngModel)]="nodeForm.parent_node_id"
+                class="mot-input mt-1.5 px-3.5 py-2 text-sm"
+              >
+                <option [ngValue]="null">None (Root / Tier 1 Node)</option>
+                @for (candidate of availableParentNodes(); track candidate.id) {
+                  <option [ngValue]="candidate.id">
+                    Tier {{ candidate.tier }} — {{ candidate.name }}
+                  </option>
+                }
+              </select>
+            </div>
+
+            <!-- Rules Description with [ Special Word Autocomplete -->
+            <div class="sm:col-span-2">
+              <app-keyword-textarea
+                inputId="nodeDesc"
+                label="Rules Description"
+                [value]="nodeForm.description"
+                (valueChange)="nodeForm.description = $event"
+                (requestCreateKeyword)="openNewKeywordModal($event)"
+                placeholder="Type [ to search special words (e.g. [Crushing], [Parry], [Sundered])..."
+              />
+            </div>
+
+            <!-- Node Medallion Icon & Color Picker -->
+            <div class="sm:col-span-2">
+              <app-icon-picker
+                label="Node Medallion Icon &amp; Color"
+                [shape]="nodeForm.node_type === 'combat_art' ? 'square' : 'circle'"
+                [icon]="nodeForm.icon"
+                (iconChange)="nodeForm.icon = $event"
+                [color]="nodeForm.icon_color"
+                (colorChange)="nodeForm.icon_color = $event"
+                [tintCustom]="nodeForm.icon_tint_custom"
+                (tintCustomChange)="nodeForm.icon_tint_custom = $event"
+              />
+            </div>
+          </div>
+
+          <!-- Section 2: Active Combat Art Parameters (Only if Combat Art) -->
+          @if (nodeForm.node_type === 'combat_art') {
+            <div
+              class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3"
+            >
+              <div>
+                <h3 class="font-display text-sm font-bold text-[var(--mot-text)]">
+                  Combat Art Action Economy &amp; Defense Triangle Tag
+                </h3>
+                <p class="text-xs text-[var(--mot-muted)]">
+                  Combat Tags automatically restrict one of the target's three active defenses.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label class="block text-xs font-bold text-[var(--mot-text)]">
+                    AP Cost (1–4)
+                  </label>
+                  <input
+                    type="number"
+                    name="apCost"
+                    min="0"
+                    max="4"
+                    [(ngModel)]="nodeForm.ap_cost"
+                    class="mot-input mt-1 px-3 py-2 font-mono-num text-sm font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-[var(--mot-text)]">
+                    Cooldown (Rounds)
+                  </label>
+                  <input
+                    type="number"
+                    name="cooldownRounds"
+                    min="0"
+                    max="6"
+                    [(ngModel)]="nodeForm.cooldown_rounds"
+                    class="mot-input mt-1 px-3 py-2 font-mono-num text-sm font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-[var(--mot-text)]">
+                    Combat Tag
+                  </label>
+                  <select
+                    name="combatTag"
+                    [(ngModel)]="nodeForm.combat_tag"
+                    class="mot-input mt-1 px-3 py-2 text-sm font-bold"
+                  >
+                    <option value="None">None</option>
+                    <option value="Crushing">Crushing (No Parry)</option>
+                    <option value="Piercing">Piercing (No Block)</option>
+                    <option value="Sweeping">Sweeping (No Dodge)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          }
+
+          <!-- Section 3: Composable Rule Hook Builder -->
+          <div
+            class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-4"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="font-display text-sm font-bold text-[var(--mot-text)]">
+                  Composable Rule Hooks (Automated Sheet &amp; Combat Effects)
+                </h3>
+                <p class="text-xs text-[var(--mot-muted)]">
+                  Attach only the mechanical modifiers this node uses.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                (click)="addRuleHookRow()"
+                [disabled]="hookRows().length >= ruleHookDefinitions.length"
+                class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-bold text-[var(--mot-accent-text)] transition-colors hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
+              >
+                + Add Rule Hook
+              </button>
+            </div>
+
+            @if (hookRows().length === 0) {
+              <div
+                class="rounded-lg border border-dashed border-[var(--mot-border)] bg-[var(--mot-surface)] px-4 py-4 text-center text-xs text-[var(--mot-muted)]"
+              >
+                No custom stat or on-hit modifiers attached yet. Click
+                <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to attach automatic bonuses.
+              </div>
+            } @else {
+              <div class="space-y-2.5">
+                @for (row of hookRows(); track $index; let idx = $index) {
+                  <div
+                    class="flex flex-col gap-2 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] p-3 sm:flex-row sm:items-center"
+                  >
+                    <div class="flex-1">
+                      <select
+                        [name]="'hookKey_' + idx"
+                        [ngModel]="row.key"
+                        (ngModelChange)="updateRowKey(idx, $event)"
+                        class="mot-input px-3 py-1.5 text-xs font-bold"
+                      >
+                        <optgroup label="Sheet Stat Bonuses (Passive Math)">
+                          @for (def of sheetStatHookDefs; track def.key) {
+                            <option [value]="def.key">{{ def.label }}</option>
+                          }
+                        </optgroup>
+                        <optgroup label="Combat Art Effects (On-Hit / Tactical)">
+                          @for (def of combatEffectHookDefs; track def.key) {
+                            <option [value]="def.key">{{ def.label }}</option>
+                          }
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div class="w-full sm:w-40">
+                      @if (getHookDef(row.key)?.valueType === 'status') {
+                        <select
+                          [name]="'hookStatus_' + idx"
+                          [ngModel]="row.statusValue"
+                          (ngModelChange)="updateRowStatus(idx, $event)"
+                          class="mot-input px-3 py-1.5 text-xs font-bold"
+                        >
+                          <option value="Sundered">Sundered</option>
+                          <option value="Staggered">Staggered</option>
+                          <option value="Bleeding">Bleeding</option>
+                          <option value="Pinned">Pinned</option>
+                        </select>
+                      } @else {
+                        <input
+                          type="number"
+                          [name]="'hookNum_' + idx"
+                          [ngModel]="row.numValue"
+                          (ngModelChange)="updateRowNum(idx, $event)"
+                          class="mot-input px-3 py-1.5 font-mono-num text-xs font-bold"
+                        />
+                      }
+                    </div>
+
+                    <button
+                      type="button"
+                      (click)="removeRuleHookRow(idx)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (liveCompiledBadges().length > 0) {
+              <div class="flex flex-wrap items-center gap-1.5 border-t border-[var(--mot-border)] pt-3">
+                <span class="text-xs font-semibold text-[var(--mot-muted)]">
+                  Sheet Preview:
+                </span>
+                @for (badge of liveCompiledBadges(); track badge) {
+                  <span
+                    class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-sp-text)]"
+                  >
+                    {{ badge }}
+                  </span>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="flex items-center justify-end gap-2.5 pt-2">
+            <button
+              type="button"
+              (click)="closeNodeModal()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              [disabled]="compendiumStore.isLoading()"
+              class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              @if (compendiumStore.isLoading()) {
+                <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                  <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Saving...</span>
+              } @else {
+                <span>{{ editingNodeId() ? 'Save Node Changes' : 'Create Node' }}</span>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+
+  <!-- =================================================================== -->
+  <!-- MODAL 3: CREATE / EDIT SPECIAL WORD (KEYWORD GLOSSARY)              -->
+  <!-- =================================================================== -->
+  @if (keywordModalOpen()) {
+    <div
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+      (click)="closeKeywordModal()"
+    >
+      <div
+        class="w-full max-w-lg rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+        (click)="$event.stopPropagation()"
+      >
+        <div
+          class="flex items-center justify-between rounded-t-2xl border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+        >
+          <div>
+            <h2 class="font-display text-lg font-bold">
+              {{ editingKeywordId() ? 'Edit Special Word' : 'Create Special Word' }}
+            </h2>
+            <p class="text-xs text-[#8AB0AB]">
+              Available in the <code>[</code> autocomplete menu and highlighted automatically in descriptions.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="closeKeywordModal()"
+            class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+          >
+            Close
+          </button>
+        </div>
+
+        <form (ngSubmit)="saveKeyword()" class="p-6 space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Special Word / Term
+            </label>
+            <input
+              type="text"
+              name="kwTerm"
+              required
+              [(ngModel)]="keywordFormTerm"
+              placeholder="e.g. Overcharge, Exposed, or Riposte"
+              class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-bold"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Category
+            </label>
+            <select
+              name="kwCategory"
+              [(ngModel)]="keywordFormCategory"
+              class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
+            >
+              <option value="Defense Triangle Tag">Defense Triangle Tag</option>
+              <option value="Active Defense">Active Defense</option>
+              <option value="Combat Status">Combat Status</option>
+              <option value="Core Mechanic">Core Mechanic</option>
+              <option value="Custom Rule">Custom Rule</option>
+            </select>
+          </div>
+
+          <div>
+            <app-keyword-textarea
+              inputId="kwSummary"
+              label="Hover Rule Explanation (Chain Other Keywords with [ )"
+              [value]="keywordFormSummary"
+              (valueChange)="keywordFormSummary = $event"
+              [excludeTerm]="keywordFormTerm"
+              [showNewWordButton]="false"
+              placeholder="Type [ to chain related keywords inside this explanation (e.g. The defender must declare [Parry] or [Shield Block])..."
+            />
+
+            @if (keywordFormSummary.trim()) {
+              <div
+                class="mt-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3"
+              >
+                <p class="mb-1.5 font-mono-num text-[11px] font-bold text-[var(--mot-muted)]">
+                  Live Chained Preview (Hover underlined words below to test):
+                </p>
+                <app-keyword-text
+                  [text]="keywordFormSummary"
+                  [excludeTerm]="keywordFormTerm"
+                  [showHintWhenIdle]="false"
+                  placement="top"
+                />
+              </div>
+            }
+          </div>
+
+          <div class="flex items-center justify-end gap-2.5 pt-2">
+            <button
+              type="button"
+              (click)="closeKeywordModal()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              [disabled]="compendiumStore.isLoading()"
+              class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              @if (compendiumStore.isLoading()) {
+                <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                  <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Saving...</span>
+              } @else {
+                <span>{{ editingKeywordId() ? 'Save Word Changes' : 'Create Special Word' }}</span>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+
+  <!-- ================================================================= -->
+  <!-- MODAL 4: FORGE / EDIT WEAPON                                      -->
+  <!-- ================================================================= -->
+  @if (weaponModalOpen()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 overflow-y-auto"
+      (click)="closeWeaponModal()"
+    >
+      <div
+        class="my-8 w-full max-w-3xl rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 space-y-5 max-h-[92vh] overflow-y-auto"
+        (click)="$event.stopPropagation()"
+      >
+        <div class="flex items-center justify-between border-b border-[var(--mot-border)] pb-3">
+          <div>
+            <h2 class="font-display text-lg font-bold text-[var(--mot-text)]">
+              {{ editingWeaponId() ? 'Edit Weapon' : 'Forge New Weapon' }}
+            </h2>
+            <p class="text-xs text-[var(--mot-muted)]">
+              Configure combat profile, <strong>Two-Handed</strong> &amp; <strong>Heavy</strong> Block tags, and hoverable trait keywords.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="closeWeaponModal()"
+            class="text-xs font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+          >
+            Close
+          </button>
+        </div>
+
+        <form (ngSubmit)="saveWeapon()" class="space-y-5">
+          <!-- Row 1: Name, Category, AP Cost & Governing Stats -->
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-12">
+            <div class="sm:col-span-5">
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Weapon Name
+              </label>
+              <input
+                type="text"
+                name="wepName"
+                [(ngModel)]="weaponForm.name"
+                required
+                placeholder="e.g. Executioner's Halberd"
+                class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <div class="sm:col-span-4">
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Category
+              </label>
+              <select
+                name="wepCategory"
+                [(ngModel)]="weaponForm.category"
+                class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+              >
+                <option value="Martial">Martial</option>
+                <option value="Heavy">Heavy</option>
+                <option value="Light">Light</option>
+                <option value="Ranged">Ranged</option>
+              </select>
+            </div>
+
+            <div class="sm:col-span-3">
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                AP Cost
+              </label>
+              <select
+                name="wepApCost"
+                [(ngModel)]="weaponForm.ap_cost"
+                class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold tabular-nums"
+              >
+                <option [ngValue]="1">1 AP</option>
+                <option [ngValue]="2">2 AP</option>
+                <option [ngValue]="3">3 AP</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Row 2: Governing Attribute, Governing Skill, Base Damage, Reach & Thrown -->
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div>
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Gov. Attribute
+              </label>
+              <select
+                name="wepGovAttr"
+                [(ngModel)]="weaponForm.gov_attribute"
+                class="mot-input mt-1 px-3 py-2 text-xs font-bold"
+              >
+                <option value="Brawn">Brawn</option>
+                <option value="Agility">Agility</option>
+                <option value="Technique">Technique</option>
+                <option value="Iron">Iron</option>
+                <option value="Cunning">Cunning</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Gov. Skill
+              </label>
+              <select
+                name="wepGovSkill"
+                [(ngModel)]="weaponForm.gov_skill"
+                class="mot-input mt-1 px-3 py-2 text-xs font-bold"
+              >
+                <option value="Strike">Strike (Melee)</option>
+                <option value="Shoot">Shoot (Ranged)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Base Damage
+              </label>
+              <input
+                type="number"
+                name="wepBaseDmg"
+                [(ngModel)]="weaponForm.base_damage"
+                min="1"
+                max="15"
+                class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Reach (Tiles)
+              </label>
+              <input
+                type="number"
+                name="wepReach"
+                [(ngModel)]="weaponForm.reach_tiles"
+                min="1"
+                max="12"
+                class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Thrown (Tiles)
+              </label>
+              <input
+                type="number"
+                name="wepThrown"
+                [(ngModel)]="weaponForm.thrown_range_tiles"
+                min="0"
+                max="12"
+                placeholder="None"
+                class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+          </div>
+
+          <!-- Row 3: Two-Handed, Heavy & Requires Aim Toggles -->
+          <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3">
+            <div class="text-xs font-bold text-[var(--mot-text)]">
+              Weapon Grip &amp; Guard Properties
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <!-- Two-Handed Toggle -->
+              <button
+                type="button"
+                (click)="weaponForm.two_handed = !weaponForm.two_handed"
+                class="flex flex-col justify-between rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#F59E0B]]="weaponForm.two_handed"
+                [class.bg-[#F59E0B]/15]="weaponForm.two_handed"
+                [class.border-[var(--mot-border)]]="!weaponForm.two_handed"
+                [class.bg-[var(--mot-surface)]]="!weaponForm.two_handed"
+              >
+                <div class="flex items-center justify-between w-full">
+                  <span class="font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                    Two-Handed
+                  </span>
+                  <span
+                    class="rounded px-1.5 py-0.5 font-mono-num text-xs font-bold"
+                    [class.bg-[#F59E0B]]="weaponForm.two_handed"
+                    [class.text-[#0D1615]]="weaponForm.two_handed"
+                    [class.bg-[var(--mot-well)]]="!weaponForm.two_handed"
+                    [class.text-[var(--mot-muted)]]="!weaponForm.two_handed"
+                  >
+                    {{ weaponForm.two_handed ? 'Yes' : 'No' }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-[var(--mot-muted)]">
+                  Cannot use an off-hand Shield while active.
+                </p>
+              </button>
+
+              <!-- Heavy Toggle + Block Base -->
+              <div
+                class="flex flex-col justify-between rounded-xl border p-3 transition-colors"
+                [class.border-[#38B29A]]="weaponForm.heavy"
+                [class.bg-[#38B29A]/15]="weaponForm.heavy"
+                [class.border-[var(--mot-border)]]="!weaponForm.heavy"
+                [class.bg-[var(--mot-surface)]]="!weaponForm.heavy"
+              >
+                <div class="flex items-center justify-between w-full">
+                  <button
+                    type="button"
+                    (click)="weaponForm.heavy = !weaponForm.heavy"
+                    class="font-mono-num text-xs font-bold text-[var(--mot-text)] text-left"
+                  >
+                    Heavy (Can Block)
+                  </button>
+                  <button
+                    type="button"
+                    (click)="weaponForm.heavy = !weaponForm.heavy"
+                    class="rounded px-1.5 py-0.5 font-mono-num text-xs font-bold"
+                    [class.bg-[#38B29A]]="weaponForm.heavy"
+                    [class.text-[#0D1615]]="weaponForm.heavy"
+                    [class.bg-[var(--mot-well)]]="!weaponForm.heavy"
+                    [class.text-[var(--mot-muted)]]="!weaponForm.heavy"
+                  >
+                    {{ weaponForm.heavy ? 'Yes' : 'No' }}
+                  </button>
+                </div>
+                @if (weaponForm.heavy) {
+                  <div class="mt-2 flex items-center justify-between gap-2">
+                    <span class="text-xs text-[var(--mot-muted)]">Block Base:</span>
+                    <input
+                      type="number"
+                      name="wepHeavyBase"
+                      [(ngModel)]="weaponForm.heavy_block_base"
+                      min="1"
+                      max="6"
+                      class="mot-input w-16 px-2 py-1 font-mono-num text-xs font-bold tabular-nums"
+                    />
+                  </div>
+                } @else {
+                  <p class="mt-1 text-xs text-[var(--mot-muted)]">
+                    Enables 1 AP Guard (Base + Block Skill).
+                  </p>
+                }
+              </div>
+
+              <!-- Requires Aim Toggle -->
+              <button
+                type="button"
+                (click)="weaponForm.requires_aim = !weaponForm.requires_aim"
+                class="flex flex-col justify-between rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#C4491A]]="weaponForm.requires_aim"
+                [class.bg-[var(--mot-surface)]]="true"
+                [class.border-[var(--mot-border)]]="!weaponForm.requires_aim"
+              >
+                <div class="flex items-center justify-between w-full">
+                  <span class="font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                    Requires Aim
+                  </span>
+                  <span
+                    class="rounded px-1.5 py-0.5 font-mono-num text-xs font-bold"
+                    [class.bg-[#C4491A]]="weaponForm.requires_aim"
+                    [class.text-white]="weaponForm.requires_aim"
+                    [class.bg-[var(--mot-well)]]="!weaponForm.requires_aim"
+                    [class.text-[var(--mot-muted)]]="!weaponForm.requires_aim"
+                  >
+                    {{ weaponForm.requires_aim ? '1 AP Aim' : 'No' }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-[var(--mot-muted)]">
+                  Ranged weapons that require 1 AP Aim before Shoot.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          <!-- Row 4: Weapon Trait Name & Keyword-Enabled Trait Description -->
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-12">
+            <div class="sm:col-span-4">
+              <label class="block text-xs font-bold text-[var(--mot-text)]">
+                Weapon Trait Name
+              </label>
+              <input
+                type="text"
+                name="wepTraitName"
+                [(ngModel)]="weaponForm.trait_name"
+                required
+                placeholder="e.g. Cleaving, Versatile"
+                class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <div class="sm:col-span-8">
+              <app-keyword-textarea
+                inputId="wepTraitDesc"
+                label="Trait Description (Type [ to insert Special Words)"
+                [value]="weaponForm.trait_description"
+                (valueChange)="weaponForm.trait_description = $event"
+                [rows]="2"
+                (requestCreateKeyword)="openNewKeywordModal($event)"
+                placeholder="e.g. Even on a defended hit, target loses 3 [SP]. Cannot be used with a Shield while [Two-Handed]."
+              />
+            </div>
+          </div>
+
+          <!-- Row 5: Automated Mechanical Rule Hooks (Optional) -->
+          <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3">
+            <div class="text-xs font-bold text-[var(--mot-text)]">
+              Automated Sheet &amp; Resolution Rule Hooks (Optional)
+            </div>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                  Parry Roll Bonus
+                </label>
+                <input
+                  type="number"
+                  name="wepParryBonus"
+                  [(ngModel)]="weaponForm.parry_roll_bonus"
+                  min="0"
+                  max="5"
+                  class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                  Flawless Parry +SP
+                </label>
+                <input
+                  type="number"
+                  name="wepFlawlessSp"
+                  [(ngModel)]="weaponForm.flawless_parry_bonus_sp_damage"
+                  min="0"
+                  max="10"
+                  class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                  Pierce Armor DR
+                </label>
+                <input
+                  type="number"
+                  name="wepIgnoreDr"
+                  [(ngModel)]="weaponForm.ignore_armor_dr"
+                  min="0"
+                  max="10"
+                  class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                  Defended Chip SP
+                </label>
+                <input
+                  type="number"
+                  name="wepChipSp"
+                  [(ngModel)]="weaponForm.defended_sp_damage"
+                  min="0"
+                  max="10"
+                  class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 6: Weapon Icon & Accent Color Picker -->
+          <app-icon-picker
+            label="Weapon Icon &amp; Accent Color"
+            [icon]="weaponForm.icon"
+            [color]="weaponForm.icon_color"
+            [tintCustom]="weaponForm.icon_tint_custom"
+            (iconChange)="weaponForm.icon = $event"
+            (colorChange)="weaponForm.icon_color = $event"
+            (tintCustomChange)="weaponForm.icon_tint_custom = $event"
+          />
+
+          <div class="flex items-center justify-end gap-2.5 border-t border-[var(--mot-border)] pt-4">
+            <button
+              type="button"
+              (click)="closeWeaponModal()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              [disabled]="compendiumStore.isLoading()"
+              class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              @if (compendiumStore.isLoading()) {
+                <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                  <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Forging...</span>
+              } @else {
+                <span>{{ editingWeaponId() ? 'Save Weapon Changes' : 'Forge Weapon' }}</span>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+
+  <!-- ================================================================= -->
+  <!-- MODAL 5: DESTRUCTIVE ACTION CONFIRMATION DIALOG                   -->
+  <!-- ================================================================= -->
+  <app-confirm-dialog
+    [open]="!!pendingDelete()"
+    [title]="pendingDelete()?.title ?? 'Confirm Deletion'"
+    [itemName]="pendingDelete()?.itemName ?? ''"
+    [badge]="pendingDelete()?.badge ?? ''"
+    [message]="pendingDelete()?.message ?? ''"
+    [warningNote]="pendingDelete()?.warningNote ?? ''"
+    [confirmLabel]="pendingDelete()?.confirmLabel ?? 'Delete Permanently'"
+    [showArchiveOption]="isPendingTargetActive()"
+    [isLoading]="compendiumStore.isLoading()"
+    (confirm)="executeConfirmDelete()"
+    (archiveInstead)="executeArchiveInstead()"
+    (cancel)="cancelConfirmDelete()"
+  />
+</div>

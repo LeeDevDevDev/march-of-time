@@ -1,4 +1,5 @@
 import { Component, HostListener, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import {
   Router,
   RouterLink,
@@ -6,25 +7,35 @@ import {
   RouterOutlet,
 } from '@angular/router';
 import { AuthStore } from './core/auth/auth.store';
+import { NotificationStore } from './core/notifications/notification.store';
 import { ThemeStore } from './core/theme/theme.store';
+import { ToastViewportComponent } from './shared/notifications/toast-viewport.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, DatePipe, ToastViewportComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App {
   readonly authStore = inject(AuthStore);
   readonly themeStore = inject(ThemeStore);
+  readonly notificationStore = inject(NotificationStore);
   private readonly router = inject(Router);
 
   readonly userMenuOpen = signal(false);
 
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.notificationStore.closeDrawer();
     this.userMenuOpen.update((open) => !open);
+  }
+
+  toggleNotifications(event: MouseEvent): void {
+    event.stopPropagation();
+    this.userMenuOpen.set(false);
+    this.notificationStore.toggleDrawer();
   }
 
   closeUserMenu(): void {
@@ -50,6 +61,7 @@ export class App {
     if (this.userMenuOpen()) {
       this.userMenuOpen.set(false);
     }
+    this.notificationStore.closeDrawer();
   }
 
   @HostListener('document:keydown.escape')
@@ -57,5 +69,6 @@ export class App {
     if (this.userMenuOpen()) {
       this.userMenuOpen.set(false);
     }
+    this.notificationStore.closeDrawer();
   }
 }

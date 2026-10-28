@@ -7,7 +7,12 @@ import {
   PerkRuleHooks,
   SkillTreeModel,
   WeaponModel,
+  WeaponPropertyTag,
   formatRuleHookBadges,
+  getHeavyWeaponBlockBase,
+  getWeaponPropertyTags,
+  isWeaponHeavy,
+  isWeaponTwoHanded,
 } from '../../../core/compendium/compendium.model';
 
 export {
@@ -19,7 +24,12 @@ export {
   type PerkRuleHooks,
   type SkillTreeModel,
   type WeaponModel,
+  type WeaponPropertyTag,
   formatRuleHookBadges,
+  getHeavyWeaponBlockBase,
+  getWeaponPropertyTags,
+  isWeaponHeavy,
+  isWeaponTwoHanded,
 };
 
 export type FieldSkillName =
@@ -44,7 +54,10 @@ export const ATTRIBUTE_LIST: {
   { name: 'Brawn', summary: 'Heavy weapon impact, grappling force, and raw physical power.' },
   { name: 'Agility', summary: 'Footwork, light blades, Dodge defense, and stealth.' },
   { name: 'Technique', summary: 'Martial precision, Parry timing, ranged aim, and craft.' },
-  { name: 'Iron', summary: 'Max HP (+2/pt), Max SP (+2/pt), Shield Block reinforcement, and grit.' },
+  {
+    name: 'Iron',
+    summary: 'Max HP (+2/pt), Max SP (+1/pt), Stance Recovery (2 + Iron SP), and physical grit.',
+  },
   { name: 'Cunning', summary: 'Tactical awareness, Feints, lore, perception, and field craft.' },
 ];
 
@@ -53,10 +66,34 @@ export const COMBAT_SKILL_LIST: {
   govHint: string;
   summary: string;
 }[] = [
-  { name: 'Strike', govHint: 'Weapon Attr', summary: 'Added to melee attack rolls (2d10 + Attr + Strike).' },
-  { name: 'Shoot', govHint: 'Weapon Attr', summary: 'Added to ranged attack rolls (2d10 + Attr + Shoot).' },
-  { name: 'Parry', govHint: 'Technique', summary: 'Deflects attacks (2d10 + Technique + Parry); raises Max SP if >= Dodge.' },
-  { name: 'Dodge', govHint: 'Agility', summary: 'Evades attacks & shifts 1 tile (2d10 + Agility + Dodge); raises Max SP if >= Parry.' },
+  {
+    name: 'Strike',
+    govHint: 'Weapon Attr',
+    summary: 'Added to melee attack rolls (2d10 + Attr + Strike).',
+  },
+  {
+    name: 'Shoot',
+    govHint: 'Weapon Attr',
+    summary: 'Added to ranged attack rolls (2d10 + Attr + Shoot).',
+  },
+  {
+    name: 'Parry',
+    govHint: 'Technique',
+    summary:
+      'Deflects attacks (2d10 + Technique + Parry); Buckler enables Martial Parry Flawless Counter.',
+  },
+  {
+    name: 'Dodge',
+    govHint: 'Agility',
+    summary:
+      'Evades attacks & shifts 1 tile (2d10 + Agility + Dodge); disabled by Heavy Armor or Tower Shield.',
+  },
+  {
+    name: 'Block',
+    govHint: 'Shield / Heavy Base',
+    summary:
+      'Added to Raise Shield or Heavy Weapon Block (1 AP): reduces non-Piercing damage by Base + Block.',
+  },
 ];
 
 export const FIELD_SKILL_LIST: {
@@ -77,24 +114,121 @@ export const FIELD_SKILL_LIST: {
   { name: 'Lore', attrA: 'Technique', attrB: 'Cunning', summary: 'History, tactics, alchemy, and ancient records.' },
 ];
 
-export const ARMOR_TIERS: Record<
-  ArmorTier,
-  { label: string; hpDr: number; speedPenaltyTiles: number; description: string }
-> = {
-  None: { label: 'Unarmored', hpDr: 0, speedPenaltyTiles: 0, description: '0 HP DR · Full 4-tile mobility' },
-  Light: { label: 'Light Armor', hpDr: 1, speedPenaltyTiles: 0, description: '1 HP DR · Full 4-tile mobility' },
-  Medium: { label: 'Medium Armor', hpDr: 2, speedPenaltyTiles: 0, description: '2 HP DR · Full 4-tile mobility' },
-  Heavy: { label: 'Heavy Armor', hpDr: 4, speedPenaltyTiles: 1, description: '4 HP DR · -1 Tile per Move AP' },
+export interface ArmorTierSpec {
+  label: string;
+  armorSp: number;
+  hpDr: number;
+  allowsDodge: boolean;
+  speedPenaltyTiles: number;
+  scalingTiers: { tier: 1 | 2 | 3; sp: number; dr: number }[];
+  description: string;
+}
+
+export const ARMOR_TIERS: Record<ArmorTier, ArmorTierSpec> = {
+  None: {
+    label: 'Unarmored',
+    armorSp: 0,
+    hpDr: 0,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    scalingTiers: [
+      { tier: 1, sp: 0, dr: 0 },
+      { tier: 2, sp: 0, dr: 0 },
+      { tier: 3, sp: 0, dr: 0 },
+    ],
+    description: '+0 SP · +0 DR · Full Dodge & mobility',
+  },
+  Light: {
+    label: 'Light Armor',
+    armorSp: 2,
+    hpDr: 1,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    scalingTiers: [
+      { tier: 1, sp: 2, dr: 1 },
+      { tier: 2, sp: 4, dr: 2 },
+      { tier: 3, sp: 6, dr: 3 },
+    ],
+    description: '+2 SP (scales +4, +6) · +1 DR (scales +2, +3) · Allows Dodge',
+  },
+  Medium: {
+    label: 'Medium Armor',
+    armorSp: 1,
+    hpDr: 2,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    scalingTiers: [
+      { tier: 1, sp: 1, dr: 2 },
+      { tier: 2, sp: 2, dr: 4 },
+      { tier: 3, sp: 4, dr: 6 },
+    ],
+    description: '+1 SP (scales +2, +4) · +2 DR (scales +4, +6) · Allows Dodge',
+  },
+  Heavy: {
+    label: 'Heavy Armor',
+    armorSp: 3,
+    hpDr: 3,
+    allowsDodge: false,
+    speedPenaltyTiles: 0,
+    scalingTiers: [
+      { tier: 1, sp: 3, dr: 3 },
+      { tier: 2, sp: 6, dr: 6 },
+      { tier: 3, sp: 9, dr: 9 },
+    ],
+    description: '+3 SP & +3 DR (scales +6/+6, +9/+9) · Trades off Dodge',
+  },
 };
 
-export const SHIELD_TIERS: Record<
-  ShieldTier,
-  { label: string; blockValue: number; speedPenaltyTiles: number; description: string }
-> = {
-  None: { label: 'No Shield', blockValue: 0, speedPenaltyTiles: 0, description: 'Cannot declare Shield Block' },
-  Buckler: { label: 'Buckler', blockValue: 2, speedPenaltyTiles: 0, description: 'Block Reduction: 2 + Iron' },
-  Heater: { label: 'Heater Shield', blockValue: 4, speedPenaltyTiles: 0, description: 'Block Reduction: 4 + Iron' },
-  Tower: { label: 'Tower Shield', blockValue: 6, speedPenaltyTiles: 1, description: 'Block Reduction: 6 + Iron · -1 Tile Move' },
+export interface ShieldTierSpec {
+  label: string;
+  blockValue: number;
+  usesRaiseShield: boolean;
+  enablesMartialParry: boolean;
+  allowsDodge: boolean;
+  speedPenaltyTiles: number;
+  description: string;
+}
+
+export const SHIELD_TIERS: Record<ShieldTier, ShieldTierSpec> = {
+  None: {
+    label: 'No Shield',
+    blockValue: 0,
+    usesRaiseShield: false,
+    enablesMartialParry: false,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    description: 'No Raise Shield or Buckler Martial Parry',
+  },
+  Buckler: {
+    label: 'Buckler',
+    blockValue: 0,
+    usesRaiseShield: false,
+    enablesMartialParry: true,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    description:
+      'No Raise Shield · Enables Martial Parry (2d10 + Technique + Parry, 1 AP reaction) for Flawless Counter SP DMG',
+  },
+  Heater: {
+    label: 'Medium / Standard Shield',
+    blockValue: 3,
+    usesRaiseShield: true,
+    enablesMartialParry: false,
+    allowsDodge: true,
+    speedPenaltyTiles: 0,
+    description:
+      'Raise Shield (1 AP action): Base 3 + Block Skill mitigation against all non-Piercing attacks for the round',
+  },
+  Tower: {
+    label: 'Heavy / Tower Shield',
+    blockValue: 5,
+    usesRaiseShield: true,
+    enablesMartialParry: false,
+    allowsDodge: false,
+    speedPenaltyTiles: 0,
+    description:
+      'Raise Shield (1 AP action): Base 5 + Block Skill mitigation (+2 over Standard) · Trades off Dodge',
+  },
 };
 
 export interface CharacterModel {
@@ -121,8 +255,20 @@ export interface CharacterModel {
 export interface DerivedCharacterStats {
   maxHp: number;
   maxSp: number;
+  armorSp: number;
   armorDr: number;
+  stanceRecoverySp: number;
   shieldBlockTotal: number;
+  usesRaiseShield: boolean;
+  enablesMartialParry: boolean;
+  canDodge: boolean;
+  activeWeaponIsTwoHanded: boolean;
+  activeWeaponIsHeavy: boolean;
+  shieldDisabledByTwoHanded: boolean;
+  canBlockWithHeavyWeapon: boolean;
+  blockSourceType: 'shield' | 'heavy_weapon' | 'none';
+  blockSourceLabel: string;
+  blockBaseValue: number;
   moveTiles: number;
   moveFeet: number;
   attributeBudget: number;
@@ -174,12 +320,14 @@ export function computeDerivedStats(
   const strike = char.combat_skills.Strike ?? 0;
   const parry = char.combat_skills.Parry ?? 0;
   const dodge = char.combat_skills.Dodge ?? 0;
+  const blockSkill = char.combat_skills.Block ?? 0;
 
   const unlockedPerks = perkNodes.filter((p) => char.unlocked_perk_ids.includes(p.id));
 
   // Aggregate structured passive rule_hooks from unlocked perks
   let perkBonusHp = 0;
   let perkBonusSp = 0;
+  let perkBonusStanceRecovery = 0;
   let perkBonusArmorDr = 0;
   let perkBonusMoveTiles = 0;
   let perkBonusAttackMod = 0;
@@ -192,6 +340,7 @@ export function computeDerivedStats(
     const h = perk.rule_hooks ?? {};
     perkBonusHp += Number(h.bonus_max_hp ?? 0);
     perkBonusSp += Number(h.bonus_max_sp ?? 0);
+    perkBonusStanceRecovery += Number(h.bonus_stance_recovery ?? 0);
     perkBonusArmorDr += Number(h.bonus_armor_dr ?? 0);
     perkBonusMoveTiles += Number(h.bonus_move_tiles ?? 0);
     perkBonusAttackMod += Number(h.bonus_attack_mod ?? 0);
@@ -201,24 +350,58 @@ export function computeDerivedStats(
     perkBonusBlockMod += Number(h.bonus_block_mod ?? 0);
   }
 
-  // Formulas from mot-playtest.xlsx + Passive Perk Rule Hooks:
-  // Max HP = 5 + (Iron * 2) + Perk Bonuses
-  // Max SP = 10 + (Iron * 2) + (MAX(Parry, Dodge) * 2) + Perk Bonuses
-  const maxHp = 5 + iron * 2 + perkBonusHp;
-  const maxSp = 10 + iron * 2 + Math.max(parry, dodge) * 2 + perkBonusSp;
+  const weaponSlot1 = weapons.find((w) => w.id === char.weapon_slot_1_id) ?? null;
+  const weaponSlot2 = weapons.find((w) => w.id === char.weapon_slot_2_id) ?? null;
+  const activeWeapon = char.active_weapon_slot === 1 ? weaponSlot1 : weaponSlot2;
+
+  const activeWeaponIsTwoHanded = isWeaponTwoHanded(activeWeapon);
+  const activeWeaponIsHeavy = isWeaponHeavy(activeWeapon);
+  const shieldDisabledByTwoHanded = activeWeaponIsTwoHanded && char.equipped_shield !== 'None';
 
   const armorSpec = ARMOR_TIERS[char.equipped_armor] ?? ARMOR_TIERS.None;
-  const shieldSpec = SHIELD_TIERS[char.equipped_shield] ?? SHIELD_TIERS.None;
+  const effectiveShieldTier: ShieldTier = activeWeaponIsTwoHanded
+    ? 'None'
+    : char.equipped_shield;
+  const shieldSpec = SHIELD_TIERS[effectiveShieldTier] ?? SHIELD_TIERS.None;
+
+  // Updated March of Time Core Formulas:
+  // 1. Stance Recovery = 2 + Iron + Perk Bonuses
+  // 2. Max SP = 2 + Iron + Armor SP + Perk Bonuses
+  // 3. Max HP = 5 + (Iron * 2) + Perk Bonuses
+  const stanceRecoverySp = 2 + iron + perkBonusStanceRecovery;
+  const armorSp = armorSpec.armorSp;
+  const maxSp = 2 + iron + armorSp + perkBonusSp;
+  const maxHp = 5 + iron * 2 + perkBonusHp;
+  const armorDr = armorSpec.hpDr + perkBonusArmorDr;
+
+  const canDodge = armorSpec.allowsDodge && shieldSpec.allowsDodge;
+  const enablesMartialParry = shieldSpec.enablesMartialParry;
+
+  // Heavy weapons can be used to Block even without a shield (or while Two-Handed disables a shield)
+  const canBlockWithHeavyWeapon = activeWeaponIsHeavy;
+  const heavyBlockBase = getHeavyWeaponBlockBase(activeWeapon);
+
+  let blockSourceType: 'shield' | 'heavy_weapon' | 'none' = 'none';
+  let blockBaseValue = 0;
+  let blockSourceLabel = 'No Shield / Heavy Weapon';
+
+  if (shieldSpec.usesRaiseShield && (!activeWeaponIsHeavy || shieldSpec.blockValue >= heavyBlockBase)) {
+    blockSourceType = 'shield';
+    blockBaseValue = shieldSpec.blockValue;
+    blockSourceLabel = shieldSpec.label;
+  } else if (activeWeaponIsHeavy) {
+    blockSourceType = 'heavy_weapon';
+    blockBaseValue = heavyBlockBase;
+    blockSourceLabel = activeWeapon ? `${activeWeapon.name} (Heavy Guard)` : 'Heavy Weapon Guard';
+  }
+
+  const usesRaiseShield = blockSourceType !== 'none';
 
   const moveTiles = Math.max(
     1,
     4 - armorSpec.speedPenaltyTiles - shieldSpec.speedPenaltyTiles + perkBonusMoveTiles
   );
   const moveFeet = moveTiles * 5;
-
-  const weaponSlot1 = weapons.find((w) => w.id === char.weapon_slot_1_id) ?? null;
-  const weaponSlot2 = weapons.find((w) => w.id === char.weapon_slot_2_id) ?? null;
-  const activeWeapon = char.active_weapon_slot === 1 ? weaponSlot1 : weaponSlot2;
 
   const govAttrVal = activeWeapon ? (char.attributes[activeWeapon.gov_attribute] ?? 0) : brawn;
   const govSkillVal = activeWeapon ? (char.combat_skills[activeWeapon.gov_skill] ?? strike) : strike;
@@ -229,21 +412,30 @@ export function computeDerivedStats(
   const rapierBonus = Number(activeWeapon?.rule_hooks?.['parry_roll_bonus'] ?? 0);
   const parryMod = technique + parry + rapierBonus + perkBonusParryMod;
   const dodgeMod = agility + dodge + perkBonusDodgeMod;
-  const blockMod = iron + parry + perkBonusBlockMod;
+
+  // 4. Block Combat Skill: Mitigation = (Shield Base or Heavy Weapon Base) + Block Skill + Perk Bonuses
+  const blockMod = blockSkill + perkBonusBlockMod;
+  const shieldBlockTotal = usesRaiseShield
+    ? blockBaseValue + blockSkill + perkBonusBlockMod
+    : 0;
 
   const versatileBonus = Number(
     activeWeapon?.rule_hooks?.['flawless_parry_bonus_sp_damage'] ?? 0
   );
   const flawlessParryCounterSp = 2 + parryMod + versatileBonus;
 
+  // 5. Level-up Point Budgets:
+  // Even Levels (2, 4, 6, 8, 10) grant +2 Combat Skill Points and +2 Field Skill Points per even level
   const level = Math.max(1, char.level);
+  const evenLevels = Math.floor(level / 2);
+
   const attributeBudget = 5 + Math.floor((level - 1) / 2);
   const attributeSpent = Object.values(char.attributes).reduce((a, b) => a + b, 0);
 
-  const combatSkillBudget = 2 + Math.floor(level / 2);
+  const combatSkillBudget = 2 + evenLevels * 2;
   const combatSkillSpent = Object.values(char.combat_skills).reduce((a, b) => a + b, 0);
 
-  const fieldSkillBudget = 4 + Math.floor(level / 2);
+  const fieldSkillBudget = 4 + evenLevels * 2;
   const fieldSkillSpent = Object.values(char.field_skills).reduce((a, b) => a + b, 0);
 
   const perkBudget = level;
@@ -271,9 +463,20 @@ export function computeDerivedStats(
   return {
     maxHp,
     maxSp,
-    armorDr: armorSpec.hpDr + perkBonusArmorDr,
-    shieldBlockTotal:
-      shieldSpec.blockValue > 0 ? shieldSpec.blockValue + iron + perkBonusBlockMod : 0,
+    armorSp,
+    armorDr,
+    stanceRecoverySp,
+    shieldBlockTotal,
+    usesRaiseShield,
+    enablesMartialParry,
+    canDodge,
+    activeWeaponIsTwoHanded,
+    activeWeaponIsHeavy,
+    shieldDisabledByTwoHanded,
+    canBlockWithHeavyWeapon,
+    blockSourceType,
+    blockSourceLabel,
+    blockBaseValue,
     moveTiles,
     moveFeet,
     attributeBudget,

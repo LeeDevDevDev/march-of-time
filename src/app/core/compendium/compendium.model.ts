@@ -1,5 +1,5 @@
 export type AttributeName = 'Brawn' | 'Agility' | 'Technique' | 'Iron' | 'Cunning';
-export type CombatSkillName = 'Strike' | 'Shoot' | 'Parry' | 'Dodge';
+export type CombatSkillName = 'Strike' | 'Shoot' | 'Parry' | 'Dodge' | 'Block';
 export type CombatTag = 'Crushing' | 'Sweeping' | 'Piercing' | 'None';
 export type CombatStatusEffect = 'None' | 'Sundered' | 'Staggered' | 'Bleeding' | 'Pinned';
 
@@ -15,6 +15,7 @@ export interface KeywordDefinition {
   term: string;
   category: KeywordCategory | string;
   summary: string;
+  is_active?: boolean;
 }
 
 /**
@@ -26,49 +27,77 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Crushing',
     category: 'Defense Triangle Tag',
     summary:
-      'Overwhelming momentum that cannot be Parried. The defender must declare [Dodge] or [Shield Block], or take the full hit.',
+      'Overwhelming momentum that cannot be Parried. The defender must declare [Dodge] or rely on [Raise Shield] ([Shield Block]), or take the full hit.',
   },
   {
     id: 'kw-piercing',
     term: 'Piercing',
     category: 'Defense Triangle Tag',
     summary:
-      'Needle-point thrust that bypasses shields and cannot be Blocked. The defender must declare [Parry] or [Dodge].',
+      'Needle-point thrust that bypasses shields and ignores [Raise Shield] ([Shield Block]). The defender must declare [Parry] or [Dodge].',
   },
   {
     id: 'kw-sweeping',
     term: 'Sweeping',
     category: 'Defense Triangle Tag',
     summary:
-      'Wide horizontal arc that covers adjacent escape lanes and cannot be Dodged. The defender must declare [Parry] or [Shield Block].',
+      'Wide horizontal arc that covers adjacent escape lanes and cannot be Dodged. The defender must declare [Parry] or rely on [Raise Shield] ([Shield Block]).',
   },
   {
     id: 'kw-parry',
     term: 'Parry',
     category: 'Active Defense',
     summary:
-      'Costs 1 AP before the attack roll (2d10 + Technique + Parry). Beats the attack to negate all damage; winning by +5 or more triggers a Flawless Counter (2 + Parry Mod [SP] damage).',
+      'Costs 1 AP Reaction before the attack roll (2d10 + Technique + Parry). Beats the attack to negate all damage; a Buckler enables Martial Parry to deal Flawless Counter (2 + Parry Mod [SP] damage) on +5 or more.',
   },
   {
     id: 'kw-dodge',
     term: 'Dodge',
     category: 'Active Defense',
     summary:
-      'Costs 1 AP before the attack roll (2d10 + Agility + Dodge) and shifts you 1 Tile. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent.',
+      'Costs 1 AP Reaction before the attack roll (2d10 + Agility + Dodge) and shifts you 1 Tile. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent. Disabled by Heavy Armor or a Heavy/Tower Shield.',
+  },
+  {
+    id: 'kw-raise-shield',
+    term: 'Raise Shield',
+    category: 'Active Defense',
+    summary:
+      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Heavy] Weapon Guard): Activates your [Shield Block] mitigation (Shield or Heavy Weapon Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn.',
   },
   {
     id: 'kw-shield-block',
     term: 'Shield Block',
     category: 'Active Defense',
     summary:
-      'Costs 1 AP with an equipped shield (2d10 + Iron + [Parry]). Even if the attack hits, reduces incoming [SP] damage by Shield Value + Iron.',
+      'Active while [Raise Shield] / Guard (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, [Heavy] Weapon Base 2; no roll required, remaining damage goes to [SP]).',
+  },
+  {
+    id: 'kw-two-handed',
+    term: 'Two-Handed',
+    category: 'Core Mechanic',
+    summary:
+      'Requires both hands to wield. You cannot use an off-hand Shield while a Two-Handed weapon is active (any equipped shield is stowed).',
+  },
+  {
+    id: 'kw-heavy',
+    term: 'Heavy',
+    category: 'Core Mechanic',
+    summary:
+      'Massive weapon heft that can be braced defensively: allows you to use [Raise Shield] / Guard (1 AP) to Block incoming non-[Piercing] attacks using your Block Skill (Heavy Weapon Base 2 + Block Skill), even while [Two-Handed] without a shield.',
+  },
+  {
+    id: 'kw-stance-recovery',
+    term: 'Stance Recovery',
+    category: 'Core Mechanic',
+    summary:
+      '1 AP Action on your turn: Steady your breathing and posture to recover 2 + Iron [SP].',
   },
   {
     id: 'kw-sundered',
     term: 'Sundered',
     category: 'Combat Status',
     summary:
-      'Armor plates and guard are compromised: target suffers -2 [Armor DR] and -2 to [Shield Block] rolls until the end of their next turn.',
+      'Armor plates and guard are compromised: target suffers -2 [Armor DR] and -2 to [Shield Block] mitigation until the end of their next turn.',
   },
   {
     id: 'kw-staggered',
@@ -96,7 +125,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'SP',
     category: 'Core Mechanic',
     summary:
-      'Stamina & Poise (10 + Iron×2 + MAX([Parry],[Dodge])×2). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP].',
+      'Stamina & Poise (2 + Iron + Armor SP). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP]. Spend 1 AP on [Stance Recovery] to restore 2 + Iron SP.',
   },
   {
     id: 'kw-hp',
@@ -110,7 +139,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Armor DR',
     category: 'Core Mechanic',
     summary:
-      'Flat reduction applied to incoming [HP] damage when your [SP] is at 0 (Light 1, Medium 2, Heavy 4).',
+      'Flat damage reduction from equipped armor: Light (+1/+2/+3 DR, +2/+4/+6 [SP]), Medium (+2/+4/+6 DR, +1/+2/+4 [SP]), Heavy (+3/+6/+9 DR & [SP], disables [Dodge]).',
   },
 ];
 
@@ -228,6 +257,7 @@ export interface PerkRuleHooks {
   // Automatic Character Sheet Stat Bonuses
   bonus_max_hp?: number;
   bonus_max_sp?: number;
+  bonus_stance_recovery?: number;
   bonus_armor_dr?: number;
   bonus_move_tiles?: number;
   bonus_attack_mod?: number;
@@ -244,15 +274,16 @@ export interface PerkRuleHooks {
   self_shift_tiles?: number;
   inflict_status?: CombatStatusEffect;
 
-  // Embedded Visual Metadata (persists automatically inside JSONB rule_hooks)
+  // Embedded Visual & Lifecycle Metadata (persists automatically inside JSONB rule_hooks)
   __icon?: string;
   __icon_color?: string;
   __icon_tint_custom?: boolean;
+  __is_active?: boolean;
 }
 
 export type EditableRuleHookKey = Exclude<
   keyof PerkRuleHooks,
-  'disallow_defense' | '__icon' | '__icon_color' | '__icon_tint_custom'
+  'disallow_defense' | '__icon' | '__icon_color' | '__icon_tint_custom' | '__is_active'
 >;
 
 export interface RuleHookDefinition {
@@ -314,10 +345,17 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   // Automatic Sheet Stat Modifiers
   {
     key: 'bonus_max_sp',
-    label: 'Bonus Max SP (Stamina & Poise)',
+    label: 'Bonus Max SP (Base 2 + Iron + Armor SP)',
     category: 'Sheet Stat Bonus',
     valueType: 'number',
     defaultValue: 2,
+  },
+  {
+    key: 'bonus_stance_recovery',
+    label: 'Bonus Stance Recovery SP (Base 2 + Iron)',
+    category: 'Sheet Stat Bonus',
+    valueType: 'number',
+    defaultValue: 1,
   },
   {
     key: 'bonus_max_hp',
@@ -370,12 +408,14 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   },
   {
     key: 'bonus_block_mod',
-    label: 'Bonus Shield Block Roll & Reduction',
+    label: 'Bonus Shield Block Mitigation (Shield Base + Block)',
     category: 'Sheet Stat Bonus',
     valueType: 'number',
     defaultValue: 1,
   },
 ];
+
+export type WeaponPropertyTag = 'Two-Handed' | 'Heavy';
 
 export interface WeaponModel {
   id: string;
@@ -392,6 +432,66 @@ export interface WeaponModel {
   trait_name: string;
   trait_description: string;
   rule_hooks: Record<string, unknown>;
+  is_active?: boolean;
+}
+
+/**
+ * Determines whether a weapon has the `Two-Handed` tag.
+ * Reads `weapon.rule_hooks['two_handed']` if explicitly set; otherwise defaults
+ * based on category/slug (`Heavy` and `Ranged` weapons like Greatsword, Warhammer, Shortbow).
+ */
+export function isWeaponTwoHanded(weapon: WeaponModel | null | undefined): boolean {
+  if (!weapon) return false;
+  const hooks = weapon.rule_hooks ?? {};
+  if (typeof hooks['two_handed'] === 'boolean') {
+    return hooks['two_handed'];
+  }
+  const cat = (weapon.category ?? '').toLowerCase();
+  const slug = (weapon.slug ?? '').toLowerCase();
+  return (
+    cat === 'heavy' ||
+    cat === 'ranged' ||
+    slug === 'greatsword' ||
+    slug === 'warhammer' ||
+    slug === 'shortbow'
+  );
+}
+
+/**
+ * Determines whether a weapon has the `Heavy` tag (can be braced to Block using `Block` Skill).
+ * Reads `weapon.rule_hooks['heavy']` if explicitly set; otherwise defaults to `true` for
+ * `Heavy` category weapons (`greatsword`, `warhammer`).
+ */
+export function isWeaponHeavy(weapon: WeaponModel | null | undefined): boolean {
+  if (!weapon) return false;
+  const hooks = weapon.rule_hooks ?? {};
+  if (typeof hooks['heavy'] === 'boolean') {
+    return hooks['heavy'];
+  }
+  const cat = (weapon.category ?? '').toLowerCase();
+  const slug = (weapon.slug ?? '').toLowerCase();
+  return cat === 'heavy' || slug === 'greatsword' || slug === 'warhammer';
+}
+
+/**
+ * Base Block mitigation when bracing a `Heavy` weapon to Block (`Raise Weapon Guard`, 1 AP).
+ * Defaults to `2` (`2 + Block Skill`).
+ */
+export function getHeavyWeaponBlockBase(weapon: WeaponModel | null | undefined): number {
+  if (!weapon || !isWeaponHeavy(weapon)) return 0;
+  const raw = Number(weapon.rule_hooks?.['heavy_block_base'] ?? 2);
+  return Number.isNaN(raw) || raw <= 0 ? 2 : raw;
+}
+
+/**
+ * Returns the list of weapon property tags (`['Two-Handed', 'Heavy']`, etc.) for display on cards and selectors.
+ */
+export function getWeaponPropertyTags(weapon: WeaponModel | null | undefined): WeaponPropertyTag[] {
+  if (!weapon) return [];
+  const tags: WeaponPropertyTag[] = [];
+  if (isWeaponTwoHanded(weapon)) tags.push('Two-Handed');
+  if (isWeaponHeavy(weapon)) tags.push('Heavy');
+  return tags;
 }
 
 export interface SkillTreeModel {
@@ -402,6 +502,7 @@ export interface SkillTreeModel {
   icon?: string | null;
   icon_color?: string | null;
   icon_tint_custom?: boolean | null;
+  is_active?: boolean;
 }
 
 export interface PerkNodeModel {
@@ -421,6 +522,27 @@ export interface PerkNodeModel {
   icon?: string | null;
   icon_color?: string | null;
   icon_tint_custom?: boolean | null;
+  is_active?: boolean;
+}
+
+/**
+ * Returns `true` if a Compendium entry is active (`is_active !== false` and `rule_hooks.__is_active !== false`).
+ * Archived (`is_active === false`) items are hidden from new character creation while remaining safe for existing characters.
+ */
+export function isCompendiumItemActive(
+  item:
+    | {
+        is_active?: boolean | null;
+        rule_hooks?: unknown;
+      }
+    | null
+    | undefined
+): boolean {
+  if (!item) return false;
+  if (item.is_active === false) return false;
+  const hooks = item.rule_hooks as Record<string, unknown> | undefined;
+  if (hooks && hooks['__is_active'] === false) return false;
+  return true;
 }
 
 export interface CompendiumIconPreset {
@@ -708,6 +830,88 @@ export function resolveNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisua
   };
 }
 
+/**
+ * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Weapon.
+ */
+export function resolveWeaponVisuals(weapon: WeaponModel): ResolvedCompendiumVisuals {
+  const key = `${weapon.slug} ${weapon.name} ${weapon.category}`.toLowerCase();
+
+  let defaultIcon = 'greatsword';
+  let defaultColor = '#FF8C5A';
+
+  if (key.includes('hammer') || key.includes('mace') || key.includes('maul')) {
+    defaultIcon = 'warhammer';
+    defaultColor = '#F59E0B';
+  } else if (key.includes('dagger') || key.includes('knife') || key.includes('stiletto')) {
+    defaultIcon = 'twin-daggers';
+    defaultColor = '#A78BFA';
+  } else if (key.includes('rapier') || key.includes('duel') || key.includes('foil')) {
+    defaultIcon = 'riposte';
+    defaultColor = '#38BDF8';
+  } else if (key.includes('spear') || key.includes('pike') || key.includes('halberd') || key.includes('lance')) {
+    defaultIcon = 'spear';
+    defaultColor = '#38B29A';
+  } else if (key.includes('axe')) {
+    defaultIcon = 'battleaxe';
+    defaultColor = '#F26464';
+  } else if (key.includes('bow') || key.includes('ranged') || key.includes('sling')) {
+    defaultIcon = 'bow';
+    defaultColor = '#38B29A';
+  } else if (key.includes('longsword') || key.includes('martial')) {
+    defaultIcon = 'greatsword';
+    defaultColor = '#38BDF8';
+  }
+
+  const hooks = weapon.rule_hooks ?? {};
+  const rawIcon = typeof hooks['__icon'] === 'string' ? hooks['__icon'].trim() : '';
+  const rawColor = typeof hooks['__icon_color'] === 'string' ? hooks['__icon_color'].trim() : '';
+  const rawTint = typeof hooks['__icon_tint_custom'] === 'boolean' ? hooks['__icon_tint_custom'] : true;
+
+  const icon = rawIcon || defaultIcon;
+  const color = rawColor || defaultColor;
+
+  return {
+    icon,
+    color,
+    tintCustom: rawTint,
+    isCustomUpload: isCustomIconUrl(icon),
+  };
+}
+
+/**
+ * Formats mechanical rule hook badges for a Weapon card in the Armory / Inspector.
+ */
+export function formatWeaponHookBadges(weapon: WeaponModel | null | undefined): string[] {
+  if (!weapon) return [];
+  const badges: string[] = [];
+  const hooks = weapon.rule_hooks ?? {};
+
+  if (weapon.requires_aim) {
+    badges.push('Requires Aim (1 AP)');
+  }
+  if (weapon.thrown_range_tiles && weapon.thrown_range_tiles > 0) {
+    badges.push(`Thrown (${weapon.thrown_range_tiles} Tiles)`);
+  }
+  const parryBonus = Number(hooks['parry_roll_bonus'] ?? 0);
+  if (parryBonus > 0) {
+    badges.push(`+${parryBonus} Parry Roll`);
+  }
+  const flawlessParryBonus = Number(hooks['flawless_parry_bonus_sp_damage'] ?? 0);
+  if (flawlessParryBonus > 0) {
+    badges.push(`+${flawlessParryBonus} Flawless Parry SP`);
+  }
+  const ignoreDr = Number(hooks['ignore_armor_dr'] ?? 0);
+  if (ignoreDr > 0) {
+    badges.push(`Pierces ${ignoreDr} Armor DR`);
+  }
+  const chipSp = Number(hooks['defended_sp_damage'] ?? 0);
+  if (chipSp > 0) {
+    badges.push(`${chipSp} SP Chip on Defended Hit`);
+  }
+
+  return badges;
+}
+
 export interface SkillTreeBranchNode {
   node: PerkNodeModel;
   children: SkillTreeBranchNode[];
@@ -875,6 +1079,9 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
   // Passive sheet modifiers
   if (hooks.bonus_max_sp) {
     badges.push(`+${hooks.bonus_max_sp} Max SP`);
+  }
+  if (hooks.bonus_stance_recovery) {
+    badges.push(`+${hooks.bonus_stance_recovery} Stance Recovery SP`);
   }
   if (hooks.bonus_max_hp) {
     badges.push(`+${hooks.bonus_max_hp} Max HP`);

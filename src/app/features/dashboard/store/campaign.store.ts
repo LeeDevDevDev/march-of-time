@@ -1,7 +1,8 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { AuthStore } from '../../../core/auth/auth.store';
-import { SupabaseService } from '../../../core/supabase/supabase.service';
+import { NotificationStore } from '../../../core/notifications/notification.store';
 import { GameCardModel } from '../models/campaign.model';
+import { CampaignService } from '../services/campaign.service';
 
 interface CampaignState {
   yourGames: GameCardModel[];
@@ -13,8 +14,9 @@ interface CampaignState {
 
 @Injectable({ providedIn: 'root' })
 export class CampaignStore {
-  private readonly supabase = inject(SupabaseService).client;
+  private readonly campaignService = inject(CampaignService);
   private readonly authStore = inject(AuthStore);
+  private readonly notifications = inject(NotificationStore);
 
   // Private encapsulated Signal State — starts genuinely empty, no fake data
   readonly #state = signal<CampaignState>({
@@ -53,60 +55,14 @@ export class CampaignStore {
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
 
     try {
-      // 1. Fetch "Your Games" (where signed-in user is the GM)
-      const { data: ownedData, error: ownedErr } = await this.supabase
-        .from('campaigns')
-        .select('*')
-        .eq('gm_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (ownedErr) {
-        if (ownedErr.code === 'PGRST205') {
-          this.#state.update((s) => ({
-            ...s,
-            isLoading: false,
-            needsMigration: true,
-          }));
-          return;
-        }
-        this.#state.update((s) => ({
-          ...s,
-          isLoading: false,
-          error: ownedErr.message,
-        }));
-        return;
-      }
-
-      // 2. Fetch "Games You Are In" (where signed-in user is a member)
-      const { data: memberRows, error: memberErr } = await this.supabase
-        .from('campaign_members')
-        .select('campaign_id, campaigns(*)')
-        .eq('user_id', userId);
-
-      if (memberErr && memberErr.code !== 'PGRST205') {
-        this.#state.update((s) => ({
-          ...s,
-          isLoading: false,
-          error: memberErr.message,
-        }));
-        return;
-      }
-
-      const joined: GameCardModel[] = [];
-      if (Array.isArray(memberRows)) {
-        for (const row of memberRows as unknown as { campaigns: GameCardModel | null }[]) {
-          if (row.campaigns && row.campaigns.gm_id !== userId) {
-            joined.push(row.campaigns);
-          }
-        }
-      }
-
+      const res = await this.campaignService.fetchUserCampaigns(userId);
       this.#state.update((s) => ({
         ...s,
-        yourGames: (ownedData as GameCardModel[]) ?? [],
-        joinedGames: joined,
+        yourGames: res.yourGames,
+        joinedGames: res.joinedGames,
+        needsMigration: res.needsMigration,
+        error: res.error,
         isLoading: false,
-        needsMigration: false,
       }));
     } catch {
       this.#state.update((s) => ({ ...s, isLoading: false }));
@@ -119,32 +75,32 @@ export class CampaignStore {
 
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
 
-    const { data, error } = await this.supabase
-      .from('campaigns')
-      .insert({
-        name: name.trim(),
-        cover_image_url: coverImageUrl.trim() || null,
-        gm_id: user.id,
-      })
-      .select('*')
-      .single();
+    const res = await this.campaignService.insertCampaign({
+      name: name.trim(),
+      cover_image_url: coverImageUrl.trim() || null,
+      gm_id: user.id,
+    });
 
-    if (error) {
+    if (res.error || !res.data) {
       this.#state.update((s) => ({
         ...s,
         isLoading: false,
-        needsMigration: error.code === 'PGRST205',
-        error: error.message,
+        needsMigration: res.needsMigration,
+        error: res.error,
       }));
       return false;
     }
 
-    const created = data as GameCardModel;
+    const created = res.data;
     this.#state.update((s) => ({
       ...s,
       yourGames: [created, ...s.yourGames],
       isLoading: false,
     }));
+    this.notifications.success(
+      'Campaign Created',
+      `"${created.name}" is live. Invite code: ${created.invite_code}`
+    );
     return true;
   }
 
@@ -155,44 +111,42 @@ export class CampaignStore {
 
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
 
-    const { data: found, error: findErr } = await this.supabase
-      .from('campaigns')
-      .select('*')
-      .eq('invite_code', code)
-      .maybeSingle();
+    const foundRes = await this.campaignService.findCampaignByInviteCode(code);
 
-    if (findErr || !found) {
+    if (foundRes.error || !foundRes.data) {
       this.#state.update((s) => ({
         ...s,
         isLoading: false,
-        error: findErr?.message ?? `No game found with invite code "${code}".`,
+        error: foundRes.error,
       }));
+      this.notifications.error(
+        'Invalid Invite Code',
+        foundRes.error ?? `No game found matching code "${code}".`
+      );
       return false;
     }
 
-    const campaign = found as GameCardModel;
+    const campaign = foundRes.data;
     if (campaign.gm_id === user.id) {
       this.#state.update((s) => ({
         ...s,
         isLoading: false,
-        error: 'You are the Game Master of this game (it is already in Your Games).',
+        error:
+          'You are the Game Master of this game (it is already in Your Games).',
       }));
       return false;
     }
 
-    const { error: joinErr } = await this.supabase.from('campaign_members').insert({
-      campaign_id: campaign.id,
-      user_id: user.id,
-    });
+    const joinErr = await this.campaignService.insertCampaignMember(
+      campaign.id,
+      user.id
+    );
 
     if (joinErr) {
       this.#state.update((s) => ({
         ...s,
         isLoading: false,
-        error:
-          joinErr.code === '23505'
-            ? 'You have already joined this game.'
-            : joinErr.message,
+        error: joinErr,
       }));
       return false;
     }
@@ -202,15 +156,16 @@ export class CampaignStore {
       joinedGames: [campaign, ...s.joinedGames],
       isLoading: false,
     }));
+    this.notifications.success(
+      'Joined Campaign',
+      `You have joined "${campaign.name}".`
+    );
     return true;
   }
 
   async markGamePlayed(gameId: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.supabase
-      .from('campaigns')
-      .update({ last_played_at: now })
-      .eq('id', gameId);
+    await this.campaignService.updateCampaignLastPlayed(gameId, now);
 
     this.#state.update((s) => ({
       ...s,

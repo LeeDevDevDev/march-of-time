@@ -151,3 +151,9 @@ select:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: #C4491A;
 }
+
+.mot-canvas-grid {
+  background-color: #0D1615;
+  background-image: radial-gradient(#243B37 1.25px, transparent 1.25px);
+  background-size: 26px 26px;
+}

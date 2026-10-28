@@ -1,9 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { User } from '@supabase/supabase-js';
-import { SupabaseService } from '../supabase/supabase.service';
 import { ThemeStore } from '../theme/theme.store';
 import { UserProfile, sanitizeHandle } from './auth.model';
+import { AuthService } from './auth.service';
 
 interface AuthState {
   user: User | null;
@@ -16,7 +16,7 @@ interface AuthState {
 
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
-  private readonly supabase = inject(SupabaseService).client;
+  private readonly authService = inject(AuthService);
   private readonly themeStore = inject(ThemeStore);
   private readonly router = inject(Router);
 
@@ -59,10 +59,6 @@ export class AuthStore {
     return null;
   });
 
-  /**
-   * True when the signed-in user has admin privileges (from public.profiles.is_admin
-   * or user_metadata.is_admin), unlocking the Content Manager.
-   */
   readonly isAdmin = computed<boolean>(() => {
     const profAdmin = this.#state().profile?.is_admin;
     if (typeof profAdmin === 'boolean') return profAdmin;
@@ -84,11 +80,10 @@ export class AuthStore {
   private async initAuthListener(): Promise<void> {
     this.#state.update((s) => ({ ...s, isLoading: true }));
     try {
-      const { data } = await this.supabase.auth.getSession();
-      const sessionUser = data.session?.user ?? null;
+      const sessionUser = await this.authService.getSessionUser();
 
       if (sessionUser) {
-        const profile = await this.fetchProfile(sessionUser.id);
+        const profile = await this.loadAndHydrateProfile(sessionUser.id);
         this.#state.update((s) => ({
           ...s,
           user: sessionUser,
@@ -106,7 +101,7 @@ export class AuthStore {
         }));
       }
 
-      this.supabase.auth.onAuthStateChange(async (event, session) => {
+      this.authService.onAuthStateChange(async (event, session) => {
         const usr = session?.user ?? null;
 
         if (!usr) {
@@ -128,7 +123,7 @@ export class AuthStore {
           return;
         }
 
-        const profile = await this.fetchProfile(usr.id);
+        const profile = await this.loadAndHydrateProfile(usr.id);
         this.#state.update((s) => ({
           ...s,
           user: usr,
@@ -140,19 +135,15 @@ export class AuthStore {
     }
   }
 
-  private async fetchProfile(userId: string): Promise<UserProfile | null> {
-    const { data } = await this.supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (data) {
-      const typed = data as UserProfile;
-      this.themeStore.hydrateFromProfileIfUnset(typed.sheet_theme, typed.vtt_theme);
-      return typed;
+  private async loadAndHydrateProfile(userId: string): Promise<UserProfile | null> {
+    const profile = await this.authService.fetchProfile(userId);
+    if (profile) {
+      this.themeStore.hydrateFromProfileIfUnset(
+        profile.sheet_theme,
+        profile.vtt_theme
+      );
     }
-    return null;
+    return profile;
   }
 
   clearMessages(): void {
@@ -160,20 +151,7 @@ export class AuthStore {
   }
 
   async isHandleTaken(cleanHandle: string, excludeUserId?: string): Promise<boolean> {
-    let query = this.supabase
-      .from('profiles')
-      .select('id')
-      .eq('handle', cleanHandle);
-
-    if (excludeUserId) {
-      query = query.neq('id', excludeUserId);
-    }
-
-    const { data, error } = await query.maybeSingle();
-    if (error) {
-      return false;
-    }
-    return Boolean(data);
+    return this.authService.isHandleTaken(cleanHandle, excludeUserId);
   }
 
   async signUpWithEmail(
@@ -186,12 +164,18 @@ export class AuthStore {
     if (cleanHandle.length < 3) {
       this.#state.update((s) => ({
         ...s,
-        error: 'Handle must be at least 3 characters (lowercase letters, numbers, or underscores).',
+        error:
+          'Handle must be at least 3 characters (lowercase letters, numbers, or underscores).',
       }));
       return false;
     }
 
-    this.#state.update((s) => ({ ...s, isLoading: true, error: null, statusMessage: null }));
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
     try {
       const taken = await this.isHandleTaken(cleanHandle);
       if (taken) {
@@ -202,33 +186,21 @@ export class AuthStore {
         return false;
       }
 
-      const { data, error } = await this.supabase.auth.signUp({
+      const res = await this.authService.signUpWithEmail({
         email,
         password,
-        options: {
-          data: {
-            full_name: displayName || email.split('@')[0],
-            handle: cleanHandle,
-          },
-        },
+        displayName,
+        cleanHandle,
       });
 
-      if (error) {
-        this.#state.update((s) => ({ ...s, error: error.message }));
+      if (res.error) {
+        this.#state.update((s) => ({ ...s, error: res.error }));
         return false;
       }
 
-      if (data.session && data.user) {
-        await this.supabase
-          .from('profiles')
-          .update({
-            display_name: displayName || email.split('@')[0],
-            handle: cleanHandle,
-          })
-          .eq('id', data.user.id);
-
-        const profile = await this.fetchProfile(data.user.id);
-        this.#state.update((s) => ({ ...s, user: data.user, profile }));
+      if (res.hasSession && res.user) {
+        const profile = await this.loadAndHydrateProfile(res.user.id);
+        this.#state.update((s) => ({ ...s, user: res.user, profile }));
         await this.router.navigate(['/dashboard']);
       } else {
         this.#state.update((s) => ({
@@ -244,16 +216,21 @@ export class AuthStore {
   }
 
   async signInWithEmail(email: string, password: string): Promise<boolean> {
-    this.#state.update((s) => ({ ...s, isLoading: true, error: null, statusMessage: null }));
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
     try {
-      const { data, error } = await this.supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        this.#state.update((s) => ({ ...s, error: error.message }));
+      const res = await this.authService.signInWithPassword(email, password);
+      if (res.error) {
+        this.#state.update((s) => ({ ...s, error: res.error }));
         return false;
       }
-      if (data.user) {
-        const profile = await this.fetchProfile(data.user.id);
-        this.#state.update((s) => ({ ...s, user: data.user, profile }));
+      if (res.user) {
+        const profile = await this.loadAndHydrateProfile(res.user.id);
+        this.#state.update((s) => ({ ...s, user: res.user, profile }));
       }
       if (this.needsOnboarding()) {
         await this.router.navigate(['/onboarding']);
@@ -268,14 +245,11 @@ export class AuthStore {
 
   async signInWithGoogle(): Promise<void> {
     this.#state.update((s) => ({ ...s, error: null }));
-    const { error } = await this.supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/dashboard`,
-      },
-    });
-    if (error) {
-      this.#state.update((s) => ({ ...s, error: error.message }));
+    const err = await this.authService.signInWithGoogle(
+      `${window.location.origin}/dashboard`
+    );
+    if (err) {
+      this.#state.update((s) => ({ ...s, error: err }));
     }
   }
 
@@ -294,12 +268,18 @@ export class AuthStore {
     if (cleanHandle.length < 3) {
       this.#state.update((s) => ({
         ...s,
-        error: 'Handle must be between 3 and 24 characters (letters, numbers, or underscores).',
+        error:
+          'Handle must be between 3 and 24 characters (letters, numbers, or underscores).',
       }));
       return false;
     }
 
-    this.#state.update((s) => ({ ...s, isLoading: true, error: null, statusMessage: null }));
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
     try {
       const taken = await this.isHandleTaken(cleanHandle, user.id);
       if (taken) {
@@ -310,41 +290,21 @@ export class AuthStore {
         return false;
       }
 
-      const { data: authUpdated, error: authErr } = await this.supabase.auth.updateUser({
-        data: {
-          full_name: cleanName,
-          handle: cleanHandle,
-        },
-      });
+      const res = await this.authService.updateUserProfileAndHandle(
+        user.id,
+        cleanName,
+        cleanHandle
+      );
 
-      if (authErr) {
-        this.#state.update((s) => ({ ...s, error: authErr.message }));
+      if (res.error) {
+        this.#state.update((s) => ({ ...s, error: res.error }));
         return false;
       }
 
-      const { error: profErr } = await this.supabase
-        .from('profiles')
-        .update({
-          display_name: cleanName,
-          handle: cleanHandle,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      if (profErr) {
-        await this.supabase
-          .from('profiles')
-          .update({
-            display_name: cleanName,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-      }
-
-      const refreshedProfile = await this.fetchProfile(user.id);
+      const refreshedProfile = await this.loadAndHydrateProfile(user.id);
       this.#state.update((s) => ({
         ...s,
-        user: authUpdated.user ?? s.user,
+        user: res.user ?? s.user,
         profile: refreshedProfile
           ? { ...refreshedProfile, display_name: cleanName, handle: cleanHandle }
           : {
@@ -367,14 +327,7 @@ export class AuthStore {
     const user = this.#state().user;
     if (!user) return;
 
-    await this.supabase.auth.updateUser({
-      data: { is_admin: nextAdmin },
-    });
-
-    await this.supabase
-      .from('profiles')
-      .update({ is_admin: nextAdmin, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
+    await this.authService.updateAdminAccess(user.id, nextAdmin);
 
     this.#state.update((s) => ({
       ...s,
@@ -395,7 +348,7 @@ export class AuthStore {
   }
 
   async signOut(): Promise<void> {
-    await this.supabase.auth.signOut();
+    await this.authService.signOut();
     this.#state.update((s) => ({
       ...s,
       user: null,

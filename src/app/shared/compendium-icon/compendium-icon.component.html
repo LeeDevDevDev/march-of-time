@@ -1,0 +1,34 @@
+@if (isCustomUpload()) {
+  @if (tintCustom()) {
+    <span
+      class="inline-block shrink-0 transition-colors"
+      [class]="sizeClass()"
+      [style.background-color]="color()"
+      [style.-webkit-mask-image]="maskUrl()"
+      [style.mask-image]="maskUrl()"
+      style="-webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center;"
+    ></span>
+  } @else {
+    <img
+      src="{{ icon() }}"
+      alt=""
+      class="inline-block shrink-0 object-contain"
+      [class]="sizeClass()"
+    />
+  }
+} @else {
+  <svg
+    [class]="sizeClass()"
+    [style.color]="color()"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.9"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    @for (d of activePreset().paths; track d) {
+      <path [attr.d]="d" />
+    }
+  </svg>
+}
