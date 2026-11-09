@@ -205,8 +205,15 @@
                 (click)="openSheet(char.id)"
                 class="btn-copper flex-1 rounded-lg px-4 py-2 text-xs font-semibold"
               >
-                Open Character Sheet
+                Open Sheet
               </button>
+              <a
+                [routerLink]="['/characters', char.id, 'edit']"
+                class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-2 text-xs font-semibold text-[var(--mot-text)] no-underline hover:border-[#C4491A]"
+                title="Edit Character in Builder"
+              >
+                Edit
+              </a>
               <button
                 type="button"
                 (click)="removeCharacter(char)"

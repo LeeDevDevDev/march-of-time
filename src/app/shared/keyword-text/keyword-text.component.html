@@ -1,6 +1,10 @@
 <div class="relative">
   <!-- Primary Text with Hoverable Special Words (Brackets Stripped) -->
-  <p class="text-xs leading-relaxed text-[var(--mot-text)]">
+  <p
+    class="text-xs leading-relaxed"
+    [class.text-[#EBF5F3]]="tone() === 'dark'"
+    [class.text-[var(--mot-text)]]="tone() !== 'dark'"
+  >
     @for (seg of segments(); track $index) {
       @if (seg.keyword; as kw) {
         <span
@@ -9,9 +13,10 @@
           (mouseleave)="hoveredKeyword.set(null)"
           (focus)="hoveredKeyword.set(kw)"
           (blur)="hoveredKeyword.set(null)"
-          class="inline cursor-help rounded px-1 py-0.5 font-bold text-[var(--mot-accent-text)] underline decoration-dotted underline-offset-4 transition-colors hover:bg-[#122220] hover:text-[#FF8C5A]"
+          class="inline cursor-help rounded px-1 py-0.5 font-bold underline decoration-dotted underline-offset-4 transition-colors hover:bg-[#122220] hover:text-[#FF8C5A]"
           [class.bg-[#122220]]="hoveredKeyword()?.term === kw.term"
-          [class.text-[#FF8C5A]]="hoveredKeyword()?.term === kw.term"
+          [class.text-[#FF8C5A]]="tone() === 'dark' || hoveredKeyword()?.term === kw.term"
+          [class.text-[var(--mot-accent-text)]]="tone() !== 'dark' && hoveredKeyword()?.term !== kw.term"
         >{{ seg.text }}</span>
       } @else {
         <span>{{ seg.text }}</span>
@@ -20,8 +25,20 @@
   </p>
 
   @if (showHintWhenIdle() && hasAnyKeywords()) {
-    <p class="mt-2.5 border-t border-[var(--mot-border)] pt-2 text-[11px] text-[var(--mot-muted)]">
-      Hover any <span class="font-bold text-[var(--mot-accent-text)] underline decoration-dotted">underlined word</span> above to inspect its rule &amp; chained keywords.
+    <p
+      class="mt-2.5 border-t pt-2 text-[11px]"
+      [class.border-[#243B37]]="tone() === 'dark'"
+      [class.text-[#8AB0AB]]="tone() === 'dark'"
+      [class.border-[var(--mot-border)]]="tone() !== 'dark'"
+      [class.text-[var(--mot-muted)]]="tone() !== 'dark'"
+    >
+      Hover any
+      <span
+        class="font-bold underline decoration-dotted"
+        [class.text-[#FF8C5A]]="tone() === 'dark'"
+        [class.text-[var(--mot-accent-text)]]="tone() !== 'dark'"
+      >underlined word</span>
+      above to inspect its rule &amp; chained keywords.
     </p>
   }
 

@@ -27,7 +27,7 @@
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    @for (d of activePreset().paths; track d) {
+    @for (d of activePreset().paths; track $index) {
       <path [attr.d]="d" />
     }
   </svg>

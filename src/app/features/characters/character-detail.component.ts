@@ -11,6 +11,7 @@ import {
   computeDerivedStats,
   formatRuleHookBadges,
   getHeavyWeaponBlockBase,
+  isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
 } from './models/character.model';
@@ -162,6 +163,10 @@ export class CharacterDetailComponent {
 
   getHookBadges(node: PerkNodeModel): string[] {
     return formatRuleHookBadges(node.rule_hooks);
+  }
+
+  isStandalone(node: PerkNodeModel): boolean {
+    return isStandalonePerkNode(node);
   }
 
   async toggleCharacterPerk(characterId: string, node: PerkNodeModel): Promise<void> {

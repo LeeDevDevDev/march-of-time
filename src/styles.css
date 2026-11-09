@@ -53,6 +53,12 @@
   color-scheme: dark;
 }
 
+html {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mot-border-strong) transparent;
+}
+
 body {
   font-family: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--mot-bg);
@@ -134,22 +140,64 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+/* Custom Scrollbar & Stable Scroll Gutter System */
+.mot-scroll-gutter,
+.overflow-y-auto {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mot-border-strong) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--mot-well);
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--mot-border-strong);
-  border-radius: 4px;
+  background-color: var(--mot-border-strong);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 150ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #C4491A;
+  background-color: #C4491A;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--mot-primary-hover);
+}
+
+/* Dark-surface panels keep Night Pine scrollbar thumbs even in Light Mode */
+.bg-\[\#122220\],
+.bg-\[\#0D1615\] {
+  scrollbar-color: #355650 transparent;
+}
+
+.bg-\[\#122220\] ::-webkit-scrollbar-thumb,
+.bg-\[\#0D1615\] ::-webkit-scrollbar-thumb,
+.bg-\[\#122220\]::-webkit-scrollbar-thumb,
+.bg-\[\#0D1615\]::-webkit-scrollbar-thumb {
+  background-color: #355650;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.bg-\[\#122220\] ::-webkit-scrollbar-thumb:hover,
+.bg-\[\#0D1615\] ::-webkit-scrollbar-thumb:hover,
+.bg-\[\#122220\]::-webkit-scrollbar-thumb:hover,
+.bg-\[\#0D1615\]::-webkit-scrollbar-thumb:hover {
+  background-color: #C4491A;
 }
 
 .mot-canvas-grid {

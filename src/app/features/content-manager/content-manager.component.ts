@@ -26,7 +26,7 @@ import {
   getHeavyWeaponBlockBase,
   getTreeArchetypeIcon,
   hooksObjectToRows,
-  isCompendiumItemActive,
+  isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
   resolveNodeVisuals,
@@ -69,44 +69,72 @@ export class ContentManagerComponent implements OnInit {
     (d) => d.category === 'Combat Art Effect'
   );
 
-  // Studio Tab: 'trees' vs 'weapons' vs 'keywords'
-  readonly studioTab = signal<'trees' | 'weapons' | 'keywords'>('trees');
+  // Studio Tab: 'trees' vs 'standalone' vs 'weapons' vs 'keywords'
+  readonly studioTab = signal<'trees' | 'standalone' | 'weapons' | 'keywords'>('trees');
   readonly treeSearch = signal<string>('');
+  readonly standaloneSearch = signal<string>('');
+  readonly standaloneTypeFilter = signal<string>('All');
+  readonly selectedStandaloneId = signal<string | null>(null);
   readonly keywordSearch = signal<string>('');
   readonly weaponSearch = signal<string>('');
   readonly weaponCategoryFilter = signal<string>('All');
   readonly selectedWeaponId = signal<string | null>(null);
 
-  // Active vs Archived Status Filters for each pillar
-  readonly treeStatusFilter = signal<'active' | 'archived'>('active');
-  readonly weaponStatusFilter = signal<'active' | 'archived'>('active');
-  readonly keywordStatusFilter = signal<'active' | 'archived'>('active');
+  readonly standaloneFilterOptions: { id: string; label: string }[] = [
+    { id: 'All', label: 'All Standalone' },
+    { id: 'combat_art', label: 'Combat Arts' },
+    { id: 'passive_upgrade', label: 'Passives' },
+    { id: 'Crushing', label: 'Crushing' },
+    { id: 'Sweeping', label: 'Sweeping' },
+    { id: 'Piercing', label: 'Piercing' },
+  ];
 
-  readonly archivedTreesCount = computed(
-    () =>
-      this.compendiumStore
-        .allSkillTrees()
-        .filter((t) => !isCompendiumItemActive(t)).length
-  );
-  readonly archivedWeaponsCount = computed(
-    () =>
-      this.compendiumStore
-        .allWeapons()
-        .filter((w) => !isCompendiumItemActive(w)).length
-  );
-  readonly archivedKeywordsCount = computed(
-    () =>
-      this.compendiumStore
-        .allKeywords()
-        .filter((k) => !isCompendiumItemActive(k)).length
-  );
+  readonly filteredStandaloneNodes = computed(() => {
+    const q = this.standaloneSearch().trim().toLowerCase();
+    const filter = this.standaloneTypeFilter();
+    return this.compendiumStore
+      .standaloneNodes()
+      .filter((node) => {
+        if (filter === 'combat_art' && node.node_type !== 'combat_art') {
+          return false;
+        }
+        if (
+          filter === 'passive_upgrade' &&
+          node.node_type !== 'passive_upgrade'
+        ) {
+          return false;
+        }
+        if (
+          (filter === 'Crushing' ||
+            filter === 'Sweeping' ||
+            filter === 'Piercing') &&
+          node.combat_tag !== filter
+        ) {
+          return false;
+        }
+        if (!q) return true;
+        return (
+          node.name.toLowerCase().includes(q) ||
+          node.description.toLowerCase().includes(q) ||
+          (node.combat_tag ?? '').toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  readonly selectedStandaloneNode = computed(() => {
+    const list = this.filteredStandaloneNodes();
+    const id = this.selectedStandaloneId();
+    if (id) {
+      const found = list.find((n) => n.id === id);
+      if (found) return found;
+    }
+    return list[0] ?? null;
+  });
 
   readonly filteredTrees = computed(() => {
     const q = this.treeSearch().trim().toLowerCase();
-    const showActive = this.treeStatusFilter() === 'active';
-    const list = this.compendiumStore
-      .allSkillTrees()
-      .filter((t) => isCompendiumItemActive(t) === showActive);
+    const list = this.compendiumStore.skillTrees();
     if (!q) return list;
     return list.filter(
       (t) =>
@@ -118,8 +146,8 @@ export class ContentManagerComponent implements OnInit {
   readonly weaponFilterOptions: { id: string; label: string }[] = [
     { id: 'All', label: 'All Weapons' },
     { id: 'Two-Handed', label: 'Two-Handed' },
-    { id: 'Heavy-Block', label: 'Heavy (Can Block)' },
-    { id: 'Heavy', label: 'Heavy Class' },
+    { id: 'Guard', label: 'Guard (Can Block)' },
+    { id: 'Heavy', label: 'Heavy' },
     { id: 'Martial', label: 'Martial' },
     { id: 'Light', label: 'Light' },
     { id: 'Ranged', label: 'Ranged' },
@@ -128,15 +156,13 @@ export class ContentManagerComponent implements OnInit {
   readonly filteredWeapons = computed(() => {
     const q = this.weaponSearch().trim().toLowerCase();
     const filter = this.weaponCategoryFilter();
-    const showActive = this.weaponStatusFilter() === 'active';
-    return this.compendiumStore.allWeapons().filter((w) => {
-      if (isCompendiumItemActive(w) !== showActive) return false;
+    return this.compendiumStore.weapons().filter((w) => {
       if (filter === 'Two-Handed' && !isWeaponTwoHanded(w)) return false;
-      if (filter === 'Heavy-Block' && !isWeaponHeavy(w)) return false;
+      if (filter === 'Guard' && !isWeaponHeavy(w)) return false;
       if (
         filter !== 'All' &&
         filter !== 'Two-Handed' &&
-        filter !== 'Heavy-Block' &&
+        filter !== 'Guard' &&
         w.category.toLowerCase() !== filter.toLowerCase()
       ) {
         return false;
@@ -212,10 +238,7 @@ export class ContentManagerComponent implements OnInit {
 
   readonly filteredKeywords = computed(() => {
     const q = this.keywordSearch().trim().toLowerCase();
-    const showActive = this.keywordStatusFilter() === 'active';
-    const list = this.compendiumStore
-      .allKeywords()
-      .filter((kw) => isCompendiumItemActive(kw) === showActive);
+    const list = this.compendiumStore.keywords();
     if (!q) return list;
     return list.filter(
       (kw) =>
@@ -231,7 +254,7 @@ export class ContentManagerComponent implements OnInit {
   readonly activeTree = computed(() => {
     const id = this.activeTreeId();
     if (!id) return null;
-    return this.compendiumStore.allSkillTrees().find((t) => t.id === id) ?? null;
+    return this.compendiumStore.skillTrees().find((t) => t.id === id) ?? null;
   });
 
   // `[` Bracket Autocomplete State in Description Textarea
@@ -314,7 +337,7 @@ export class ContentManagerComponent implements OnInit {
   readonly hookRows = signal<RuleHookRow[]>([]);
 
   nodeForm: {
-    tree_id: string;
+    tree_id: string | null;
     name: string;
     node_type: 'combat_art' | 'passive_upgrade';
     tier: number;
@@ -372,6 +395,14 @@ export class ContentManagerComponent implements OnInit {
 
   getTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
     return resolveTreeVisuals(tree);
+  }
+
+  getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+    return resolveNodeVisuals(node);
+  }
+
+  getNodeHookBadges(node: PerkNodeModel): string[] {
+    return formatRuleHookBadges(node.rule_hooks);
   }
 
   getPerksForTree(treeId: string): PerkNodeModel[] {
@@ -664,6 +695,17 @@ export class ContentManagerComponent implements OnInit {
     this.treeModalOpen.set(false);
   }
 
+  onBackdropMouseDown(
+    event: MouseEvent,
+    modal: 'tree' | 'node' | 'keyword' | 'weapon'
+  ): void {
+    if (event.target !== event.currentTarget) return;
+    if (modal === 'tree') this.closeTreeModal();
+    else if (modal === 'node') this.closeNodeModal();
+    else if (modal === 'keyword') this.closeKeywordModal();
+    else if (modal === 'weapon') this.closeWeaponModal();
+  }
+
   async saveTree(): Promise<void> {
     const editId = this.editingTreeId();
     if (editId) {
@@ -709,18 +751,20 @@ export class ContentManagerComponent implements OnInit {
   }
 
   // Node Modal Actions
-  openNewNodeModal(defaultTreeId?: string): void {
+  openNewNodeModal(defaultTreeId?: string | null): void {
     this.compendiumStore.clearMessages();
     this.editingNodeId.set(null);
     this.bracketMenuOpen.set(false);
-    const firstTreeId =
-      defaultTreeId ??
-      this.activeTreeId() ??
-      this.compendiumStore.skillTrees()[0]?.id ??
-      '';
+    const resolvedTreeId =
+      defaultTreeId === null
+        ? null
+        : (defaultTreeId ??
+          this.activeTreeId() ??
+          this.compendiumStore.skillTrees()[0]?.id ??
+          null);
 
     this.nodeForm = {
-      tree_id: firstTreeId,
+      tree_id: resolvedTreeId,
       name: '',
       node_type: 'combat_art',
       tier: 1,
@@ -736,6 +780,10 @@ export class ContentManagerComponent implements OnInit {
     };
     this.hookRows.set([]);
     this.nodeModalOpen.set(true);
+  }
+
+  openNewStandaloneNodeModal(): void {
+    this.openNewNodeModal(null);
   }
 
   openBranchChildModal(parentNode: PerkNodeModel): void {
@@ -770,7 +818,7 @@ export class ContentManagerComponent implements OnInit {
 
     const visuals = resolveNodeVisuals(node);
     this.nodeForm = {
-      tree_id: node.tree_id,
+      tree_id: isStandalonePerkNode(node) ? null : node.tree_id,
       name: node.name,
       node_type: node.node_type,
       tier: node.tier,
@@ -801,11 +849,12 @@ export class ContentManagerComponent implements OnInit {
       this.nodeForm.combat_tag
     );
 
+    const isStandalone = !this.nodeForm.tree_id;
     const payload = {
-      tree_id: this.nodeForm.tree_id,
+      tree_id: this.nodeForm.tree_id || null,
       name: this.nodeForm.name,
       node_type: this.nodeForm.node_type,
-      tier: Number(this.nodeForm.tier) || 1,
+      tier: isStandalone ? 1 : Number(this.nodeForm.tier) || 1,
       perk_cost: Number(this.nodeForm.perk_cost) || 1,
       ap_cost:
         this.nodeForm.node_type === 'combat_art' ? Number(this.nodeForm.ap_cost) : null,
@@ -817,7 +866,7 @@ export class ContentManagerComponent implements OnInit {
         this.nodeForm.node_type === 'combat_art' ? this.nodeForm.combat_tag : 'None',
       description: this.nodeForm.description,
       rule_hooks: compiledHooks,
-      parent_node_id: this.nodeForm.parent_node_id || null,
+      parent_node_id: isStandalone ? null : this.nodeForm.parent_node_id || null,
       icon: this.nodeForm.icon,
       icon_color: this.nodeForm.icon_color,
       icon_tint_custom: this.nodeForm.icon_tint_custom,
@@ -826,15 +875,26 @@ export class ContentManagerComponent implements OnInit {
     const editId = this.editingNodeId();
     if (editId) {
       const ok = await this.compendiumStore.updatePerkNode(editId, payload);
-      if (ok) this.closeNodeModal();
+      if (ok) {
+        if (isStandalone) {
+          this.selectedStandaloneId.set(editId);
+        }
+        this.closeNodeModal();
+      }
     } else {
       const created = await this.compendiumStore.createPerkNode(payload);
-      if (created) this.closeNodeModal();
+      if (created) {
+        if (isStandalone) {
+          this.selectedStandaloneId.set(created.id);
+        }
+        this.closeNodeModal();
+      }
     }
   }
 
   confirmDeleteNode(node: PerkNodeModel): void {
     this.compendiumStore.clearMessages();
+    const isStandalone = isStandalonePerkNode(node);
     const dependentChildren = this.compendiumStore
       .perkNodes()
       .filter((n) => n.parent_node_id === node.id);
@@ -842,15 +902,19 @@ export class ContentManagerComponent implements OnInit {
     this.pendingDelete.set({
       kind: 'node',
       target: node,
-      title: 'Delete Skill Tree Node',
+      title: isStandalone ? 'Delete Standalone Ability' : 'Delete Skill Tree Node',
       itemName: node.name,
-      badge: `Tier ${node.tier} · ${node.node_type === 'combat_art' ? 'Combat Art' : 'Passive'}`,
-      message: `Are you sure you want to delete "${node.name}" from this skill tree?`,
+      badge: isStandalone
+        ? `Standalone · ${node.node_type === 'combat_art' ? 'Combat Art' : 'Passive'}`
+        : `Tier ${node.tier} · ${node.node_type === 'combat_art' ? 'Combat Art' : 'Passive'}`,
+      message: isStandalone
+        ? `Are you sure you want to delete the standalone ability "${node.name}" from the compendium?`
+        : `Are you sure you want to delete "${node.name}" from this skill tree?`,
       warningNote:
         dependentChildren.length > 0
           ? `This node is a prerequisite for ${dependentChildren.length} child node(s) (${dependentChildren.map((c) => c.name).join(', ')}). Deleting it will unlink their parent connection.`
-          : 'Characters who unlocked this node will no longer receive its Combat Art or passive stat hooks.',
-      confirmLabel: 'Delete Node',
+          : 'Characters or NPC tokens who unlocked this ability will no longer receive its Combat Art or passive stat hooks.',
+      confirmLabel: isStandalone ? 'Delete Standalone Ability' : 'Delete Node',
     });
   }
 
@@ -873,26 +937,6 @@ export class ContentManagerComponent implements OnInit {
 
   getHeavyBlockBase(w: WeaponModel): number {
     return getHeavyWeaponBlockBase(w);
-  }
-
-  async toggleWeaponTwoHanded(w: WeaponModel): Promise<void> {
-    const nextTwoHanded = !isWeaponTwoHanded(w);
-    const currentHeavy = isWeaponHeavy(w);
-    await this.compendiumStore.updateWeaponTags(w.id, {
-      two_handed: nextTwoHanded,
-      heavy: currentHeavy,
-      heavy_block_base: getHeavyWeaponBlockBase(w) || 2,
-    });
-  }
-
-  async toggleWeaponHeavy(w: WeaponModel): Promise<void> {
-    const currentTwoHanded = isWeaponTwoHanded(w);
-    const nextHeavy = !isWeaponHeavy(w);
-    await this.compendiumStore.updateWeaponTags(w.id, {
-      two_handed: currentTwoHanded,
-      heavy: nextHeavy,
-      heavy_block_base: 2,
-    });
   }
 
   openNewWeaponModal(): void {
@@ -971,6 +1015,10 @@ export class ContentManagerComponent implements OnInit {
     const compiledHooks: Record<string, unknown> = {
       ...(existing?.rule_hooks ?? {}),
       two_handed: this.weaponForm.two_handed,
+      guard: this.weaponForm.heavy,
+      guard_block_base: this.weaponForm.heavy
+        ? Math.max(1, Number(this.weaponForm.heavy_block_base) || 2)
+        : undefined,
       heavy: this.weaponForm.heavy,
       heavy_block_base: this.weaponForm.heavy
         ? Math.max(1, Number(this.weaponForm.heavy_block_base) || 2)
@@ -1000,7 +1048,7 @@ export class ContentManagerComponent implements OnInit {
       name: this.weaponForm.name,
       category: this.weaponForm.category,
       ap_cost: Number(this.weaponForm.ap_cost) || 1,
-      requires_aim: Boolean(this.weaponForm.requires_aim),
+      requires_aim: false,
       gov_attribute: this.weaponForm.gov_attribute,
       gov_skill: this.weaponForm.gov_skill,
       base_damage: Number(this.weaponForm.base_damage) || 3,
@@ -1039,72 +1087,17 @@ export class ContentManagerComponent implements OnInit {
       title: 'Delete Weapon from Armory',
       itemName: w.name,
       badge: `${w.category} · ${w.ap_cost} AP`,
-      message: `Are you sure you want to permanently remove "${w.name}" from the Weapons & Armory compendium?`,
+      message: `Are you sure you want to remove "${w.name}" from the active Weapons & Armory compendium?`,
       warningNote:
-        'Any character currently equipping this weapon in Slot 1 or Slot 2 will fall back to Unarmed until they select a replacement.',
+        'Existing characters who already have this weapon equipped will keep their stats safely intact.',
       confirmLabel: 'Delete Weapon',
     });
-  }
-
-  isItemActive(
-    item:
-      | {
-          is_active?: boolean | null;
-          rule_hooks?: unknown;
-        }
-      | null
-      | undefined
-  ): boolean {
-    return isCompendiumItemActive(item);
-  }
-
-  isPendingTargetActive(): boolean {
-    const pending = this.pendingDelete();
-    if (!pending) return false;
-    return isCompendiumItemActive(pending.target);
-  }
-
-  async toggleTreeActive(tree: SkillTreeModel): Promise<void> {
-    const nextActive = !isCompendiumItemActive(tree);
-    await this.compendiumStore.setSkillTreeActive(tree.id, nextActive);
-  }
-
-  async toggleNodeActive(node: PerkNodeModel): Promise<void> {
-    const nextActive = !isCompendiumItemActive(node);
-    await this.compendiumStore.setPerkNodeActive(node.id, nextActive);
-  }
-
-  async toggleWeaponActive(w: WeaponModel): Promise<void> {
-    const nextActive = !isCompendiumItemActive(w);
-    await this.compendiumStore.setWeaponActive(w.id, nextActive);
-  }
-
-  async toggleKeywordActive(kw: KeywordDefinition): Promise<void> {
-    const nextActive = !isCompendiumItemActive(kw);
-    await this.compendiumStore.setKeywordActive(kw, nextActive);
   }
 
   cancelConfirmDelete(): void {
     if (!this.compendiumStore.isLoading()) {
       this.pendingDelete.set(null);
     }
-  }
-
-  async executeArchiveInstead(): Promise<void> {
-    const pending = this.pendingDelete();
-    if (!pending) return;
-
-    if (pending.kind === 'tree') {
-      await this.compendiumStore.setSkillTreeActive(pending.target.id, false);
-    } else if (pending.kind === 'node') {
-      await this.compendiumStore.setPerkNodeActive(pending.target.id, false);
-    } else if (pending.kind === 'weapon') {
-      await this.compendiumStore.setWeaponActive(pending.target.id, false);
-    } else if (pending.kind === 'keyword') {
-      await this.compendiumStore.setKeywordActive(pending.target, false);
-    }
-
-    this.pendingDelete.set(null);
   }
 
   async executeConfirmDelete(): Promise<void> {
@@ -1117,7 +1110,10 @@ export class ContentManagerComponent implements OnInit {
         this.activeTreeId.set(null);
       }
     } else if (pending.kind === 'node') {
-      await this.compendiumStore.deletePerkNode(pending.target.id);
+      const ok = await this.compendiumStore.deletePerkNode(pending.target.id);
+      if (ok && this.selectedStandaloneId() === pending.target.id) {
+        this.selectedStandaloneId.set(null);
+      }
     } else if (pending.kind === 'weapon') {
       const ok = await this.compendiumStore.deleteWeapon(pending.target.id);
       if (ok && this.selectedWeaponId() === pending.target.id) {

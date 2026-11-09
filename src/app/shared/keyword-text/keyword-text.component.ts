@@ -19,6 +19,7 @@ export class KeywordTextComponent {
   readonly excludeTerm = input<string>('');
   readonly showHintWhenIdle = input<boolean>(true);
   readonly placement = input<'top' | 'bottom'>('bottom');
+  readonly tone = input<'adaptive' | 'dark'>('adaptive');
 
   readonly hoveredKeyword = signal<KeywordDefinition | null>(null);
 

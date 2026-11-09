@@ -62,14 +62,14 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Raise Shield',
     category: 'Active Defense',
     summary:
-      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Heavy] Weapon Guard): Activates your [Shield Block] mitigation (Shield or Heavy Weapon Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn.',
+      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn.',
   },
   {
     id: 'kw-shield-block',
     term: 'Shield Block',
     category: 'Active Defense',
     summary:
-      'Active while [Raise Shield] / Guard (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, [Heavy] Weapon Base 2; no roll required, remaining damage goes to [SP]).',
+      'Active while [Raise Shield] / [Guard] (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, Weapon [Guard] Base 2; no roll required, remaining damage goes to [SP]).',
   },
   {
     id: 'kw-two-handed',
@@ -79,11 +79,18 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
       'Requires both hands to wield. You cannot use an off-hand Shield while a Two-Handed weapon is active (any equipped shield is stowed).',
   },
   {
-    id: 'kw-heavy',
-    term: 'Heavy',
+    id: 'kw-guard',
+    term: 'Guard',
     category: 'Core Mechanic',
     summary:
-      'Massive weapon heft that can be braced defensively: allows you to use [Raise Shield] / Guard (1 AP) to Block incoming non-[Piercing] attacks using your Block Skill (Heavy Weapon Base 2 + Block Skill), even while [Two-Handed] without a shield.',
+      'Defensive weapon property: allows you to spend 1 AP on your turn to brace your weapon and Block incoming non-[Piercing] attacks using your Block Skill (Weapon Guard Base + Block Skill), even while [Two-Handed] without a shield.',
+  },
+  {
+    id: 'kw-aim',
+    term: 'Aim',
+    category: 'Core Mechanic',
+    summary:
+      'Ranged weapons can fire anytime at Disadvantage. Spending 1 AP to Aim at your target first allows you to make a normal Shoot roll.',
   },
   {
     id: 'kw-stance-recovery',
@@ -279,11 +286,17 @@ export interface PerkRuleHooks {
   __icon_color?: string;
   __icon_tint_custom?: boolean;
   __is_active?: boolean;
+  __is_standalone?: boolean;
 }
 
 export type EditableRuleHookKey = Exclude<
   keyof PerkRuleHooks,
-  'disallow_defense' | '__icon' | '__icon_color' | '__icon_tint_custom' | '__is_active'
+  | 'disallow_defense'
+  | '__icon'
+  | '__icon_color'
+  | '__icon_tint_custom'
+  | '__is_active'
+  | '__is_standalone'
 >;
 
 export interface RuleHookDefinition {
@@ -301,7 +314,6 @@ export interface RuleHookRow {
 }
 
 /**
- * Industry-standard Composable Rule Hook Registry (Foundry VTT / D&D Beyond style).
  * Adding a new mechanical hook to March of Time only requires adding an entry here.
  */
 export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
@@ -415,7 +427,7 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   },
 ];
 
-export type WeaponPropertyTag = 'Two-Handed' | 'Heavy';
+export type WeaponPropertyTag = 'Two-Handed' | 'Guard';
 
 export interface WeaponModel {
   id: string;
@@ -458,13 +470,16 @@ export function isWeaponTwoHanded(weapon: WeaponModel | null | undefined): boole
 }
 
 /**
- * Determines whether a weapon has the `Heavy` tag (can be braced to Block using `Block` Skill).
- * Reads `weapon.rule_hooks['heavy']` if explicitly set; otherwise defaults to `true` for
+ * Determines whether a weapon has the `Guard` property tag (can be braced to Block using `Block` Skill).
+ * Reads `weapon.rule_hooks['guard']` or `weapon.rule_hooks['heavy']` if explicitly set; otherwise defaults to `true` for
  * `Heavy` category weapons (`greatsword`, `warhammer`).
  */
 export function isWeaponHeavy(weapon: WeaponModel | null | undefined): boolean {
   if (!weapon) return false;
   const hooks = weapon.rule_hooks ?? {};
+  if (typeof hooks['guard'] === 'boolean') {
+    return hooks['guard'];
+  }
   if (typeof hooks['heavy'] === 'boolean') {
     return hooks['heavy'];
   }
@@ -474,23 +489,27 @@ export function isWeaponHeavy(weapon: WeaponModel | null | undefined): boolean {
 }
 
 /**
- * Base Block mitigation when bracing a `Heavy` weapon to Block (`Raise Weapon Guard`, 1 AP).
+ * Base Block mitigation when bracing a `Guard` weapon to Block (`Raise Weapon Guard`, 1 AP).
  * Defaults to `2` (`2 + Block Skill`).
  */
 export function getHeavyWeaponBlockBase(weapon: WeaponModel | null | undefined): number {
   if (!weapon || !isWeaponHeavy(weapon)) return 0;
-  const raw = Number(weapon.rule_hooks?.['heavy_block_base'] ?? 2);
+  const raw = Number(
+    weapon.rule_hooks?.['guard_block_base'] ??
+      weapon.rule_hooks?.['heavy_block_base'] ??
+      2
+  );
   return Number.isNaN(raw) || raw <= 0 ? 2 : raw;
 }
 
 /**
- * Returns the list of weapon property tags (`['Two-Handed', 'Heavy']`, etc.) for display on cards and selectors.
+ * Returns the list of weapon property tags (`['Two-Handed', 'Guard']`, etc.) for display on cards and selectors.
  */
 export function getWeaponPropertyTags(weapon: WeaponModel | null | undefined): WeaponPropertyTag[] {
   if (!weapon) return [];
   const tags: WeaponPropertyTag[] = [];
   if (isWeaponTwoHanded(weapon)) tags.push('Two-Handed');
-  if (isWeaponHeavy(weapon)) tags.push('Heavy');
+  if (isWeaponHeavy(weapon)) tags.push('Guard');
   return tags;
 }
 
@@ -507,7 +526,7 @@ export interface SkillTreeModel {
 
 export interface PerkNodeModel {
   id: string;
-  tree_id: string;
+  tree_id: string | null;
   slug: string;
   name: string;
   node_type: 'combat_art' | 'passive_upgrade';
@@ -524,6 +543,105 @@ export interface PerkNodeModel {
   icon_tint_custom?: boolean | null;
   is_active?: boolean;
 }
+
+/**
+ * Returns `true` when a `PerkNodeModel` is a Standalone ("Solo") Combat Art or Passive
+ * that does not belong to any Martial Skill Tree (`tree_id === null` or `rule_hooks.__is_standalone === true`).
+ */
+export function isStandalonePerkNode(
+  node: PerkNodeModel | null | undefined
+): boolean {
+  if (!node) return false;
+  return !node.tree_id || node.rule_hooks?.__is_standalone === true;
+}
+
+export const DEFAULT_STANDALONE_PERK_NODES: PerkNodeModel[] = [
+  {
+    id: 'solo-shield-bash',
+    tree_id: null,
+    slug: 'shield-bash',
+    name: 'Shield Bash',
+    node_type: 'combat_art',
+    tier: 1,
+    perk_cost: 1,
+    ap_cost: 1,
+    cooldown_rounds: 2,
+    combat_tag: 'Crushing',
+    description:
+      'Drive your shield or weapon guard into an adjacent foe, dealing +2 [SP] damage and inflicting [Staggered] on hit. Punishes [Shield Block].',
+    rule_hooks: {
+      disallow_defense: ['Block'],
+      bonus_sp_damage: 2,
+      inflict_status: 'Staggered',
+      __is_standalone: true,
+      __icon: 'bastion-shield',
+      __icon_color: '#FF8C5A',
+      __icon_tint_custom: true,
+      __is_active: true,
+    },
+    parent_node_id: null,
+    icon: 'bastion-shield',
+    icon_color: '#FF8C5A',
+    icon_tint_custom: true,
+    is_active: true,
+  },
+  {
+    id: 'solo-vanguard-cleave',
+    tree_id: null,
+    slug: 'vanguard-cleave',
+    name: 'Vanguard Cleave',
+    node_type: 'combat_art',
+    tier: 1,
+    perk_cost: 1,
+    ap_cost: 2,
+    cooldown_rounds: 3,
+    combat_tag: 'Sweeping',
+    description:
+      'Swing in a wide horizontal arc that punishes [Dodge] attempts and deals +2 flat damage.',
+    rule_hooks: {
+      disallow_defense: ['Dodge'],
+      bonus_flat_damage: 2,
+      __is_standalone: true,
+      __icon: 'battleaxe',
+      __icon_color: '#F26464',
+      __icon_tint_custom: true,
+      __is_active: true,
+    },
+    parent_node_id: null,
+    icon: 'battleaxe',
+    icon_color: '#F26464',
+    icon_tint_custom: true,
+    is_active: true,
+  },
+  {
+    id: 'solo-veterans-resolve',
+    tree_id: null,
+    slug: 'veterans-resolve',
+    name: "Veteran's Resolve",
+    node_type: 'passive_upgrade',
+    tier: 1,
+    perk_cost: 1,
+    ap_cost: null,
+    cooldown_rounds: null,
+    combat_tag: 'None',
+    description:
+      'Hardened battlefield conditioning grants +2 Max [SP] and +1 [Stance Recovery] when catching your breath.',
+    rule_hooks: {
+      bonus_max_sp: 2,
+      bonus_stance_recovery: 1,
+      __is_standalone: true,
+      __icon: 'iron-helm',
+      __icon_color: '#38B29A',
+      __icon_tint_custom: true,
+      __is_active: true,
+    },
+    parent_node_id: null,
+    icon: 'iron-helm',
+    icon_color: '#38B29A',
+    icon_tint_custom: true,
+    is_active: true,
+  },
+];
 
 /**
  * Returns `true` if a Compendium entry is active (`is_active !== false` and `rule_hooks.__is_active !== false`).
@@ -886,9 +1004,6 @@ export function formatWeaponHookBadges(weapon: WeaponModel | null | undefined): 
   const badges: string[] = [];
   const hooks = weapon.rule_hooks ?? {};
 
-  if (weapon.requires_aim) {
-    badges.push('Requires Aim (1 AP)');
-  }
   if (weapon.thrown_range_tiles && weapon.thrown_range_tiles > 0) {
     badges.push(`Thrown (${weapon.thrown_range_tiles} Tiles)`);
   }

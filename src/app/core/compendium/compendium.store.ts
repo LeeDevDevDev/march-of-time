@@ -2,11 +2,13 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { AuthStore } from '../auth/auth.store';
 import { NotificationStore } from '../notifications/notification.store';
 import {
+  DEFAULT_KEYWORDS,
   KeywordDefinition,
   PerkNodeModel,
   SkillTreeModel,
   WeaponModel,
   isCompendiumItemActive,
+  isStandalonePerkNode,
 } from './compendium.model';
 import { CompendiumService, slugifyText } from './compendium.service';
 
@@ -31,7 +33,7 @@ export class CompendiumStore {
     weapons: [],
     skillTrees: [],
     perkNodes: [],
-    keywords: this.compendiumService.loadFallbackKeywords(),
+    keywords: DEFAULT_KEYWORDS,
     isLoading: false,
     error: null,
     statusMessage: null,
@@ -47,6 +49,11 @@ export class CompendiumStore {
   readonly perkNodes = computed(() =>
     this.#state().perkNodes.filter((p) => isCompendiumItemActive(p))
   );
+  readonly standaloneNodes = computed(() =>
+    this.#state().perkNodes.filter(
+      (p) => isCompendiumItemActive(p) && isStandalonePerkNode(p)
+    )
+  );
   readonly keywords = computed(() =>
     this.#state().keywords.filter((k) => isCompendiumItemActive(k))
   );
@@ -55,6 +62,9 @@ export class CompendiumStore {
   readonly allWeapons = computed(() => this.#state().weapons);
   readonly allSkillTrees = computed(() => this.#state().skillTrees);
   readonly allPerkNodes = computed(() => this.#state().perkNodes);
+  readonly allStandaloneNodes = computed(() =>
+    this.#state().perkNodes.filter((p) => isStandalonePerkNode(p))
+  );
   readonly allKeywords = computed(() => this.#state().keywords);
 
   readonly isLoading = computed(() => this.#state().isLoading);
@@ -127,10 +137,12 @@ export class CompendiumStore {
       summary,
     });
 
-    const nextKeywords = [...this.#state().keywords, created].sort((a, b) =>
+    const filteredExisting = this.#state().keywords.filter(
+      (kw) => kw.term.toLowerCase() !== created.term.toLowerCase()
+    );
+    const nextKeywords = [...filteredExisting, created].sort((a, b) =>
       a.term.localeCompare(b.term)
     );
-    this.compendiumService.saveFallbackKeywords(nextKeywords);
 
     this.#state.update((s) => ({
       ...s,
@@ -177,8 +189,6 @@ export class CompendiumStore {
       )
       .sort((a, b) => a.term.localeCompare(b.term));
 
-    this.compendiumService.saveFallbackKeywords(nextKeywords);
-
     this.#state.update((s) => ({
       ...s,
       keywords: nextKeywords,
@@ -201,7 +211,6 @@ export class CompendiumStore {
         ? { ...item, is_active: isActive }
         : item
     );
-    this.compendiumService.saveFallbackKeywords(nextKeywords);
 
     this.#state.update((s) => ({
       ...s,
@@ -231,20 +240,27 @@ export class CompendiumStore {
   async deleteKeyword(kw: KeywordDefinition): Promise<void> {
     await this.compendiumService.deleteKeywordRecord(kw);
 
-    const nextKeywords = this.#state().keywords.filter(
-      (item) => item.term.toLowerCase() !== kw.term.toLowerCase()
+    const nextKeywords = this.#state().keywords.map((item) =>
+      item.term.toLowerCase() === kw.term.toLowerCase()
+        ? { ...item, is_active: false }
+        : item
     );
-    this.compendiumService.saveFallbackKeywords(nextKeywords);
 
     this.#state.update((s) => ({
       ...s,
       keywords: nextKeywords,
-      statusMessage: `Permanently deleted keyword "${kw.term}".`,
+      statusMessage: `Deleted keyword "${kw.term}".`,
     }));
 
     this.notifications.info(
       'Special Word Deleted',
-      `Permanently removed "${kw.term}" from the database.`
+      `Removed "${kw.term}" from the active glossary.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setKeywordActive(kw, true);
+        },
+      }
     );
   }
 
@@ -407,7 +423,10 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
-    const err = await this.compendiumService.deleteSkillTreeRecord(treeId);
+    const err = await this.compendiumService.deleteSkillTreeRecord(
+      treeId,
+      existing?.slug
+    );
 
     if (err) {
       this.#state.update((s) => ({
@@ -421,15 +440,31 @@ export class CompendiumStore {
 
     this.#state.update((s) => ({
       ...s,
-      skillTrees: s.skillTrees.filter((t) => t.id !== treeId),
-      perkNodes: s.perkNodes.filter((p) => p.tree_id !== treeId),
+      skillTrees: s.skillTrees.map((t) =>
+        t.id === treeId ? { ...t, is_active: false } : t
+      ),
+      perkNodes: s.perkNodes.map((p) =>
+        p.tree_id === treeId
+          ? {
+              ...p,
+              is_active: false,
+              rule_hooks: { ...(p.rule_hooks ?? {}), __is_active: false },
+            }
+          : p
+      ),
       isLoading: false,
-      statusMessage: 'Skill Tree permanently deleted.',
+      statusMessage: `Deleted Skill Tree "${existing?.name ?? 'Skill Tree'}".`,
     }));
 
     this.notifications.info(
       'Skill Tree Deleted',
-      `Permanently deleted "${existing?.name ?? 'Skill Tree'}" and its nodes.`
+      `Removed "${existing?.name ?? 'Skill Tree'}" from the active compendium. Existing characters keep their unlocked perks.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setSkillTreeActive(treeId, true);
+        },
+      }
     );
     return true;
   }
@@ -453,21 +488,23 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
+    const isStandalone = !draft.tree_id;
     const enrichedHooks = {
       ...(draft.rule_hooks ?? {}),
       __icon: draft.icon ?? undefined,
       __icon_color: draft.icon_color ?? undefined,
       __icon_tint_custom: draft.icon_tint_custom ?? true,
       __is_active: true,
+      __is_standalone: isStandalone,
     };
 
     const { data, error } = await this.compendiumService.insertPerkNode(
       {
-        tree_id: draft.tree_id,
+        tree_id: draft.tree_id || null,
         slug,
         name: trimmedName,
         node_type: draft.node_type,
-        tier: draft.tier,
+        tier: isStandalone ? 1 : draft.tier,
         perk_cost: draft.perk_cost,
         ap_cost: draft.node_type === 'combat_art' ? draft.ap_cost : null,
         cooldown_rounds:
@@ -475,7 +512,7 @@ export class CompendiumStore {
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
         rule_hooks: enrichedHooks,
-        parent_node_id: draft.parent_node_id || null,
+        parent_node_id: isStandalone ? null : draft.parent_node_id || null,
         is_official: true,
         created_by: this.authStore.user()?.id ?? null,
       },
@@ -502,12 +539,16 @@ export class CompendiumStore {
         (a, b) => a.tier - b.tier || a.name.localeCompare(b.name)
       ),
       isLoading: false,
-      statusMessage: `Added "${data.name}" to the Skill Tree.`,
+      statusMessage: isStandalone
+        ? `Created Standalone Ability "${data.name}".`
+        : `Added "${data.name}" to the Skill Tree.`,
     }));
 
     this.notifications.success(
-      'Skill Tree Node Created',
-      `Added Tier ${data.tier} "${data.name}" to the Skill Tree.`
+      isStandalone ? 'Standalone Ability Created' : 'Skill Tree Node Created',
+      isStandalone
+        ? `"${data.name}" is now available in the Standalone Combat Arts roster.`
+        : `Added Tier ${data.tier} "${data.name}" to the Skill Tree.`
     );
     return data;
   }
@@ -520,6 +561,7 @@ export class CompendiumStore {
     if (!trimmedName) return false;
 
     const existing = this.#state().perkNodes.find((p) => p.id === nodeId);
+    const isStandalone = !draft.tree_id;
 
     this.#state.update((s) => ({
       ...s,
@@ -534,15 +576,16 @@ export class CompendiumStore {
       __icon_color: draft.icon_color ?? undefined,
       __icon_tint_custom: draft.icon_tint_custom ?? true,
       __is_active: existing?.is_active ?? true,
+      __is_standalone: isStandalone,
     };
 
     const { data, error } = await this.compendiumService.updatePerkNodeRecord(
       nodeId,
       {
-        tree_id: draft.tree_id,
+        tree_id: draft.tree_id || null,
         name: trimmedName,
         node_type: draft.node_type,
-        tier: draft.tier,
+        tier: isStandalone ? 1 : draft.tier,
         perk_cost: draft.perk_cost,
         ap_cost: draft.node_type === 'combat_art' ? draft.ap_cost : null,
         cooldown_rounds:
@@ -550,7 +593,7 @@ export class CompendiumStore {
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
         rule_hooks: enrichedHooks,
-        parent_node_id: draft.parent_node_id || null,
+        parent_node_id: isStandalone ? null : draft.parent_node_id || null,
       },
       {
         icon: draft.icon,
@@ -580,7 +623,7 @@ export class CompendiumStore {
     }));
 
     this.notifications.success(
-      'Skill Tree Node Updated',
+      isStandalone ? 'Standalone Ability Updated' : 'Skill Tree Node Updated',
       `Saved changes to "${data.name}".`
     );
     return true;
@@ -643,7 +686,16 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
-    const err = await this.compendiumService.deletePerkNodeRecord(nodeId);
+    const nextHooks: PerkNodeModel['rule_hooks'] = {
+      ...(existing?.rule_hooks ?? {}),
+      __is_active: false,
+    };
+
+    const err = await this.compendiumService.deletePerkNodeRecord(
+      nodeId,
+      existing?.slug,
+      nextHooks
+    );
 
     if (err) {
       this.#state.update((s) => ({
@@ -657,14 +709,26 @@ export class CompendiumStore {
 
     this.#state.update((s) => ({
       ...s,
-      perkNodes: s.perkNodes.filter((p) => p.id !== nodeId),
+      perkNodes: s.perkNodes.map((p) =>
+        p.id === nodeId
+          ? { ...p, is_active: false, rule_hooks: nextHooks }
+          : p
+      ),
       isLoading: false,
-      statusMessage: 'Node permanently deleted from Skill Tree.',
+      statusMessage: `Deleted "${existing?.name ?? 'Ability'}".`,
     }));
 
     this.notifications.info(
-      'Skill Tree Node Deleted',
-      `Permanently removed "${existing?.name ?? 'Node'}" from the database.`
+      isStandalonePerkNode(existing)
+        ? 'Standalone Ability Deleted'
+        : 'Skill Tree Node Deleted',
+      `Removed "${existing?.name ?? 'Ability'}" from the active compendium. Existing characters keep this perk.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setPerkNodeActive(nodeId, true);
+        },
+      }
     );
     return true;
   }
@@ -873,17 +937,36 @@ export class CompendiumStore {
     const existing = this.#state().weapons.find((w) => w.id === weaponId);
     if (!existing) return false;
 
-    void this.compendiumService.deleteWeaponRecord(weaponId);
+    const nextHooks: Record<string, unknown> = {
+      ...(existing.rule_hooks ?? {}),
+      __is_active: false,
+    };
+
+    void this.compendiumService.deleteWeaponRecord(
+      weaponId,
+      existing.slug,
+      nextHooks
+    );
 
     this.#state.update((s) => ({
       ...s,
-      weapons: s.weapons.filter((w) => w.id !== weaponId),
-      statusMessage: `Permanently removed "${existing.name}" from the Armory.`,
+      weapons: s.weapons.map((w) =>
+        w.id === weaponId
+          ? { ...w, is_active: false, rule_hooks: nextHooks }
+          : w
+      ),
+      statusMessage: `Deleted "${existing.name}" from the Armory.`,
     }));
 
     this.notifications.info(
-      'Weapon Permanently Deleted',
-      `Removed "${existing.name}" from the Armory database.`
+      'Weapon Deleted',
+      `Removed "${existing.name}" from the active Armory. Existing characters keep this weapon equipped.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setWeaponActive(weaponId, true);
+        },
+      }
     );
 
     return true;

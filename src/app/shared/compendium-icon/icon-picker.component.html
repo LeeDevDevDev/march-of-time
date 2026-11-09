@@ -137,6 +137,7 @@
             <input
               type="checkbox"
               [ngModel]="tintCustom()"
+              [ngModelOptions]="{ standalone: true }"
               (ngModelChange)="tintCustomChange.emit($event)"
               class="h-4 w-4 accent-[#C4491A]"
             />
@@ -185,6 +186,7 @@
         <input
           type="color"
           [ngModel]="color()"
+          [ngModelOptions]="{ standalone: true }"
           (ngModelChange)="selectColor($event)"
           class="h-4 w-4 cursor-pointer border-0 bg-transparent p-0"
         />

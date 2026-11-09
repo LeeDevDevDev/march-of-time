@@ -34,16 +34,25 @@ export class CharacterStore {
     () => this.#state().isLoading || this.compendiumStore.isLoading()
   );
   readonly error = computed(() => this.#state().error);
+  readonly defaultCharacterName = computed(() => {
+    const username =
+      this.authStore.displayName() ||
+      this.authStore.handle() ||
+      'Adventurer';
+    return `${username}'s Character`;
+  });
 
   // Read-only Compendium selectors delegated from CompendiumStore
   // Active items for building new characters:
   readonly weapons = this.compendiumStore.weapons;
   readonly skillTrees = this.compendiumStore.skillTrees;
   readonly perkNodes = this.compendiumStore.perkNodes;
+  readonly standaloneNodes = this.compendiumStore.standaloneNodes;
   // All items (including archived) so existing characters never lose equipped stats:
   readonly allWeapons = this.compendiumStore.allWeapons;
   readonly allSkillTrees = this.compendiumStore.allSkillTrees;
   readonly allPerkNodes = this.compendiumStore.allPerkNodes;
+  readonly allStandaloneNodes = this.compendiumStore.allStandaloneNodes;
 
   constructor() {
     effect(() => {
@@ -106,9 +115,11 @@ export class CharacterStore {
 
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
     try {
+      const resolvedName =
+        draft.name.trim() || this.defaultCharacterName();
       const { data, error } = await this.characterService.insertCharacter({
         owner_id: user.id,
-        name: draft.name.trim() || 'Unnamed Warden',
+        name: resolvedName,
         level: draft.level,
         attributes: draft.attributes,
         combat_skills: draft.combat_skills,
@@ -176,6 +187,68 @@ export class CharacterStore {
     }));
 
     await this.characterService.updateCharacterRecord(characterId, clamped);
+  }
+
+  async saveBuilderChanges(
+    characterId: string,
+    draft: Omit<
+      CharacterModel,
+      'id' | 'owner_id' | 'current_hp' | 'current_sp' | 'current_ap' | 'active_cooldowns'
+    >
+  ): Promise<CharacterModel | null> {
+    const current = this.getCharacterById(characterId);
+    if (!current) return null;
+
+    const oldDerived = computeDerivedStats(
+      current,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes()
+    );
+    const nextDerived = computeDerivedStats(
+      draft,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes()
+    );
+
+    // If maxHp or maxSp increased (e.g. leveling up or equipping heavier armor), grant the delta
+    const hpDelta = Math.max(0, nextDerived.maxHp - oldDerived.maxHp);
+    const spDelta = Math.max(0, nextDerived.maxSp - oldDerived.maxSp);
+
+    const updated: CharacterModel = {
+      ...current,
+      name: draft.name.trim() || this.defaultCharacterName(),
+      level: draft.level,
+      attributes: draft.attributes,
+      combat_skills: draft.combat_skills,
+      field_skills: draft.field_skills,
+      equipped_armor: draft.equipped_armor,
+      equipped_shield: draft.equipped_shield,
+      weapon_slot_1_id: draft.weapon_slot_1_id,
+      weapon_slot_2_id: draft.weapon_slot_2_id,
+      unlocked_perk_ids: draft.unlocked_perk_ids,
+      current_hp: Math.min(nextDerived.maxHp, current.current_hp + hpDelta),
+      current_sp: Math.min(nextDerived.maxSp, current.current_sp + spDelta),
+    };
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      characters: s.characters.map((c) => (c.id === characterId ? updated : c)),
+    }));
+
+    try {
+      await this.characterService.updateCharacterRecord(characterId, updated);
+      this.#state.update((s) => ({ ...s, isLoading: false }));
+      this.notifications.success(
+        'Character Updated',
+        `Saved changes to ${updated.name} (Level ${updated.level}).`
+      );
+      return updated;
+    } catch {
+      this.#state.update((s) => ({ ...s, isLoading: false }));
+      return null;
+    }
   }
 
   async deleteCharacter(characterId: string): Promise<void> {

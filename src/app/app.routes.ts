@@ -51,6 +51,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'characters/:id/edit',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/characters/character-creator.component').then(
+        (m) => m.CharacterCreatorComponent
+      ),
+  },
+  {
     path: 'characters/:id',
     canActivate: [authGuard],
     loadComponent: () =>

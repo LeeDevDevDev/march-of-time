@@ -25,6 +25,7 @@
     [rows]="rows()"
     [required]="required()"
     [ngModel]="value()"
+    [ngModelOptions]="{ standalone: true }"
     (ngModelChange)="onTextChange($event, textareaEl)"
     (keyup)="onCursorActivity(textareaEl, $event)"
     (click)="onCursorActivity(textareaEl)"

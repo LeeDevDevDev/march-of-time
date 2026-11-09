@@ -48,7 +48,6 @@ export class SkillTreeCanvasComponent implements OnChanges {
   @Output() addRootNode = new EventEmitter<void>();
   @Output() branchChildNode = new EventEmitter<PerkNodeModel>();
   @Output() editNode = new EventEmitter<PerkNodeModel>();
-  @Output() toggleArchiveNode = new EventEmitter<PerkNodeModel>();
   @Output() deleteNode = new EventEmitter<PerkNodeModel>();
   @Output() toggleUnlock = new EventEmitter<PerkNodeModel>();
 

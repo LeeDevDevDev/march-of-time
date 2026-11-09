@@ -11,6 +11,7 @@ import {
   formatRuleHookBadges,
   getHeavyWeaponBlockBase,
   getWeaponPropertyTags,
+  isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
 } from '../../../core/compendium/compendium.model';
@@ -28,6 +29,7 @@ export {
   formatRuleHookBadges,
   getHeavyWeaponBlockBase,
   getWeaponPropertyTags,
+  isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
 };
@@ -383,7 +385,7 @@ export function computeDerivedStats(
 
   let blockSourceType: 'shield' | 'heavy_weapon' | 'none' = 'none';
   let blockBaseValue = 0;
-  let blockSourceLabel = 'No Shield / Heavy Weapon';
+  let blockSourceLabel = 'No Shield / Weapon Guard';
 
   if (shieldSpec.usesRaiseShield && (!activeWeaponIsHeavy || shieldSpec.blockValue >= heavyBlockBase)) {
     blockSourceType = 'shield';
@@ -392,7 +394,7 @@ export function computeDerivedStats(
   } else if (activeWeaponIsHeavy) {
     blockSourceType = 'heavy_weapon';
     blockBaseValue = heavyBlockBase;
-    blockSourceLabel = activeWeapon ? `${activeWeapon.name} (Heavy Guard)` : 'Heavy Weapon Guard';
+    blockSourceLabel = activeWeapon ? `${activeWeapon.name} (Guard)` : 'Weapon Guard';
   }
 
   const usesRaiseShield = blockSourceType !== 'none';

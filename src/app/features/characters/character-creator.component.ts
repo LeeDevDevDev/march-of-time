@@ -1,9 +1,10 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   ResolvedCompendiumVisuals,
   getTreeArchetypeIcon,
+  resolveNodeVisuals,
   resolveTreeVisuals,
 } from '../../core/compendium/compendium.model';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
@@ -40,12 +41,28 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
 })
 export class CharacterCreatorComponent {
   readonly characterStore = inject(CharacterStore);
+  private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   readonly Number = Number;
+
+  readonly editingCharacterId = signal<string | null>(
+    this.route.snapshot.paramMap.get('id')
+  );
+  readonly isEditMode = computed(() => !!this.editingCharacterId());
+  private hasHydratedEditState = false;
 
   readonly step = signal<CreatorStep>(1);
 
   readonly name = signal<string>('');
+  readonly characterInitials = computed(() => {
+    const source =
+      this.name().trim() || this.characterStore.defaultCharacterName();
+    const parts = source.split(/\s+/);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return source.slice(0, 2).toUpperCase();
+  });
   readonly level = signal<number>(1);
   readonly attributes = signal<Record<AttributeName, number>>({
     Brawn: 0,
@@ -137,6 +154,55 @@ export class CharacterCreatorComponent {
     },
   ];
 
+  constructor() {
+    const stepParam = Number(this.route.snapshot.queryParamMap.get('step'));
+    if (stepParam >= 1 && stepParam <= 5) {
+      this.step.set(stepParam as CreatorStep);
+    }
+
+    effect(() => {
+      const editId = this.editingCharacterId();
+      if (!editId || this.hasHydratedEditState) return;
+      const existing = this.characterStore.getCharacterById(editId);
+      if (!existing) return;
+
+      this.hasHydratedEditState = true;
+      this.name.set(existing.name);
+      this.level.set(existing.level);
+      this.attributes.set({
+        Brawn: existing.attributes?.Brawn ?? 0,
+        Agility: existing.attributes?.Agility ?? 0,
+        Technique: existing.attributes?.Technique ?? 0,
+        Iron: existing.attributes?.Iron ?? 0,
+        Cunning: existing.attributes?.Cunning ?? 0,
+      });
+      this.combatSkills.set({
+        Strike: existing.combat_skills?.Strike ?? 0,
+        Shoot: existing.combat_skills?.Shoot ?? 0,
+        Parry: existing.combat_skills?.Parry ?? 0,
+        Dodge: existing.combat_skills?.Dodge ?? 0,
+        Block: existing.combat_skills?.Block ?? 0,
+      });
+      this.fieldSkills.set({
+        Athletics: existing.field_skills?.Athletics ?? 0,
+        Menace: existing.field_skills?.Menace ?? 0,
+        Stealth: existing.field_skills?.Stealth ?? 0,
+        Tinkering: existing.field_skills?.Tinkering ?? 0,
+        Medicine: existing.field_skills?.Medicine ?? 0,
+        Survival: existing.field_skills?.Survival ?? 0,
+        Resolve: existing.field_skills?.Resolve ?? 0,
+        Perception: existing.field_skills?.Perception ?? 0,
+        Sway: existing.field_skills?.Sway ?? 0,
+        Lore: existing.field_skills?.Lore ?? 0,
+      });
+      this.equippedArmor.set(existing.equipped_armor ?? 'Medium');
+      this.equippedShield.set(existing.equipped_shield ?? 'Heater');
+      this.weaponSlot1Id.set(existing.weapon_slot_1_id ?? null);
+      this.weaponSlot2Id.set(existing.weapon_slot_2_id ?? null);
+      this.unlockedPerkIds.set([...(existing.unlocked_perk_ids ?? [])]);
+    });
+  }
+
   prevStep(): void {
     const cur = this.step();
     if (cur > 1) this.step.set((cur - 1) as CreatorStep);
@@ -208,6 +274,10 @@ export class CharacterCreatorComponent {
     return resolveTreeVisuals(tree);
   }
 
+  getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+    return resolveNodeVisuals(node);
+  }
+
   countSelectedInTree(treeId: string): number {
     const selected = new Set(this.unlockedPerkIds());
     return this.characterStore
@@ -233,16 +303,37 @@ export class CharacterCreatorComponent {
   }
 
   async finishCreateCharacter(): Promise<void> {
-    if (!this.name().trim()) {
-      this.step.set(1);
-      return;
-    }
+    const resolvedName =
+      this.name().trim() || this.characterStore.defaultCharacterName();
+    this.name.set(resolvedName);
 
     const wep1 = this.weaponSlot1Id() ?? this.characterStore.weapons()[0]?.id ?? null;
     const wep2 = this.weaponSlot2Id() ?? this.characterStore.weapons()[1]?.id ?? null;
+    const editId = this.editingCharacterId();
+
+    if (editId) {
+      const updated = await this.characterStore.saveBuilderChanges(editId, {
+        name: resolvedName,
+        level: this.level(),
+        attributes: this.attributes(),
+        combat_skills: this.combatSkills(),
+        field_skills: this.fieldSkills(),
+        equipped_armor: this.equippedArmor(),
+        equipped_shield: this.equippedShield(),
+        weapon_slot_1_id: wep1,
+        weapon_slot_2_id: wep2,
+        active_weapon_slot: 1,
+        unlocked_perk_ids: this.unlockedPerkIds(),
+      });
+
+      if (updated) {
+        await this.router.navigate(['/characters', updated.id]);
+      }
+      return;
+    }
 
     const created = await this.characterStore.createCharacter({
-      name: this.name().trim(),
+      name: resolvedName,
       level: this.level(),
       attributes: this.attributes(),
       combat_skills: this.combatSkills(),
