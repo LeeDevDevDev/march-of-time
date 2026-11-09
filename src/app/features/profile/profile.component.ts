@@ -29,8 +29,4 @@ export class ProfileComponent implements OnInit {
   async saveProfile(): Promise<void> {
     await this.authStore.saveProfileAndHandle(this.displayName, this.handle);
   }
-
-  async toggleAdmin(): Promise<void> {
-    await this.authStore.setAdminAccess(!this.authStore.isAdmin());
-  }
 }

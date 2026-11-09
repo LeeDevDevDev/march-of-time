@@ -108,7 +108,7 @@
     </div>
   </section>
 
-  <!-- Admin Role Toggle Card -->
+  <!-- Account Role Indicator Card (Read-Only, Server-Enforced) -->
   <section
     class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 sm:p-8"
   >
@@ -116,28 +116,30 @@
       <div>
         <div class="flex items-center gap-2">
           <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
-            Administrator Role
+            Account Role
           </h2>
           @if (authStore.isAdmin()) {
             <span
               class="rounded border border-[#C4491A] bg-[var(--mot-well)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]"
             >
-              Admin Active
+              System Administrator
+            </span>
+          } @else {
+            <span
+              class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-0.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)]"
+            >
+              Player / Game Master
             </span>
           }
         </div>
         <p class="mt-1 text-xs text-[var(--mot-muted)]">
-          Enables the <strong>Content Manager</strong> navigation tab in the top bar for managing system weapons, skill trees, and perks.
+          @if (authStore.isAdmin()) {
+            Your account has verified database privileges to author weapons, skill trees, and glossary rules in the <strong>Content Manager</strong>.
+          } @else {
+            Standard player and Game Master access. Administrator privileges are managed on the server via Supabase.
+          }
         </p>
       </div>
-
-      <button
-        type="button"
-        (click)="toggleAdmin()"
-        class="shrink-0 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-bold text-[var(--mot-text)] transition-colors hover:border-[#C4491A]"
-      >
-        {{ authStore.isAdmin() ? 'Disable Admin View' : 'Enable Admin View' }}
-      </button>
     </div>
   </section>
 </div>

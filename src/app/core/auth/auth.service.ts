@@ -152,17 +152,6 @@ export class AuthService {
     return { user: authUpdated.user ?? null, error: null };
   }
 
-  async updateAdminAccess(userId: string, nextAdmin: boolean): Promise<void> {
-    await this.supabase.auth.updateUser({
-      data: { is_admin: nextAdmin },
-    });
-
-    await this.supabase
-      .from('profiles')
-      .update({ is_admin: nextAdmin, updated_at: new Date().toISOString() })
-      .eq('id', userId);
-  }
-
   async signOut(): Promise<void> {
     await this.supabase.auth.signOut();
   }

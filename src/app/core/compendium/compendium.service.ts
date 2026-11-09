@@ -28,15 +28,6 @@ export function slugifyText(value: string): string {
 export class CompendiumService {
   private readonly supabase = inject(SupabaseService).client;
 
-  // ===========================================================================
-  // SUPABASE COMPENDIUM BUNDLE & VIEWS
-  // ===========================================================================
-
-  /**
-   * Calls the PostgreSQL `get_compendium_bundle()` RPC so the backend gathers
-   * weapons, skill_trees, perk_nodes, and compendium_keywords in a single request.
-   * Falls back to table queries if `0010_compendium_views_and_rpc.sql` hasn't been run yet.
-   */
   async fetchFullCompendium(): Promise<CompendiumBundle> {
     const { data, error } = await this.supabase.rpc('get_compendium_bundle');
 
@@ -53,7 +44,6 @@ export class CompendiumService {
       };
     }
 
-    // Fallback if migration 0010_compendium_views_and_rpc.sql is not yet applied
     const [wepsRes, treesRes, perksRes, kwRes] = await Promise.all([
       this.supabase.from('weapons').select('*').order('name'),
       this.supabase.from('skill_trees').select('*').order('name'),
@@ -75,10 +65,6 @@ export class CompendiumService {
           : DEFAULT_KEYWORDS,
     };
   }
-
-  // ===========================================================================
-  // KEYWORDS API (`public.compendium_keywords` / `public.v_active_keywords`)
-  // ===========================================================================
 
   async insertKeyword(input: {
     term: string;
@@ -145,10 +131,6 @@ export class CompendiumService {
   async deleteKeywordRecord(kw: KeywordDefinition): Promise<void> {
     await this.updateKeywordActiveStatus(kw, false);
   }
-
-  // ===========================================================================
-  // SKILL TREES API (`public.skill_trees` / `public.v_active_skill_trees`)
-  // ===========================================================================
 
   async insertSkillTree(input: {
     name: string;
@@ -240,7 +222,6 @@ export class CompendiumService {
       return null;
     }
 
-    // Fallback if `0010_compendium_views_and_rpc.sql` hasn't been executed yet
     const archivedSlug = `${(currentSlug || 'tree').replace(/-archived-[a-z0-9]+$/i, '')}-archived-${Date.now().toString(36)}`;
     const { error } = await this.supabase
       .from('skill_trees')
@@ -254,10 +235,6 @@ export class CompendiumService {
 
     return error?.message ?? null;
   }
-
-  // ===========================================================================
-  // PERK NODES & STANDALONE ARTS API (`public.perk_nodes` / `public.v_active_perk_nodes`)
-  // ===========================================================================
 
   async insertPerkNode(
     payload: Record<string, unknown>,
@@ -347,7 +324,6 @@ export class CompendiumService {
       return null;
     }
 
-    // Fallback if `0010_compendium_views_and_rpc.sql` hasn't been executed yet
     const archivedSlug = `${(currentSlug || 'node').replace(/-archived-[a-z0-9]+$/i, '')}-archived-${Date.now().toString(36)}`;
     const { error } = await this.supabase
       .from('perk_nodes')
@@ -360,10 +336,6 @@ export class CompendiumService {
 
     return error?.message ?? null;
   }
-
-  // ===========================================================================
-  // SUPABASE STORAGE: CUSTOM ICONS (`compendium-icons` bucket)
-  // ===========================================================================
 
   async uploadCompendiumIconFile(
     file: File,
@@ -395,10 +367,6 @@ export class CompendiumService {
 
     return { url: fallbackDataUrl, storedInBucket: false };
   }
-
-  // ===========================================================================
-  // WEAPONS & ARMORY API (`public.weapons` / `public.v_active_weapons`)
-  // ===========================================================================
 
   async insertWeapon(
     payload: Record<string, unknown>
@@ -456,7 +424,6 @@ export class CompendiumService {
       return;
     }
 
-    // Fallback if `0010_compendium_views_and_rpc.sql` hasn't been executed yet
     const archivedSlug = `${(currentSlug || 'weapon').replace(/-archived-[a-z0-9]+$/i, '')}-archived-${Date.now().toString(36)}`;
     await this.supabase
       .from('weapons')

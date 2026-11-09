@@ -60,9 +60,7 @@ export class AuthStore {
   });
 
   readonly isAdmin = computed<boolean>(() => {
-    const profAdmin = this.#state().profile?.is_admin;
-    if (typeof profAdmin === 'boolean') return profAdmin;
-    return Boolean(this.#state().user?.user_metadata?.['is_admin']);
+    return this.#state().profile?.is_admin === true;
   });
 
   readonly needsOnboarding = computed(
@@ -321,30 +319,6 @@ export class AuthStore {
     } finally {
       this.#state.update((s) => ({ ...s, isLoading: false }));
     }
-  }
-
-  async setAdminAccess(nextAdmin: boolean): Promise<void> {
-    const user = this.#state().user;
-    if (!user) return;
-
-    await this.authService.updateAdminAccess(user.id, nextAdmin);
-
-    this.#state.update((s) => ({
-      ...s,
-      profile: s.profile
-        ? { ...s.profile, is_admin: nextAdmin }
-        : {
-            id: user.id,
-            display_name: this.displayName(),
-            handle: this.handle(),
-            is_admin: nextAdmin,
-            sheet_theme: this.themeStore.sheetTheme(),
-            vtt_theme: this.themeStore.vttTheme(),
-          },
-      statusMessage: nextAdmin
-        ? 'Admin access enabled. Content Manager is now visible in the navigation bar.'
-        : 'Admin access disabled.',
-    }));
   }
 
   async signOut(): Promise<void> {
