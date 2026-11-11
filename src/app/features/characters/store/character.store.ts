@@ -21,14 +21,12 @@ export class CharacterStore {
   private readonly compendiumStore = inject(CompendiumStore);
   private readonly notifications = inject(NotificationStore);
 
-  // Private encapsulated Signal State — manages ONLY the user's characters
   readonly #state = signal<CharacterState>({
     characters: [],
     isLoading: false,
     error: null,
   });
 
-  // Public Readonly Selectors
   readonly characters = computed(() => this.#state().characters);
   readonly isLoading = computed(
     () => this.#state().isLoading || this.compendiumStore.isLoading()
@@ -42,13 +40,10 @@ export class CharacterStore {
     return `${username}'s Character`;
   });
 
-  // Read-only Compendium selectors delegated from CompendiumStore
-  // Active items for building new characters:
   readonly weapons = this.compendiumStore.weapons;
   readonly skillTrees = this.compendiumStore.skillTrees;
   readonly perkNodes = this.compendiumStore.perkNodes;
   readonly standaloneNodes = this.compendiumStore.standaloneNodes;
-  // All items (including archived) so existing characters never lose equipped stats:
   readonly allWeapons = this.compendiumStore.allWeapons;
   readonly allSkillTrees = this.compendiumStore.allSkillTrees;
   readonly allPerkNodes = this.compendiumStore.allPerkNodes;
@@ -210,7 +205,6 @@ export class CharacterStore {
       this.compendiumStore.allPerkNodes()
     );
 
-    // If maxHp or maxSp increased (e.g. leveling up or equipping heavier armor), grant the delta
     const hpDelta = Math.max(0, nextDerived.maxHp - oldDerived.maxHp);
     const spDelta = Math.max(0, nextDerived.maxSp - oldDerived.maxSp);
 

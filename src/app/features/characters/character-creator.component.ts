@@ -3,11 +3,16 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   ResolvedCompendiumVisuals,
+  formatWeaponHookBadges,
+  getCombatTagBadgeClass,
+  getCombatTagCounterLabel,
   getTreeArchetypeIcon,
   resolveNodeVisuals,
   resolveTreeVisuals,
+  resolveWeaponVisuals,
 } from '../../core/compendium/compendium.model';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
+import { KeywordTextComponent } from '../../shared/keyword-text/keyword-text.component';
 import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
 import {
   ARMOR_TIERS,
@@ -24,6 +29,7 @@ import {
   SkillTreeModel,
   WeaponModel,
   computeDerivedStats,
+  formatRuleHookBadges,
   getHeavyWeaponBlockBase,
   getWeaponPropertyTags,
   isWeaponHeavy,
@@ -36,7 +42,13 @@ type CreatorStep = 1 | 2 | 3 | 4 | 5;
 @Component({
   selector: 'app-character-creator',
   standalone: true,
-  imports: [FormsModule, RouterLink, SkillTreeCanvasComponent, CompendiumIconComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    SkillTreeCanvasComponent,
+    CompendiumIconComponent,
+    KeywordTextComponent,
+  ],
   templateUrl: './character-creator.component.html',
 })
 export class CharacterCreatorComponent {
@@ -44,6 +56,8 @@ export class CharacterCreatorComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   readonly Number = Number;
+  readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
+  readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
 
   readonly editingCharacterId = signal<string | null>(
     this.route.snapshot.paramMap.get('id')
@@ -278,6 +292,18 @@ export class CharacterCreatorComponent {
     return resolveNodeVisuals(node);
   }
 
+  getWeaponVisuals(weapon: WeaponModel): ResolvedCompendiumVisuals {
+    return resolveWeaponVisuals(weapon);
+  }
+
+  getWeaponHookBadges(weapon: WeaponModel | null | undefined): string[] {
+    return formatWeaponHookBadges(weapon);
+  }
+
+  getHookBadges(node: PerkNodeModel): string[] {
+    return formatRuleHookBadges(node.rule_hooks);
+  }
+
   countSelectedInTree(treeId: string): number {
     const selected = new Set(this.unlockedPerkIds());
     return this.characterStore
@@ -289,14 +315,19 @@ export class CharacterCreatorComponent {
     const perkId = node.id;
     this.unlockedPerkIds.update((ids) => {
       if (ids.includes(perkId)) {
-        // Also remove any child nodes that depend on this node
-        const dependentIds = new Set(
-          this.characterStore
-            .perkNodes()
-            .filter((p) => p.parent_node_id === perkId)
-            .map((p) => p.id)
-        );
-        return ids.filter((id) => id !== perkId && !dependentIds.has(id));
+        const allNodes = this.characterStore.perkNodes();
+        const toRemove = new Set<string>([perkId]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const p of allNodes) {
+            if (p.parent_node_id && toRemove.has(p.parent_node_id) && !toRemove.has(p.id)) {
+              toRemove.add(p.id);
+              changed = true;
+            }
+          }
+        }
+        return ids.filter((id) => !toRemove.has(id));
       }
       return [...ids, perkId];
     });

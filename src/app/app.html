@@ -3,13 +3,11 @@
   [class.theme-light]="themeStore.sheetTheme() === 'light'"
   [class.theme-dark]="themeStore.sheetTheme() === 'dark'"
 >
-  <!-- Deep Night-Pine Shell Header (#122220) -->
   <header class="sticky top-0 z-40 border-b border-[#243B37] bg-[#122220] text-[#EBF5F3]">
     <div
       class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8"
     >
       <div class="flex items-center gap-6">
-        <!-- Brand Identity -->
         <a routerLink="/dashboard" class="flex items-center gap-3 no-underline">
           <div
             class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#C4491A] font-display text-sm font-bold text-white"
@@ -21,7 +19,6 @@
           </span>
         </a>
 
-        <!-- Primary Navigation Bar (Games | Characters | Content Manager [Admin]) -->
         @if (authStore.isAuthenticated()) {
           <nav aria-label="Primary navigation" class="flex items-center gap-1.5">
             <a
@@ -49,7 +46,7 @@
               >
                 <span>Content Manager</span>
                 <span
-                  class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white"
+                  class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-xs font-bold text-white"
                 >
                   Admin
                 </span>
@@ -59,10 +56,8 @@
         }
       </div>
 
-      <!-- Top-Right Notification Center + User Context Menu (Only shown when signed in) -->
       @if (authStore.isAuthenticated()) {
         <div class="flex items-center gap-2.5">
-          <!-- Notification Bell & Activity Feed Popover -->
           <div class="relative" (click)="$event.stopPropagation()">
             <button
               type="button"
@@ -96,7 +91,7 @@
 
             @if (notificationStore.drawerOpen()) {
               <div
-                class="absolute right-0 mt-2 w-80 sm:w-96 overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+                class="mot-float absolute right-0 mt-2 w-80 sm:w-96 overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
                 role="dialog"
                 aria-label="Recent notifications"
               >
@@ -149,7 +144,7 @@
                               {{ item.title }}
                             </span>
                           </div>
-                          <span class="shrink-0 font-mono-num text-[11px] text-[var(--mot-muted)] tabular-nums">
+                          <span class="shrink-0 font-mono-num text-xs text-[var(--mot-muted)] tabular-nums">
                             {{ item.createdAt | date: 'shortTime' }}
                           </span>
                         </div>
@@ -216,13 +211,11 @@
             </svg>
           </button>
 
-          <!-- Dropdown Context Menu -->
           @if (userMenuOpen()) {
             <div
               role="menu"
-              class="absolute right-0 mt-2 w-60 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1.5 text-[var(--mot-text)]"
+              class="mot-float absolute right-0 mt-2 w-60 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1.5 text-[var(--mot-text)]"
             >
-              <!-- Signed-in Identity Summary -->
               <div class="border-b border-[var(--mot-border)] px-3 py-2.5">
                 <div class="text-sm font-bold text-[var(--mot-text)]">
                   {{ authStore.displayName() }}
@@ -238,7 +231,6 @@
               </div>
 
               <div class="py-1 space-y-0.5">
-                <!-- 1. Profile -->
                 <button
                   type="button"
                   role="menuitem"
@@ -252,7 +244,6 @@
                   Profile &amp; Handle
                 </button>
 
-                <!-- 2. Theme Toggle (Light Mode / Dark Mode) -->
                 <button
                   type="button"
                   role="menuitem"
@@ -274,7 +265,6 @@
                 </button>
               </div>
 
-              <!-- 3. Sign Out -->
               <div class="border-t border-[var(--mot-border)] pt-1">
                 <button
                   type="button"

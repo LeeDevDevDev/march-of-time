@@ -1,0 +1,319 @@
+@if (!activeTree()) {
+  <section class="space-y-4">
+    <div
+      class="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 sm:flex-row sm:items-center"
+    >
+      <div>
+        <h2 class="font-display text-lg font-bold text-[var(--mot-text)]">
+          Martial Skill Trees
+        </h2>
+        <p class="text-xs text-[var(--mot-muted)]">
+          Select a Skill Tree to open its interactive branching node canvas, or create a new martial path.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2.5">
+        <input
+          type="text"
+          [ngModel]="treeSearch()"
+          (ngModelChange)="treeSearch.set($event)"
+          placeholder="Search skill trees..."
+          class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+        />
+        <button
+          type="button"
+          (click)="openNewTreeModal()"
+          class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>New Skill Tree</span>
+        </button>
+      </div>
+    </div>
+
+    @if (compendiumStore.isLoading() && compendiumStore.skillTrees().length === 0) {
+      <div class="grid grid-cols-1 gap-5 md:grid-cols-3" aria-busy="true">
+        @for (sk of [1, 2, 3]; track sk) {
+          <div
+            class="animate-pulse rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 space-y-4"
+          >
+            <div class="flex items-start justify-between">
+              <div class="h-12 w-12 rounded-xl bg-[var(--mot-well)]"></div>
+              <div class="h-6 w-16 rounded-lg bg-[var(--mot-well)]"></div>
+            </div>
+            <div class="h-6 w-2/3 rounded bg-[var(--mot-well)]"></div>
+            <div class="space-y-2">
+              <div class="h-3.5 w-full rounded bg-[var(--mot-well)]"></div>
+              <div class="h-3.5 w-4/5 rounded bg-[var(--mot-well)]"></div>
+            </div>
+            <div class="flex gap-2 pt-2">
+              <div class="h-6 w-24 rounded-md bg-[var(--mot-well)]"></div>
+              <div class="h-6 w-20 rounded-md bg-[var(--mot-well)]"></div>
+            </div>
+            <div class="flex justify-between border-t border-[var(--mot-border)] pt-4">
+              <div class="h-8 w-24 rounded-lg bg-[var(--mot-well)]"></div>
+              <div class="h-8 w-32 rounded-lg bg-[var(--mot-well)]"></div>
+            </div>
+          </div>
+        }
+      </div>
+    } @else if (filteredTrees().length === 0) {
+      <div
+        class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-8 text-center"
+      >
+        <p class="font-display text-base font-bold text-[var(--mot-text)]">
+          No Skill Trees Found
+        </p>
+        <p class="mt-1 text-xs text-[var(--mot-muted)]">
+          Create a new Skill Tree or clear your search filter.
+        </p>
+        <button
+          type="button"
+          (click)="openNewTreeModal()"
+          class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+        >
+          + New Skill Tree
+        </button>
+      </div>
+    } @else {
+      <div class="grid grid-cols-1 gap-5 md:grid-cols-3">
+        @for (tree of filteredTrees(); track tree.id) {
+          <article
+            class="group flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-6 transition-all hover:border-[#C4491A]"
+          >
+            <div>
+              <div class="flex items-start justify-between gap-3">
+                <div
+                  class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220] transition-transform group-hover:scale-105"
+                  [style.border-color]="getTreeVisuals(tree).color"
+                >
+                  <app-compendium-icon
+                    [icon]="getTreeVisuals(tree).icon"
+                    [color]="getTreeVisuals(tree).color"
+                    [tintCustom]="getTreeVisuals(tree).tintCustom"
+                    sizeClass="h-6 w-6"
+                  />
+                </div>
+
+                <div class="flex items-center gap-1.5">
+                  <span
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+                  >
+                    {{ getPerksForTree(tree.id).length }}
+                    {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
+                  </span>
+                </div>
+              </div>
+
+              <h2 class="mt-4 font-display text-xl font-bold text-[var(--mot-text)]">
+                {{ tree.name }}
+              </h2>
+              <p class="mt-1.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                {{ tree.description }}
+              </p>
+
+              <div class="mt-4 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                <span
+                  class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-accent-text)] tabular-nums"
+                >
+                  {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
+                </span>
+                <span
+                  class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)] tabular-nums"
+                >
+                  {{ countNodeType(tree.id, 'passive_upgrade') }} Passives
+                </span>
+              </div>
+            </div>
+
+            <div class="mt-6 flex items-center justify-between gap-2 border-t border-[var(--mot-border)] pt-4">
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  (click)="openEditTreeModal(tree)"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  (click)="deleteTree.emit(tree)"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                >
+                  Delete
+                </button>
+              </div>
+
+              <button
+                type="button"
+                (click)="openSkillTreeView(tree.id)"
+                class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+              >
+                View Skill Tree →
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+}
+
+@if (activeTree(); as tree) {
+  <section
+    class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
+  >
+    <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+      <div class="flex items-center gap-4">
+        <button
+          type="button"
+          (click)="closeSkillTreeView()"
+          class="flex h-9 items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A]"
+        >
+          ← All Trees
+        </button>
+
+        <div>
+          <h1 class="font-display text-lg font-bold text-white sm:text-xl">
+            {{ tree.name }}
+          </h1>
+          <p class="text-xs text-[#8AB0AB]">
+            {{ tree.description }}
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          (click)="createKeyword.emit()"
+          class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#FF8C5A] hover:border-[#C4491A]"
+        >
+          + New Special Word
+        </button>
+        <button
+          type="button"
+          (click)="openEditTreeModal(tree)"
+          class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+        >
+          Edit Tree Info
+        </button>
+        <button
+          type="button"
+          (click)="createRootNode.emit(tree.id)"
+          class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
+        >
+          + Add Tier 1 Root Node
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <app-skill-tree-canvas
+    [tree]="tree"
+    [allNodes]="compendiumStore.perkNodes()"
+    mode="admin"
+    (addRootNode)="createRootNode.emit(tree.id)"
+    (branchChildNode)="branchChildNode.emit($event)"
+    (editNode)="editNode.emit($event)"
+    (deleteNode)="deleteNode.emit($event)"
+  />
+}
+
+@if (treeModalOpen()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+    (mousedown)="onBackdropMouseDown($event)"
+  >
+    <div
+      class="mot-float flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+      (mousedown)="$event.stopPropagation()"
+      (click)="$event.stopPropagation()"
+    >
+      <div
+        class="flex shrink-0 items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+      >
+        <h2 class="font-display text-lg font-bold">
+          {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
+        </h2>
+        <button
+          type="button"
+          (click)="closeTreeModal()"
+          class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+        >
+          Close
+        </button>
+      </div>
+
+      <form (ngSubmit)="saveTree()" class="mot-scroll-gutter flex-1 overflow-y-auto p-6 space-y-4">
+        <div>
+          <label for="treeName" class="block text-xs font-bold text-[var(--mot-text)]">
+            Skill Tree Name
+          </label>
+          <input
+            id="treeName"
+            type="text"
+            name="treeName"
+            required
+            [(ngModel)]="treeFormName"
+            placeholder="e.g. Path of the Sentinel"
+            class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
+          />
+        </div>
+
+        <div>
+          <label for="treeDesc" class="block text-xs font-bold text-[var(--mot-text)]">
+            Martial Philosophy &amp; Combat Focus
+          </label>
+          <textarea
+            id="treeDesc"
+            name="treeDesc"
+            rows="3"
+            required
+            [(ngModel)]="treeFormDescription"
+            placeholder="Describe what kind of Combat Arts and Passive Upgrades belong to this path..."
+            class="mot-input mt-1.5 px-3.5 py-2.5 text-sm"
+          ></textarea>
+        </div>
+
+        <app-icon-picker
+          label="Skill Tree Crest &amp; Color"
+          shape="square"
+          [icon]="treeFormIcon"
+          (iconChange)="treeFormIcon = $event"
+          [color]="treeFormColor"
+          (colorChange)="treeFormColor = $event"
+          [tintCustom]="treeFormTintCustom"
+          (tintCustomChange)="treeFormTintCustom = $event"
+        />
+
+        <div class="flex items-center justify-end gap-2.5 pt-2">
+          <button
+            type="button"
+            (click)="closeTreeModal()"
+            class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            [disabled]="compendiumStore.isLoading()"
+            class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+          >
+            @if (compendiumStore.isLoading()) {
+              <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <span>Saving...</span>
+            } @else {
+              <span>{{ editingTreeId() ? 'Save Tree Changes' : 'Create Skill Tree' }}</span>
+            }
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}

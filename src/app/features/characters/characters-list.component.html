@@ -1,5 +1,4 @@
 <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
-  <!-- Top Characters Banner -->
   <section
     class="relative overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 sm:p-8 text-[#EBF5F3]"
   >
@@ -50,7 +49,6 @@
     </div>
   }
 
-  <!-- Characters Roster Grid -->
   @if (characterStore.isLoading() && characterStore.characters().length === 0) {
     <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
       @for (sk of [1, 2, 3]; track sk) {
@@ -119,7 +117,6 @@
             class="flex flex-col justify-between overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] transition-colors hover:border-[#C4491A]"
           >
             <div>
-              <!-- Card Header -->
               <div
                 class="flex items-center justify-between border-b border-[#243B37] bg-[#122220] px-5 py-4 text-[#EBF5F3]"
               >
@@ -146,7 +143,6 @@
                 </span>
               </div>
 
-              <!-- Vitals & Equipped Weapons Summary -->
               <div class="p-5 space-y-4 tabular-nums">
                 <div class="grid grid-cols-3 gap-2 text-center">
                   <div
@@ -196,7 +192,6 @@
               </div>
             </div>
 
-            <!-- Card Footer Actions -->
             <div
               class="flex items-center gap-2 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3.5"
             >
@@ -232,6 +227,7 @@
   <app-confirm-dialog
     [open]="!!pendingDeleteCharacter()"
     title="Delete Character"
+    subtitle="Permanent removal — this action cannot be undone."
     [itemName]="pendingDeleteCharacter()?.name ?? ''"
     [badge]="pendingDeleteCharacter() ? 'Level ' + pendingDeleteCharacter()!.level + ' Warden' : ''"
     message="Are you sure you want to permanently delete this character sheet, their weapon loadout, and unlocked Combat Arts?"

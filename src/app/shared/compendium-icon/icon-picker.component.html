@@ -1,10 +1,8 @@
 <div
   class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-4"
 >
-  <!-- Top Bar: Live Preview Medallion + Mode Switcher -->
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center gap-3.5">
-      <!-- Live Medallion Preview -->
       <div
         class="flex h-14 w-14 shrink-0 items-center justify-center border-2 bg-[#122220] transition-all"
         [class.rounded-2xl]="shape() === 'square'"
@@ -29,7 +27,6 @@
       </div>
     </div>
 
-    <!-- Premade vs Upload Tab Switcher -->
     <div class="flex items-center rounded-lg border border-[#243B37] bg-[#0D1615] p-1">
       <button
         type="button"
@@ -54,7 +51,6 @@
     </div>
   </div>
 
-  <!-- TAB 1: PREMADE RPG VECTOR ICONS -->
   @if (activeTab() === 'premade') {
     <div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
       @for (preset of presets; track preset.id) {
@@ -87,7 +83,6 @@
     </div>
   }
 
-  <!-- TAB 2: UPLOAD CUSTOM SVG / PNG / WEBP ICON -->
   @if (activeTab() === 'upload') {
     <div
       class="rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 space-y-3"
@@ -97,7 +92,7 @@
           <p class="text-xs font-bold text-[var(--mot-text)]">
             Upload Custom SVG, PNG, or WebP Icon
           </p>
-          <p class="mt-0.5 text-[11px] text-[var(--mot-muted)]">
+          <p class="mt-0.5 text-xs text-[var(--mot-muted)]">
             Transparent SVGs or PNG silhouettes can automatically change color using the palette below.
           </p>
         </div>
@@ -118,7 +113,7 @@
       </div>
 
       @if (uploadStatus()) {
-        <p class="font-mono-num text-[11px] font-semibold text-[var(--mot-sp-text)]">
+        <p class="font-mono-num text-xs font-semibold text-[var(--mot-sp-text)]">
           {{ uploadStatus() }}
         </p>
       }
@@ -156,7 +151,6 @@
     </div>
   }
 
-  <!-- COLOR PALETTE & CUSTOM HEX PICKER -->
   <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--mot-border)] pt-3">
     <div class="flex flex-wrap items-center gap-2">
       <span class="text-xs font-bold text-[var(--mot-text)]">
@@ -178,7 +172,6 @@
       }
     </div>
 
-    <!-- Custom Color Input + Hex Readout -->
     <div class="flex items-center gap-2">
       <label
         class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-mono-num font-bold text-[var(--mot-text)] hover:border-[#C4491A]"

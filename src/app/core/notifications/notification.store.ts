@@ -116,7 +116,6 @@ export class NotificationStore {
   triggerAction(item: AppNotification): void {
     if (!item.action) return;
     const cb = item.action.callback;
-    // Remove action after triggering so it can't be double-clicked
     this.#state.update((s) => ({
       ...s,
       items: s.items.map((n) =>

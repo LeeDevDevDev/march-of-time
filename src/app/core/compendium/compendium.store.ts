@@ -28,7 +28,6 @@ export class CompendiumStore {
   private readonly authStore = inject(AuthStore);
   private readonly notifications = inject(NotificationStore);
 
-  // Private encapsulated Signal State for the March of Time Rules Compendium
   readonly #state = signal<CompendiumState>({
     weapons: [],
     skillTrees: [],
@@ -39,7 +38,6 @@ export class CompendiumStore {
     statusMessage: null,
   });
 
-  // Public Readonly Selectors (Active items for character builders & live gameplay)
   readonly weapons = computed(() =>
     this.#state().weapons.filter((w) => isCompendiumItemActive(w))
   );
@@ -58,7 +56,6 @@ export class CompendiumStore {
     this.#state().keywords.filter((k) => isCompendiumItemActive(k))
   );
 
-  // Full Compendium Selectors (Active + Archived — for Content Forge & existing character sheets)
   readonly allWeapons = computed(() => this.#state().weapons);
   readonly allSkillTrees = computed(() => this.#state().skillTrees);
   readonly allPerkNodes = computed(() => this.#state().perkNodes);
@@ -109,10 +106,6 @@ export class CompendiumStore {
       this.#state.update((s) => ({ ...s, isLoading: false }));
     }
   }
-
-  // ===========================================================================
-  // ADMIN CONTENT MANAGER CRUD: SPECIAL KEYWORDS & GLOSSARY
-  // ===========================================================================
 
   async createKeyword(input: {
     term: string;
@@ -263,10 +256,6 @@ export class CompendiumStore {
       }
     );
   }
-
-  // ===========================================================================
-  // ADMIN CONTENT MANAGER CRUD: SKILL TREES & COMBAT ARTS / PASSIVE PERKS
-  // ===========================================================================
 
   async createSkillTree(input: {
     name: string;
@@ -733,10 +722,6 @@ export class CompendiumStore {
     return true;
   }
 
-  // ===========================================================================
-  // SUPABASE STORAGE UPLOAD FOR CUSTOM SKILL TREE & NODE ICONS
-  // ===========================================================================
-
   async uploadCompendiumIcon(
     file: File,
     fallbackDataUrl: string
@@ -746,10 +731,6 @@ export class CompendiumStore {
       fallbackDataUrl
     );
   }
-
-  // ===========================================================================
-  // ADMIN CONTENT MANAGER CRUD: WEAPONS & ARMORY FORGE
-  // ===========================================================================
 
   async createWeapon(
     draft: Omit<WeaponModel, 'id' | 'slug'> & { slug?: string }

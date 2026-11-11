@@ -8,6 +8,7 @@ import { Component, EventEmitter, HostListener, Input, Output } from '@angular/c
 export class ConfirmDialogComponent {
   @Input() open = false;
   @Input() title = 'Confirm Deletion';
+  @Input() subtitle = '';
   @Input() itemName = '';
   @Input() badge = '';
   @Input() message = 'Are you sure you want to permanently delete this entry?';

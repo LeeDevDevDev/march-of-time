@@ -8,11 +8,10 @@
     (mousedown)="onBackdropMouseDown($event)"
   >
     <div
-      class="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+      class="mot-float w-full max-w-md overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
       (mousedown)="$event.stopPropagation()"
       (click)="$event.stopPropagation()"
     >
-      <!-- Night Pine Header with Crimson Warning Emblem -->
       <div
         class="flex items-start justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
       >
@@ -44,9 +43,11 @@
             >
               {{ title }}
             </h2>
-            <p class="text-xs text-[#8AB0AB]">
-              Removed from the active Compendium (safe for existing characters).
-            </p>
+            @if (subtitle) {
+              <p class="text-xs text-[#8AB0AB]">
+                {{ subtitle }}
+              </p>
+            }
           </div>
         </div>
 
@@ -60,9 +61,7 @@
         </button>
       </div>
 
-      <!-- Body -->
       <div class="p-6 space-y-4">
-        <!-- Target Item Pill Card -->
         <div
           class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-3"
         >
@@ -98,7 +97,6 @@
           </div>
         }
 
-        <!-- Actions -->
         <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--mot-border)] pt-4">
           <button
             type="button"

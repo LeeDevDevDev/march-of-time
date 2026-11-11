@@ -1,0 +1,327 @@
+<section class="space-y-4">
+  <div
+    class="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 sm:flex-row sm:items-center"
+  >
+    <div class="flex flex-wrap items-center gap-1.5">
+      @for (filter of standaloneFilterOptions; track filter.id) {
+        <button
+          type="button"
+          (click)="standaloneTypeFilter.set(filter.id)"
+          class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+          [class.btn-copper]="standaloneTypeFilter() === filter.id"
+          [class.border-[var(--mot-border)]]="standaloneTypeFilter() !== filter.id"
+          [class.bg-[var(--mot-well)]]="standaloneTypeFilter() !== filter.id"
+          [class.text-[var(--mot-muted)]]="standaloneTypeFilter() !== filter.id"
+        >
+          {{ filter.label }}
+        </button>
+      }
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2.5">
+      <input
+        type="text"
+        [ngModel]="standaloneSearch()"
+        (ngModelChange)="standaloneSearch.set($event)"
+        placeholder="Search standalone arts..."
+        class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+      />
+      <button
+        type="button"
+        (click)="createStandaloneNode.emit()"
+        class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span>New Standalone Art</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-12">
+    <div class="space-y-2.5 lg:col-span-7">
+      @if (filteredStandaloneNodes().length === 0) {
+        <div
+          class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-8 text-center"
+        >
+          <p class="font-display text-base font-bold text-[var(--mot-text)]">
+            No Standalone Combat Arts or Passives Found
+          </p>
+          <p class="mt-1 text-xs text-[var(--mot-muted)]">
+            Author standalone Combat Arts or Passive Upgrades that can be assigned directly to characters or NPC tokens without a Skill Tree.
+          </p>
+          <button
+            type="button"
+            (click)="createStandaloneNode.emit()"
+            class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+          >
+            + New Standalone Art
+          </button>
+        </div>
+      } @else {
+        @for (node of filteredStandaloneNodes(); track node.id) {
+          <article
+            (click)="selectedStandaloneId.set(node.id)"
+            class="cursor-pointer rounded-2xl border p-4 transition-all"
+            [class.border-[#C4491A]]="selectedStandaloneNode()?.id === node.id"
+            [class.bg-[var(--mot-well)]]="selectedStandaloneNode()?.id === node.id"
+            [class.border-[var(--mot-border)]]="selectedStandaloneNode()?.id !== node.id"
+            [class.bg-[var(--mot-surface)]]="selectedStandaloneNode()?.id !== node.id"
+          >
+            <div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div class="flex items-start gap-3.5">
+                <div
+                  class="flex h-11 w-11 shrink-0 items-center justify-center border-2 bg-[#122220]"
+                  [class.rounded-xl]="node.node_type === 'combat_art'"
+                  [class.rounded-full]="node.node_type === 'passive_upgrade'"
+                  [style.border-color]="getNodeVisuals(node).color"
+                >
+                  <app-compendium-icon
+                    [icon]="getNodeVisuals(node).icon"
+                    [color]="getNodeVisuals(node).color"
+                    [tintCustom]="getNodeVisuals(node).tintCustom"
+                    sizeClass="h-5 w-5"
+                  />
+                </div>
+
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-display text-base font-bold text-[var(--mot-text)]">
+                      {{ node.name }}
+                    </h3>
+                    <span
+                      class="inline-flex items-center rounded-full border border-[#C4491A]/40 bg-[#C4491A]/10 px-2.5 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]"
+                    >
+                      Standalone
+                    </span>
+                    @if (node.node_type === 'combat_art') {
+                      <span
+                        class="inline-flex items-center rounded-full border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]"
+                      >
+                        Combat Art
+                      </span>
+                      @if (node.combat_tag && node.combat_tag !== 'None') {
+                        <span
+                          [class]="'inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold ' + getCombatTagBadgeClass(node.combat_tag)"
+                        >
+                          {{ node.combat_tag }}
+                        </span>
+                      }
+                    } @else {
+                      <span
+                        class="badge-jade inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
+                      >
+                        Passive
+                      </span>
+                    }
+                  </div>
+
+                  <div class="mt-1 flex flex-wrap items-center gap-2 font-mono-num text-xs font-semibold text-[var(--mot-accent-text)] tabular-nums">
+                    @if (node.node_type === 'combat_art') {
+                      <span>{{ node.ap_cost ?? 1 }} AP</span>
+                      <span>·</span>
+                      <span>{{ node.cooldown_rounds ?? 0 }} Rnd Cooldown</span>
+                      @if (node.combat_tag && node.combat_tag !== 'None') {
+                        <span>·</span>
+                        <span>{{ getCombatTagCounterLabel(node.combat_tag) }}</span>
+                      }
+                    } @else {
+                      <span class="text-[var(--mot-jade-text)]">Always Active Passive</span>
+                    }
+                    <span>·</span>
+                    <span>Cost {{ node.perk_cost ?? 1 }} {{ (node.perk_cost ?? 1) === 1 ? 'Perk' : 'Perks' }}</span>
+                  </div>
+
+                  @if (getNodeHookBadges(node).length > 0) {
+                    <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      @for (b of getNodeHookBadges(node); track $index) {
+                        <span
+                          class="badge-jade inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                        >
+                          {{ b }}
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2" (click)="$event.stopPropagation()">
+                <button
+                  type="button"
+                  (click)="editStandaloneNode.emit(node)"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  Edit
+                </button>
+              </div>
+            </div>
+          </article>
+        }
+      }
+    </div>
+
+    <div class="lg:col-span-5">
+      @if (selectedStandaloneNode(); as selNode) {
+        <aside
+          class="sticky top-6 overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] text-[#EBF5F3]"
+        >
+          <div class="flex items-start justify-between gap-3 border-b border-[#243B37] p-5">
+            <div class="flex min-w-0 flex-1 items-center gap-3.5">
+              <div
+                class="flex h-12 w-12 shrink-0 items-center justify-center border-2 bg-[#0D1615]"
+                [class.rounded-xl]="selNode.node_type === 'combat_art'"
+                [class.rounded-full]="selNode.node_type === 'passive_upgrade'"
+                [style.border-color]="getNodeVisuals(selNode).color"
+              >
+                <app-compendium-icon
+                  [icon]="getNodeVisuals(selNode).icon"
+                  [color]="getNodeVisuals(selNode).color"
+                  [tintCustom]="getNodeVisuals(selNode).tintCustom"
+                  sizeClass="h-6 w-6"
+                />
+              </div>
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h2 class="font-display text-xl font-bold text-white">
+                    {{ selNode.name }}
+                  </h2>
+                  <span class="rounded border border-[#C4491A] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]">
+                    Standalone
+                  </span>
+                </div>
+                <p class="mt-0.5 font-mono-num text-xs text-[#8AB0AB] tabular-nums">
+                  {{ selNode.node_type === 'combat_art' ? 'Active Combat Art' : 'Passive Upgrade' }} ·
+                  No Skill Tree Prerequisite
+                </p>
+              </div>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                (click)="editStandaloneNode.emit(selNode)"
+                class="btn-copper inline-flex h-8 items-center justify-center rounded-lg border border-transparent px-3 text-xs font-semibold"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                (click)="deleteStandaloneNode.emit(selNode)"
+                class="inline-flex h-8 items-center justify-center rounded-lg border border-[#243B37] bg-[#0D1615] px-3 text-xs font-semibold text-[#F26464] transition-colors hover:border-[#F26464]"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+
+          <div class="space-y-5 p-5">
+            <div class="grid grid-cols-3 gap-2.5 tabular-nums">
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Ability Type</div>
+                <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                  {{ selNode.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
+                </div>
+                <div class="mt-0.5 text-xs text-[#8AB0AB]">
+                  Cost: {{ selNode.perk_cost ?? 1 }} {{ (selNode.perk_cost ?? 1) === 1 ? 'Perk' : 'Perks' }}
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Action Economy</div>
+                @if (selNode.node_type === 'combat_art') {
+                  <div class="mt-1 font-mono-num text-sm font-bold text-[#FF8C5A]">
+                    {{ selNode.ap_cost ?? 1 }} AP
+                  </div>
+                  <div class="mt-0.5 text-xs text-[#8AB0AB]">
+                    {{ selNode.cooldown_rounds ?? 0 }} Rnd Cooldown
+                  </div>
+                } @else {
+                  <div class="mt-1 font-mono-num text-sm font-bold text-[#38B29A]">
+                    0 AP
+                  </div>
+                  <div class="mt-0.5 text-xs text-[#8AB0AB]">Always Active</div>
+                }
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Defense Tag</div>
+                @if (selNode.node_type === 'combat_art' && selNode.combat_tag && selNode.combat_tag !== 'None') {
+                  <div class="mt-1">
+                    <span
+                      [class]="'inline-flex items-center rounded-md border px-2 py-0.5 font-mono-num text-xs font-bold ' + getCombatTagBadgeClass(selNode.combat_tag)"
+                    >
+                      {{ selNode.combat_tag }}
+                    </span>
+                  </div>
+                } @else {
+                  <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                    {{ selNode.node_type === 'combat_art' ? 'None' : 'Passive' }}
+                  </div>
+                }
+                <div class="mt-1 text-xs text-[#8AB0AB]">
+                  {{ getCombatTagCounterLabel(selNode.combat_tag) || 'Standard Defense' }}
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display text-sm font-bold text-[#FF8C5A]">
+                  Tactical Effect &amp; Rules
+                </span>
+                <span class="text-xs text-[#8AB0AB]">Hover underlined words</span>
+              </div>
+              <app-keyword-text
+                [text]="selNode.description"
+                [showHintWhenIdle]="false"
+                placement="top"
+                tone="dark"
+              />
+
+              @if (getNodeHookBadges(selNode).length > 0) {
+                <div class="flex flex-wrap gap-1.5 pt-2">
+                  @for (b of getNodeHookBadges(selNode); track $index) {
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full border border-[#38B29A]/40 bg-[#38B29A]/15 px-2.5 py-0.5 font-mono-num text-[11px] font-bold text-[#38B29A] tabular-nums"
+                    >
+                      {{ b }}
+                    </span>
+                  }
+                </div>
+              }
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold text-white">
+                  Standalone Assignment &amp; VTT Scope
+                </span>
+                <span class="font-mono-num text-[11px] font-semibold text-[#8AB0AB]">
+                  Read-only · Edit to modify
+                </span>
+              </div>
+
+              <div class="divide-y divide-[#243B37] rounded-xl border border-[#243B37] bg-[#122220] text-xs">
+                <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="font-semibold text-[#8AB0AB]">Skill Tree Prerequisite</span>
+                  <span class="font-mono-num font-bold text-[#38B29A] sm:text-right">
+                    None (Standalone / Solo Ability)
+                  </span>
+                </div>
+
+                <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="font-semibold text-[#8AB0AB]">Character &amp; NPC Assignment</span>
+                  <span class="font-mono-num font-bold text-[#38BDF8] sm:text-right">
+                    Equippable on Characters &amp; VTT Tokens
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      }
+    </div>
+  </div>
+</section>

@@ -24,6 +24,22 @@
   --mot-guard-bg: #E0F2FE;
   --mot-guard-border: #7DD3FC;
   --mot-guard-text: #075985;
+  --mot-warn-bg: #FEF3C7;
+  --mot-warn-border: #FCD34D;
+  --mot-warn-text: #9A3412;
+  --mot-jade-bg: #CCFBF1;
+  --mot-jade-border: #5EEAD4;
+  --mot-jade-text: #0F766E;
+  --mot-crushing-bg: #FFE4E6;
+  --mot-crushing-border: #FDA4AF;
+  --mot-crushing-text: #9F1239;
+  --mot-sweeping-bg: #FFEDD5;
+  --mot-sweeping-border: #FDBA74;
+  --mot-sweeping-text: #9A3412;
+  --mot-piercing-bg: #E0F2FE;
+  --mot-piercing-border: #7DD3FC;
+  --mot-piercing-text: #075985;
+  --mot-float-shadow: 0 18px 38px -8px rgba(15, 30, 28, 0.22), 0 4px 12px -2px rgba(15, 30, 28, 0.08);
   color-scheme: light;
 }
 
@@ -50,7 +66,43 @@
   --mot-guard-bg: #102A36;
   --mot-guard-border: #1E4E63;
   --mot-guard-text: #BAE6FD;
+  --mot-warn-bg: #3D2314;
+  --mot-warn-border: #784321;
+  --mot-warn-text: #FDBA74;
+  --mot-jade-bg: #102B26;
+  --mot-jade-border: #225C50;
+  --mot-jade-text: #5EEAD4;
+  --mot-crushing-bg: #3B1822;
+  --mot-crushing-border: #6E293B;
+  --mot-crushing-text: #FDA4AF;
+  --mot-sweeping-bg: #3D2314;
+  --mot-sweeping-border: #784321;
+  --mot-sweeping-text: #FDBA74;
+  --mot-piercing-bg: #112E38;
+  --mot-piercing-border: #1E5263;
+  --mot-piercing-text: #7DD3FC;
+  --mot-float-shadow: 0 22px 48px -10px rgba(0, 0, 0, 0.7), 0 6px 16px -4px rgba(0, 0, 0, 0.45);
   color-scheme: dark;
+}
+
+.bg-\[\#122220\],
+.bg-\[\#0D1615\],
+.bg-\[\#09100F\] {
+  --mot-warn-bg: #3D2314;
+  --mot-warn-border: #784321;
+  --mot-warn-text: #FDBA74;
+  --mot-jade-bg: #102B26;
+  --mot-jade-border: #225C50;
+  --mot-jade-text: #5EEAD4;
+  --mot-crushing-bg: #3B1822;
+  --mot-crushing-border: #6E293B;
+  --mot-crushing-text: #FDA4AF;
+  --mot-sweeping-bg: #3D2314;
+  --mot-sweeping-border: #784321;
+  --mot-sweeping-text: #FDBA74;
+  --mot-piercing-bg: #112E38;
+  --mot-piercing-border: #1E5263;
+  --mot-piercing-text: #7DD3FC;
 }
 
 html {
@@ -81,7 +133,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Signature Sunfire Copper Primary Action */
 .btn-copper {
   background-color: var(--mot-primary);
   color: var(--mot-primary-fg);
@@ -102,7 +153,40 @@ body {
   cursor: not-allowed;
 }
 
-/* Unified Recessed Form Input */
+.badge-crushing {
+  background-color: var(--mot-crushing-bg);
+  border-color: var(--mot-crushing-border);
+  color: var(--mot-crushing-text);
+}
+
+.badge-sweeping {
+  background-color: var(--mot-sweeping-bg);
+  border-color: var(--mot-sweeping-border);
+  color: var(--mot-sweeping-text);
+}
+
+.badge-piercing {
+  background-color: var(--mot-piercing-bg);
+  border-color: var(--mot-piercing-border);
+  color: var(--mot-piercing-text);
+}
+
+.badge-jade {
+  background-color: var(--mot-jade-bg);
+  border-color: var(--mot-jade-border);
+  color: var(--mot-jade-text);
+}
+
+.badge-warn {
+  background-color: var(--mot-warn-bg);
+  border-color: var(--mot-warn-border);
+  color: var(--mot-warn-text);
+}
+
+.mot-float {
+  box-shadow: var(--mot-float-shadow);
+}
+
 .mot-input {
   width: 100%;
   border-radius: 0.5rem;
@@ -123,7 +207,6 @@ body {
   box-shadow: 0 0 0 2px rgba(196, 73, 26, 0.28);
 }
 
-/* Browser Surface Theming */
 ::selection {
   background-color: #C4491A;
   color: #FFFFFF;
@@ -140,7 +223,6 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* Custom Scrollbar & Stable Scroll Gutter System */
 .mot-scroll-gutter,
 .overflow-y-auto {
   scrollbar-gutter: stable;
@@ -177,7 +259,6 @@ select:focus-visible {
   background-color: var(--mot-primary-hover);
 }
 
-/* Dark-surface panels keep Night Pine scrollbar thumbs even in Light Mode */
 .bg-\[\#122220\],
 .bg-\[\#0D1615\] {
   scrollbar-color: #355650 transparent;

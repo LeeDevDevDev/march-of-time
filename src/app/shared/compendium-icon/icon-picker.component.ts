@@ -61,7 +61,6 @@ export class IconPickerComponent {
       return;
     }
 
-    // If SVG, read fallback Data URL and upload original SVG to Supabase Storage bucket
     if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
       const reader = new FileReader();
       reader.onload = async () => {
@@ -75,7 +74,6 @@ export class IconPickerComponent {
       return;
     }
 
-    // For PNG / WebP / JPEG, resize cleanly onto a 128x128 canvas and upload to Supabase Storage
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
@@ -97,7 +95,6 @@ export class IconPickerComponent {
         ctx.drawImage(img, 0, 0, w, h);
         const compressedDataUrl = canvas.toDataURL('image/png');
 
-        // Convert the 128x128 canvas to a compact PNG File for Supabase Storage
         const blob = await new Promise<Blob | null>((resolve) =>
           canvas.toBlob((b) => resolve(b), 'image/png')
         );

@@ -3,6 +3,20 @@ export type CombatSkillName = 'Strike' | 'Shoot' | 'Parry' | 'Dodge' | 'Block';
 export type CombatTag = 'Crushing' | 'Sweeping' | 'Piercing' | 'None';
 export type CombatStatusEffect = 'None' | 'Sundered' | 'Staggered' | 'Bleeding' | 'Pinned';
 
+export function getCombatTagBadgeClass(tag: CombatTag | string | null | undefined): string {
+  if (tag === 'Crushing') return 'badge-crushing';
+  if (tag === 'Sweeping') return 'badge-sweeping';
+  if (tag === 'Piercing') return 'badge-piercing';
+  return '';
+}
+
+export function getCombatTagCounterLabel(tag: CombatTag | string | null | undefined): string {
+  if (tag === 'Crushing') return 'Cannot Parry';
+  if (tag === 'Sweeping') return 'Cannot Dodge';
+  if (tag === 'Piercing') return 'Cannot Block';
+  return '';
+}
+
 export type KeywordCategory =
   | 'Defense Triangle Tag'
   | 'Active Defense'
@@ -171,7 +185,6 @@ export function buildKeywordLookupMap(
     if (!lower) continue;
     map.set(lower, kw);
 
-    // Helpful verb/inflection aliases
     if (lower === 'parry') map.set('parried', kw);
     if (lower === 'dodge') map.set('dodged', kw);
     if (lower === 'shield block') {
@@ -183,10 +196,6 @@ export function buildKeywordLookupMap(
   return map;
 }
 
-/**
- * Strips `[` and `]` around `[Special Word]` tags and splits text into plain text + hoverable Keyword segments
- * using the live `keywordsList` from `CompendiumStore`.
- */
 export function tokenizeTextWithKeywords(
   rawText: string,
   keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
@@ -233,10 +242,8 @@ export function tokenizeTextWithKeywords(
 }
 
 /**
- * Slay the Spire-style Chained Keyword Resolver:
- * Given a hovered root Keyword (e.g. `Sweeping`), returns all distinct Keywords referenced
- * inside `rootKeyword.summary` (e.g. `Dodge`, `Parry`, `Shield Block`) in order of appearance,
- * with cycle protection so self-references or mutual references never loop.
+ * Returns distinct keywords referenced inside `rootKeyword.summary` in order of appearance,
+ * with cycle protection against self or mutual references.
  */
 export function resolveChainedKeywords(
   rootKeyword: KeywordDefinition | null,
@@ -261,7 +268,6 @@ export function resolveChainedKeywords(
 }
 
 export interface PerkRuleHooks {
-  // Automatic Character Sheet Stat Bonuses
   bonus_max_hp?: number;
   bonus_max_sp?: number;
   bonus_stance_recovery?: number;
@@ -273,7 +279,6 @@ export interface PerkRuleHooks {
   bonus_dodge_mod?: number;
   bonus_block_mod?: number;
 
-  // Active Combat Art Execution Hooks
   disallow_defense?: ('Parry' | 'Dodge' | 'Block')[];
   bonus_sp_damage?: number;
   ignore_armor_dr?: number;
@@ -281,7 +286,6 @@ export interface PerkRuleHooks {
   self_shift_tiles?: number;
   inflict_status?: CombatStatusEffect;
 
-  // Embedded Visual & Lifecycle Metadata (persists automatically inside JSONB rule_hooks)
   __icon?: string;
   __icon_color?: string;
   __icon_tint_custom?: boolean;
@@ -313,11 +317,7 @@ export interface RuleHookRow {
   statusValue: CombatStatusEffect;
 }
 
-/**
- * Adding a new mechanical hook to March of Time only requires adding an entry here.
- */
 export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
-  // Combat Art On-Hit / Execution Effects
   {
     key: 'bonus_sp_damage',
     label: 'Bonus SP Damage on Hit',
@@ -353,8 +353,6 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
     valueType: 'status',
     defaultValue: 'Sundered',
   },
-
-  // Automatic Sheet Stat Modifiers
   {
     key: 'bonus_max_sp',
     label: 'Bonus Max SP (Base 2 + Iron + Armor SP)',
@@ -568,9 +566,9 @@ export const DEFAULT_STANDALONE_PERK_NODES: PerkNodeModel[] = [
     cooldown_rounds: 2,
     combat_tag: 'Crushing',
     description:
-      'Drive your shield or weapon guard into an adjacent foe, dealing +2 [SP] damage and inflicting [Staggered] on hit. Punishes [Shield Block].',
+      'Drive your shield or weapon guard into an adjacent foe, dealing +2 [SP] damage and inflicting [Staggered] on hit. Cannot be [Parried].',
     rule_hooks: {
-      disallow_defense: ['Block'],
+      disallow_defense: ['Parry'],
       bonus_sp_damage: 2,
       inflict_status: 'Staggered',
       __is_standalone: true,
@@ -1190,8 +1188,6 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
   if (hooks.inflict_status && hooks.inflict_status !== 'None') {
     badges.push(`Inflicts ${hooks.inflict_status}`);
   }
-
-  // Passive sheet modifiers
   if (hooks.bonus_max_sp) {
     badges.push(`+${hooks.bonus_max_sp} Max SP`);
   }

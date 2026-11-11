@@ -20,6 +20,8 @@ import {
   buildKeywordLookupMap,
   buildSkillTreeHierarchy,
   formatRuleHookBadges,
+  getCombatTagBadgeClass,
+  getCombatTagCounterLabel,
   resolveChainedKeywords,
   resolveNodeVisuals,
   resolveTreeVisuals,
@@ -36,6 +38,8 @@ import { CompendiumIconComponent } from '../compendium-icon/compendium-icon.comp
 })
 export class SkillTreeCanvasComponent implements OnChanges {
   readonly Math = Math;
+  readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
+  readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
   private readonly compendiumStore = inject(CompendiumStore);
 
   @Input({ required: true }) tree!: SkillTreeModel;
@@ -57,7 +61,6 @@ export class SkillTreeCanvasComponent implements OnChanges {
   readonly selectedNodeId = signal<string | null>(null);
   readonly hoveredKeyword = signal<KeywordDefinition | null>(null);
 
-  // 2D Panning & Zoom State
   readonly panX = signal(0);
   readonly panY = signal(0);
   readonly zoom = signal(1);

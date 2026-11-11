@@ -24,12 +24,12 @@ export class DashboardComponent {
 
   openCreateDrawer(): void {
     this.showJoinForm.set(false);
-    this.showCreateForm.set(true);
+    this.showCreateForm.update((open) => !open);
   }
 
   openJoinDrawer(): void {
     this.showCreateForm.set(false);
-    this.showJoinForm.set(true);
+    this.showJoinForm.update((open) => !open);
   }
 
   copyInviteCode(code: string): void {

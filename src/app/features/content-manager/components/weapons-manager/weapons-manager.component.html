@@ -1,0 +1,890 @@
+<section class="space-y-4">
+  <div
+    class="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4 sm:flex-row sm:items-center"
+  >
+    <div class="flex flex-wrap items-center gap-1.5">
+      @for (filter of weaponFilterOptions; track filter.id) {
+        <button
+          type="button"
+          (click)="weaponCategoryFilter.set(filter.id)"
+          class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+          [class.btn-copper]="weaponCategoryFilter() === filter.id"
+          [class.border-[var(--mot-border)]]="weaponCategoryFilter() !== filter.id"
+          [class.bg-[var(--mot-well)]]="weaponCategoryFilter() !== filter.id"
+          [class.text-[var(--mot-muted)]]="weaponCategoryFilter() !== filter.id"
+        >
+          {{ filter.label }}
+        </button>
+      }
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2.5">
+      <input
+        type="text"
+        [ngModel]="weaponSearch()"
+        (ngModelChange)="weaponSearch.set($event)"
+        placeholder="Search weapons or traits..."
+        class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+      />
+      <button
+        type="button"
+        (click)="openNewWeaponModal()"
+        class="btn-copper inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span>Forge Weapon</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-12">
+    <div class="space-y-2.5 lg:col-span-7">
+      @if (compendiumStore.isLoading() && compendiumStore.weapons().length === 0) {
+        @for (sk of [1, 2, 3, 4]; track sk) {
+          <div
+            class="animate-pulse rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-4"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3.5">
+                <div class="h-11 w-11 rounded-xl bg-[var(--mot-well)]"></div>
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <div class="h-4 w-32 rounded bg-[var(--mot-well)]"></div>
+                    <div class="h-4 w-16 rounded bg-[var(--mot-well)]"></div>
+                    <div class="h-4 w-20 rounded bg-[var(--mot-well)]"></div>
+                  </div>
+                  <div class="h-3.5 w-56 rounded bg-[var(--mot-well)]"></div>
+                </div>
+              </div>
+              <div class="h-7 w-14 rounded-lg bg-[var(--mot-well)]"></div>
+            </div>
+          </div>
+        }
+      } @else if (filteredWeapons().length === 0) {
+        <div
+          class="rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-8 text-center"
+        >
+          <p class="font-display text-base font-bold text-[var(--mot-text)]">
+            No matching weapons in the Armory
+          </p>
+          <p class="mt-1 text-xs text-[var(--mot-muted)]">
+            Try clearing the filter or forge a new weapon for the compendium.
+          </p>
+          <button
+            type="button"
+            (click)="openNewWeaponModal()"
+            class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
+          >
+            + Forge Weapon
+          </button>
+        </div>
+      } @else {
+        @for (w of filteredWeapons(); track w.id) {
+          <article
+            (click)="selectedWeaponId.set(w.id)"
+            class="cursor-pointer rounded-2xl border p-4 transition-all"
+            [class.border-[#C4491A]]="selectedWeapon()?.id === w.id"
+            [class.bg-[var(--mot-well)]]="selectedWeapon()?.id === w.id"
+            [class.border-[var(--mot-border)]]="selectedWeapon()?.id !== w.id"
+            [class.bg-[var(--mot-surface)]]="selectedWeapon()?.id !== w.id"
+          >
+            <div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div class="flex items-start gap-3.5">
+                <div
+                  class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                  [style.border-color]="getWeaponVisuals(w).color"
+                >
+                  <app-compendium-icon
+                    [icon]="getWeaponVisuals(w).icon"
+                    [color]="getWeaponVisuals(w).color"
+                    [tintCustom]="getWeaponVisuals(w).tintCustom"
+                    sizeClass="h-5 w-5"
+                  />
+                </div>
+
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-display text-base font-bold text-[var(--mot-text)]">
+                      {{ w.name }}
+                    </h3>
+                    <span
+                      class="inline-flex items-center rounded-full border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-muted)]"
+                    >
+                      {{ w.category }}
+                    </span>
+                  </div>
+
+                  <div class="mt-1 flex flex-wrap items-center gap-2 font-mono-num text-xs font-semibold text-[var(--mot-accent-text)] tabular-nums">
+                    <span>{{ w.ap_cost }} AP</span>
+                    <span>·</span>
+                    <span>2d10 + {{ w.gov_attribute }} + {{ w.gov_skill }}</span>
+                    <span>·</span>
+                    <span>Base {{ w.base_damage }} DMG</span>
+                    <span>·</span>
+                    <span>Reach {{ w.reach_tiles }} {{ w.reach_tiles === 1 ? 'Tile' : 'Tiles' }}</span>
+                  </div>
+
+                  <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    @if (isTwoHanded(w)) {
+                      <span
+                        class="badge-warn inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
+                      >
+                        <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+                          <path d="M13 19l6-6" />
+                          <path d="M16 16l4 4" />
+                          <path d="M19 21l2-2" />
+                        </svg>
+                        <span>Two-Handed · No Shield</span>
+                      </span>
+                    } @else {
+                      <span
+                        class="inline-flex items-center gap-1.5 rounded-full border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-0.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)]"
+                      >
+                        <svg class="h-3 w-3 shrink-0 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                        <span>One-Handed</span>
+                      </span>
+                    }
+
+                    @if (isHeavy(w)) {
+                      <span
+                        class="badge-jade inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                      >
+                        <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                          <path d="M9 12l2 2 4-4" />
+                        </svg>
+                        <span>Guard · Block {{ getHeavyBlockBase(w) }}</span>
+                      </span>
+                    }
+
+                    @if (w.thrown_range_tiles) {
+                      <span
+                        class="badge-piercing inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                      >
+                        <span>Thrown {{ w.thrown_range_tiles }}T</span>
+                      </span>
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2" (click)="$event.stopPropagation()">
+                <button
+                  type="button"
+                  (click)="openEditWeaponModal(w)"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  Edit
+                </button>
+              </div>
+            </div>
+          </article>
+        }
+      }
+    </div>
+
+    <div class="lg:col-span-5">
+      @if (selectedWeapon(); as sel) {
+        <aside
+          class="sticky top-6 overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] text-[#EBF5F3]"
+        >
+          <div class="flex items-start justify-between gap-3 border-b border-[#243B37] p-5">
+            <div class="flex min-w-0 flex-1 items-center gap-3.5">
+              <div
+                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 bg-[#0D1615]"
+                [style.border-color]="getWeaponVisuals(sel).color"
+              >
+                <app-compendium-icon
+                  [icon]="getWeaponVisuals(sel).icon"
+                  [color]="getWeaponVisuals(sel).color"
+                  [tintCustom]="getWeaponVisuals(sel).tintCustom"
+                  sizeClass="h-6 w-6"
+                />
+              </div>
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h2 class="font-display text-xl font-bold text-white">
+                    {{ sel.name }}
+                  </h2>
+                  <span class="rounded border border-[#243B37] bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                    {{ sel.category }}
+                  </span>
+                </div>
+                <p class="mt-0.5 font-mono-num text-xs text-[#8AB0AB] tabular-nums">
+                  {{ sel.ap_cost }} AP Strike · Governing {{ sel.gov_attribute }} ({{ sel.gov_skill }})
+                </p>
+              </div>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                (click)="openEditWeaponModal(sel)"
+                class="btn-copper inline-flex h-8 items-center justify-center rounded-lg border border-transparent px-3 text-xs font-semibold"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                (click)="deleteWeapon.emit(sel)"
+                class="inline-flex h-8 items-center justify-center rounded-lg border border-[#243B37] bg-[#0D1615] px-3 text-xs font-semibold text-[#F26464] transition-colors hover:border-[#F26464]"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+
+          <div class="space-y-5 p-5">
+            <div class="grid grid-cols-3 gap-2.5 tabular-nums">
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Attack Roll</div>
+                <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                  2d10 + {{ sel.gov_attribute }}
+                </div>
+                <div class="mt-0.5 text-xs text-[#8AB0AB]">+ {{ sel.gov_skill }} Skill</div>
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Flat Damage</div>
+                <div class="mt-1 font-mono-num text-sm font-bold text-[#FF8C5A]">
+                  {{ sel.base_damage }} + {{ sel.gov_attribute }}
+                </div>
+                <div class="mt-0.5 text-xs text-[#8AB0AB]">No damage dice</div>
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3">
+                <div class="text-xs font-semibold text-[#8AB0AB]">Reach &amp; Range</div>
+                <div class="mt-1 font-mono-num text-sm font-bold text-white">
+                  {{ sel.reach_tiles }} {{ sel.reach_tiles === 1 ? 'Tile' : 'Tiles' }} ({{ sel.reach_tiles * 5 }} ft)
+                </div>
+                <div class="mt-0.5 text-xs text-[#8AB0AB]">
+                  {{ sel.thrown_range_tiles ? 'Thrown ' + sel.thrown_range_tiles + ' Tiles' : 'Melee / Primary' }}
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-3.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs font-bold text-white">
+                  Weapon Properties &amp; Guard Profile
+                </span>
+                <span class="font-mono-num text-[11px] font-semibold text-[#8AB0AB]">
+                  Read-only · Edit to modify
+                </span>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                @if (isTwoHanded(sel)) {
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border border-[#F59E0B]/45 bg-[#F59E0B]/15 px-3 py-1 font-mono-num text-xs font-bold text-[#F59E0B]"
+                  >
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+                      <path d="M13 19l6-6" />
+                      <path d="M16 16l4 4" />
+                      <path d="M19 21l2-2" />
+                    </svg>
+                    <span>Two-Handed Grip</span>
+                  </span>
+                } @else {
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border border-[#38BDF8]/40 bg-[#38BDF8]/15 px-3 py-1 font-mono-num text-xs font-bold text-[#38BDF8]"
+                  >
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                    <span>One-Handed Grip</span>
+                  </span>
+                }
+
+                @if (isHeavy(sel)) {
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border border-[#38B29A]/45 bg-[#38B29A]/15 px-3 py-1 font-mono-num text-xs font-bold text-[#38B29A] tabular-nums"
+                  >
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="M9 12l2 2 4-4" />
+                    </svg>
+                    <span>Guard · Block Base {{ getHeavyBlockBase(sel) }}</span>
+                  </span>
+                } @else {
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border border-[#243B37] bg-[#122220] px-3 py-1 font-mono-num text-xs font-semibold text-[#8AB0AB]"
+                  >
+                    <span>No Guard Property</span>
+                  </span>
+                }
+
+                @if (sel.thrown_range_tiles) {
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border border-[#38BDF8]/40 bg-[#38BDF8]/15 px-3 py-1 font-mono-num text-xs font-bold text-[#38BDF8] tabular-nums"
+                  >
+                    <span>Thrown ({{ sel.thrown_range_tiles }} Tiles)</span>
+                  </span>
+                }
+              </div>
+
+              <div class="divide-y divide-[#243B37] rounded-xl border border-[#243B37] bg-[#122220] text-xs">
+                <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="font-semibold text-[#8AB0AB]">Off-Hand &amp; Shield</span>
+                  @if (isTwoHanded(sel)) {
+                    <span class="font-mono-num font-bold text-[#F59E0B] sm:text-right">
+                      No Off-Hand Shield · Requires Both Hands
+                    </span>
+                  } @else {
+                    <span class="font-mono-num font-bold text-[#38BDF8] sm:text-right">
+                      Shield Compatible · Off-Hand Free
+                    </span>
+                  }
+                </div>
+
+                <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="font-semibold text-[#8AB0AB]">Guard &amp; Block</span>
+                  @if (isHeavy(sel)) {
+                    <span class="font-mono-num font-bold text-[#38B29A] tabular-nums sm:text-right">
+                      1 AP Guard ({{ getHeavyBlockBase(sel) }} + Block Skill) vs Non-Piercing
+                    </span>
+                  } @else {
+                    <span class="font-mono-num font-semibold text-[#8AB0AB] sm:text-right">
+                      Relies on Parry, Dodge, or Equipped Shield
+                    </span>
+                  }
+                </div>
+
+                @if (sel.category === 'Ranged' || sel.gov_skill === 'Shoot') {
+                  <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span class="font-semibold text-[#8AB0AB]">Ranged Firing</span>
+                    <span class="font-mono-num font-semibold text-[#FF8C5A] sm:text-right">
+                      Unaimed = Disadvantage · 1 AP Aim = Normal Roll
+                    </span>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display text-sm font-bold text-[#FF8C5A]">
+                  Trait: {{ sel.trait_name }}
+                </span>
+                <span class="text-xs text-[#8AB0AB]">Hover underlined words</span>
+              </div>
+              <app-keyword-text
+                [text]="sel.trait_description"
+                [showHintWhenIdle]="false"
+                placement="top"
+                tone="dark"
+              />
+
+              @if (getWeaponBadges(sel).length > 0) {
+                <div class="flex flex-wrap gap-1.5 pt-2">
+                  @for (b of getWeaponBadges(sel); track $index) {
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full border border-[#38B29A]/40 bg-[#38B29A]/15 px-2.5 py-0.5 font-mono-num text-[11px] font-bold text-[#38B29A] tabular-nums"
+                    >
+                      {{ b }}
+                    </span>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        </aside>
+      } @else if (compendiumStore.isLoading()) {
+        <aside
+          class="sticky top-6 animate-pulse overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-5 text-[#EBF5F3] space-y-5"
+        >
+          <div class="flex items-center justify-between gap-3 border-b border-[#243B37] pb-4">
+            <div class="flex items-center gap-3.5">
+              <div class="h-12 w-12 rounded-xl bg-[#0D1615]"></div>
+              <div class="space-y-2">
+                <div class="h-5 w-36 rounded bg-[#0D1615]"></div>
+                <div class="h-3.5 w-44 rounded bg-[#0D1615]"></div>
+              </div>
+            </div>
+            <div class="h-8 w-24 rounded-lg bg-[#0D1615]"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+            <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+            <div class="h-20 rounded-xl bg-[#0D1615]"></div>
+          </div>
+          <div class="h-32 rounded-xl bg-[#0D1615]"></div>
+          <div class="h-24 rounded-xl bg-[#0D1615]"></div>
+        </aside>
+      }
+    </div>
+  </div>
+</section>
+
+@if (weaponModalOpen()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+    (mousedown)="onBackdropMouseDown($event)"
+  >
+    <div
+      class="mot-float flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+      (mousedown)="$event.stopPropagation()"
+      (click)="$event.stopPropagation()"
+    >
+      <div
+        class="flex shrink-0 items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+      >
+        <div>
+          <h2 class="font-display text-lg font-bold text-white">
+            {{ editingWeaponId() ? 'Edit Weapon' : 'Forge New Weapon' }}
+          </h2>
+          <p class="text-xs text-[#8AB0AB]">
+            Configure combat profile, <strong>Two-Handed</strong> &amp; <strong>Guard</strong> tags, and hoverable trait keywords.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="closeWeaponModal()"
+          class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+        >
+          Close
+        </button>
+      </div>
+
+      <form (ngSubmit)="saveWeapon()" class="mot-scroll-gutter flex-1 overflow-y-auto p-6 space-y-5">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-12">
+          <div class="sm:col-span-5">
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Weapon Name
+            </label>
+            <input
+              type="text"
+              name="wepName"
+              [(ngModel)]="weaponForm.name"
+              required
+              placeholder="e.g. Executioner's Halberd"
+              class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+            />
+          </div>
+
+          <div class="sm:col-span-4">
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Category
+            </label>
+            <select
+              name="wepCategory"
+              [(ngModel)]="weaponForm.category"
+              class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+            >
+              <option value="Martial">Martial</option>
+              <option value="Heavy">Heavy</option>
+              <option value="Light">Light</option>
+              <option value="Ranged">Ranged</option>
+            </select>
+          </div>
+
+          <div class="sm:col-span-3">
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              AP Cost
+            </label>
+            <select
+              name="wepApCost"
+              [(ngModel)]="weaponForm.ap_cost"
+              class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold tabular-nums"
+            >
+              <option [ngValue]="1">1 AP</option>
+              <option [ngValue]="2">2 AP</option>
+              <option [ngValue]="3">3 AP</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Gov. Attribute
+            </label>
+            <select
+              name="wepGovAttr"
+              [(ngModel)]="weaponForm.gov_attribute"
+              class="mot-input mt-1 px-3 py-2 text-xs font-bold"
+            >
+              <option value="Brawn">Brawn</option>
+              <option value="Agility">Agility</option>
+              <option value="Technique">Technique</option>
+              <option value="Iron">Iron</option>
+              <option value="Cunning">Cunning</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Gov. Skill
+            </label>
+            <select
+              name="wepGovSkill"
+              [(ngModel)]="weaponForm.gov_skill"
+              class="mot-input mt-1 px-3 py-2 text-xs font-bold"
+            >
+              <option value="Strike">Strike (Melee)</option>
+              <option value="Shoot">Shoot (Ranged)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Base Damage
+            </label>
+            <input
+              type="number"
+              name="wepBaseDmg"
+              [(ngModel)]="weaponForm.base_damage"
+              min="1"
+              max="15"
+              class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Reach (Tiles)
+            </label>
+            <input
+              type="number"
+              name="wepReach"
+              [(ngModel)]="weaponForm.reach_tiles"
+              min="1"
+              max="12"
+              class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Thrown (Tiles)
+            </label>
+            <input
+              type="number"
+              name="wepThrown"
+              [(ngModel)]="weaponForm.thrown_range_tiles"
+              min="0"
+              max="12"
+              placeholder="None"
+              class="mot-input mt-1 px-3 py-2 font-mono-num text-xs font-bold tabular-nums"
+            />
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div class="text-xs font-bold text-[var(--mot-text)]">
+                Weapon Properties &amp; Guard Tags
+              </div>
+              <p class="text-xs text-[var(--mot-muted)]">
+                Click either property card below to toggle its combat tag.
+              </p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+              @if (weaponForm.two_handed) {
+                <span
+                  class="badge-warn inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
+                >
+                  <span>Two-Handed · No Shield</span>
+                </span>
+              } @else {
+                <span
+                  class="inline-flex items-center gap-1.5 rounded-full border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-0.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)]"
+                >
+                  <span>One-Handed</span>
+                </span>
+              }
+
+              @if (weaponForm.heavy) {
+                <span
+                  class="badge-jade inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                >
+                  <span>Guard · Block {{ weaponForm.heavy_block_base || 2 }}</span>
+                </span>
+              }
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              (click)="weaponForm.two_handed = !weaponForm.two_handed"
+              [attr.aria-pressed]="weaponForm.two_handed"
+              class="group flex cursor-pointer select-none flex-col justify-between rounded-xl border p-3.5 text-left transition-all hover:border-[var(--mot-warn-border)]"
+              [class.border-[var(--mot-warn-border)]]="weaponForm.two_handed"
+              [class.bg-[var(--mot-warn-bg)]]="weaponForm.two_handed"
+              [class.border-[var(--mot-border)]]="!weaponForm.two_handed"
+              [class.bg-[var(--mot-surface)]]="!weaponForm.two_handed"
+            >
+              <div class="flex w-full items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors"
+                    [class.border-[var(--mot-warn-border)]]="weaponForm.two_handed"
+                    [class.bg-[var(--mot-surface)]]="weaponForm.two_handed"
+                    [class.text-[var(--mot-warn-text)]]="weaponForm.two_handed"
+                    [class.border-[var(--mot-border)]]="!weaponForm.two_handed"
+                    [class.bg-[var(--mot-well)]]="!weaponForm.two_handed"
+                    [class.text-[var(--mot-muted)]]="!weaponForm.two_handed"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+                      <path d="M13 19l6-6" />
+                      <path d="M16 16l4 4" />
+                      <path d="M19 21l2-2" />
+                    </svg>
+                  </span>
+                  <span class="font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                    Two-Handed
+                  </span>
+                </div>
+
+                <span
+                  class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
+                  [class.border-[var(--mot-warn-border)]]="weaponForm.two_handed"
+                  [class.bg-[var(--mot-surface)]]="weaponForm.two_handed"
+                  [class.text-[var(--mot-warn-text)]]="weaponForm.two_handed"
+                  [class.border-transparent]="!weaponForm.two_handed"
+                  [class.bg-[var(--mot-well)]]="!weaponForm.two_handed"
+                  [class.text-[var(--mot-muted)]]="!weaponForm.two_handed"
+                >
+                  {{ weaponForm.two_handed ? 'Active' : 'Off' }}
+                </span>
+              </div>
+              <p class="mt-2.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                Occupies both hands and disables equipping an off-hand Shield.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              (click)="weaponForm.heavy = !weaponForm.heavy"
+              [attr.aria-pressed]="weaponForm.heavy"
+              class="group flex cursor-pointer select-none flex-col justify-between rounded-xl border p-3.5 text-left transition-all hover:border-[var(--mot-jade-border)]"
+              [class.border-[var(--mot-jade-border)]]="weaponForm.heavy"
+              [class.bg-[var(--mot-jade-bg)]]="weaponForm.heavy"
+              [class.border-[var(--mot-border)]]="!weaponForm.heavy"
+              [class.bg-[var(--mot-surface)]]="!weaponForm.heavy"
+            >
+              <div class="flex w-full items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors"
+                    [class.border-[var(--mot-jade-border)]]="weaponForm.heavy"
+                    [class.bg-[var(--mot-surface)]]="weaponForm.heavy"
+                    [class.text-[var(--mot-jade-text)]]="weaponForm.heavy"
+                    [class.border-[var(--mot-border)]]="!weaponForm.heavy"
+                    [class.bg-[var(--mot-well)]]="!weaponForm.heavy"
+                    [class.text-[var(--mot-muted)]]="!weaponForm.heavy"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="M9 12l2 2 4-4" />
+                    </svg>
+                  </span>
+                  <span class="font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                    Guard (Can Block)
+                  </span>
+                </div>
+
+                <span
+                  class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                  [class.border-[var(--mot-jade-border)]]="weaponForm.heavy"
+                  [class.bg-[var(--mot-surface)]]="weaponForm.heavy"
+                  [class.text-[var(--mot-jade-text)]]="weaponForm.heavy"
+                  [class.border-transparent]="!weaponForm.heavy"
+                  [class.bg-[var(--mot-well)]]="!weaponForm.heavy"
+                  [class.text-[var(--mot-muted)]]="!weaponForm.heavy"
+                >
+                  {{ weaponForm.heavy ? 'Block ' + (weaponForm.heavy_block_base || 2) : 'Off' }}
+                </span>
+              </div>
+              <p class="mt-2.5 text-xs leading-relaxed text-[var(--mot-muted)]">
+                Enables 1 AP Guard Action ({{ weaponForm.heavy_block_base || 2 }} + Block Skill) vs non-Piercing.
+              </p>
+            </button>
+          </div>
+
+          @if (weaponForm.heavy) {
+            <div
+              class="flex flex-col justify-between gap-3 rounded-xl border border-[var(--mot-jade-border)] bg-[var(--mot-surface)] p-3.5 sm:flex-row sm:items-center"
+            >
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-[var(--mot-text)]">
+                    Weapon Guard Mitigation (Block Base)
+                  </span>
+                  <span
+                    class="badge-jade rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold tabular-nums"
+                  >
+                    1 AP Guard = {{ weaponForm.heavy_block_base || 2 }} + Block Skill
+                  </span>
+                </div>
+                <p class="mt-0.5 text-xs text-[var(--mot-muted)]">
+                  Select how much base damage this weapon blocks before adding the character's Block skill.
+                </p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                @for (preset of [1, 2, 3, 4]; track preset) {
+                  <button
+                    type="button"
+                    (click)="weaponForm.heavy_block_base = preset"
+                    class="rounded-full border px-3 py-1 font-mono-num text-xs font-bold tabular-nums transition-colors"
+                    [class.btn-copper]="weaponForm.heavy_block_base === preset"
+                    [class.border-transparent]="weaponForm.heavy_block_base === preset"
+                    [class.border-[var(--mot-border)]]="weaponForm.heavy_block_base !== preset"
+                    [class.bg-[var(--mot-well)]]="weaponForm.heavy_block_base !== preset"
+                    [class.text-[var(--mot-muted)]]="weaponForm.heavy_block_base !== preset"
+                  >
+                    Base {{ preset }}
+                  </button>
+                }
+
+                <input
+                  type="number"
+                  name="wepHeavyBase"
+                  [(ngModel)]="weaponForm.heavy_block_base"
+                  min="1"
+                  max="6"
+                  aria-label="Custom Guard Block Base"
+                  class="mot-input w-16 px-2.5 py-1 text-center font-mono-num text-xs font-bold tabular-nums"
+                />
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-12">
+          <div class="sm:col-span-4">
+            <label class="block text-xs font-bold text-[var(--mot-text)]">
+              Weapon Trait Name
+            </label>
+            <input
+              type="text"
+              name="wepTraitName"
+              [(ngModel)]="weaponForm.trait_name"
+              required
+              placeholder="e.g. Cleaving, Versatile"
+              class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+            />
+          </div>
+
+          <div class="sm:col-span-8">
+            <app-keyword-textarea
+              inputId="wepTraitDesc"
+              label="Trait Description (Type [ to insert Special Words)"
+              [value]="weaponForm.trait_description"
+              (valueChange)="weaponForm.trait_description = $event"
+              [rows]="2"
+              (requestCreateKeyword)="requestCreateKeyword.emit($event)"
+              placeholder="e.g. Even on a defended hit, target loses 3 [SP]. Cannot be used with a Shield while [Two-Handed]."
+            />
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3">
+          <div class="text-xs font-bold text-[var(--mot-text)]">
+            Automated Sheet &amp; Resolution Rule Hooks (Optional)
+          </div>
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                Parry Roll Bonus
+              </label>
+              <input
+                type="number"
+                name="wepParryBonus"
+                [(ngModel)]="weaponForm.parry_roll_bonus"
+                min="0"
+                max="5"
+                class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                Flawless Parry +SP
+              </label>
+              <input
+                type="number"
+                name="wepFlawlessSp"
+                [(ngModel)]="weaponForm.flawless_parry_bonus_sp_damage"
+                min="0"
+                max="10"
+                class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                Pierce Armor DR
+              </label>
+              <input
+                type="number"
+                name="wepIgnoreDr"
+                [(ngModel)]="weaponForm.ignore_armor_dr"
+                min="0"
+                max="10"
+                class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[var(--mot-muted)]">
+                Defended Chip SP
+              </label>
+              <input
+                type="number"
+                name="wepChipSp"
+                [(ngModel)]="weaponForm.defended_sp_damage"
+                min="0"
+                max="10"
+                class="mot-input mt-1 px-2.5 py-1.5 font-mono-num text-xs font-bold tabular-nums"
+              />
+            </div>
+          </div>
+        </div>
+
+        <app-icon-picker
+          label="Weapon Icon &amp; Accent Color"
+          [icon]="weaponForm.icon"
+          [color]="weaponForm.icon_color"
+          [tintCustom]="weaponForm.icon_tint_custom"
+          (iconChange)="weaponForm.icon = $event"
+          (colorChange)="weaponForm.icon_color = $event"
+          (tintCustomChange)="weaponForm.icon_tint_custom = $event"
+        />
+
+        <div class="flex items-center justify-end gap-2.5 border-t border-[var(--mot-border)] pt-4">
+          <button
+            type="button"
+            (click)="closeWeaponModal()"
+            class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            [disabled]="compendiumStore.isLoading()"
+            class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+          >
+            @if (compendiumStore.isLoading()) {
+              <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <span>Forging...</span>
+            } @else {
+              <span>{{ editingWeaponId() ? 'Save Weapon Changes' : 'Forge Weapon' }}</span>
+            }
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}

@@ -18,7 +18,6 @@ export class CampaignStore {
   private readonly authStore = inject(AuthStore);
   private readonly notifications = inject(NotificationStore);
 
-  // Private encapsulated Signal State — starts genuinely empty, no fake data
   readonly #state = signal<CampaignState>({
     yourGames: [],
     joinedGames: [],
@@ -27,7 +26,6 @@ export class CampaignStore {
     needsMigration: false,
   });
 
-  // Public Readonly Computed Selectors
   readonly yourGames = computed(() => this.#state().yourGames);
   readonly joinedGames = computed(() => this.#state().joinedGames);
   readonly isLoading = computed(() => this.#state().isLoading);

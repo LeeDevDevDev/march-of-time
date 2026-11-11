@@ -1,9 +1,7 @@
-<div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-10">
-  <!-- Chronicle Command Banner -->
+<div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
   <section
     class="relative overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 sm:p-8 text-[#EBF5F3]"
   >
-    <!-- Subtle Geometric Astrolabe Linework -->
     <svg
       class="pointer-events-none absolute -right-12 -top-12 h-64 w-64 text-[#243B37] opacity-45"
       viewBox="0 0 200 200"
@@ -55,7 +53,14 @@
         <button
           type="button"
           (click)="openJoinDrawer()"
-          class="inline-flex items-center gap-2 rounded-lg border border-[#243B37] bg-[#0D1615] px-4 py-2.5 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+          [attr.aria-expanded]="showJoinForm()"
+          class="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-semibold transition-colors"
+          [class.border-[#C4491A]]="showJoinForm()"
+          [class.bg-[#0D1615]]="true"
+          [class.text-white]="showJoinForm()"
+          [class.border-[#243B37]]="!showJoinForm()"
+          [class.text-[#EBF5F3]]="!showJoinForm()"
+          [class.hover:border-[#C4491A]]="!showJoinForm()"
         >
           <svg class="h-4 w-4 text-[#FB923C]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
@@ -68,6 +73,7 @@
         <button
           type="button"
           (click)="openCreateDrawer()"
+          [attr.aria-expanded]="showCreateForm()"
           class="btn-copper inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
@@ -88,35 +94,30 @@
     </div>
   }
 
-  <!-- SECTION 1: YOUR GAMES (Games you created / GM) -->
-  <section class="space-y-5">
-    <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--mot-border)] pb-3.5">
-      <div class="flex items-center gap-3">
-        <h2 class="font-display text-xl font-bold text-[var(--mot-text)]">
-          Your Games
-        </h2>
-        <span
-          class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+  @if (showCreateForm()) {
+    <form
+      (ngSubmit)="submitCreateGame()"
+      class="rounded-2xl border border-[#C4491A] bg-[var(--mot-surface)] p-5 space-y-4"
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-[var(--mot-border)] pb-3">
+        <div>
+          <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+            Create a New Campaign
+          </h2>
+          <p class="text-xs text-[var(--mot-muted)]">
+            Generates a 6-character invite code automatically so players can join your table.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="showCreateForm.set(false)"
+          class="text-xs font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
         >
-          {{ campaignStore.yourGames().length }}
-        </span>
+          Close
+        </button>
       </div>
 
-      <button
-        type="button"
-        (click)="showCreateForm.set(!showCreateForm())"
-        class="text-xs font-bold text-[var(--mot-accent-text)] hover:underline"
-      >
-        {{ showCreateForm() ? 'Close Form' : '+ Create New Game' }}
-      </button>
-    </div>
-
-    <!-- Inline Create Game Form -->
-    @if (showCreateForm()) {
-      <form
-        (ngSubmit)="submitCreateGame()"
-        class="grid grid-cols-1 gap-4 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 sm:grid-cols-12"
-      >
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-12">
         <div class="sm:col-span-5">
           <label for="gameName" class="block text-xs font-bold text-[var(--mot-text)]">
             Game Name
@@ -163,10 +164,82 @@
             }
           </button>
         </div>
-      </form>
-    }
+      </div>
+    </form>
+  }
 
-    <!-- Your Games Grid -->
+  @if (showJoinForm()) {
+    <form
+      (ngSubmit)="submitJoinGame()"
+      class="rounded-2xl border border-[#C4491A] bg-[var(--mot-surface)] p-5 space-y-4"
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-[var(--mot-border)] pb-3">
+        <div>
+          <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+            Join Table with Invite Code
+          </h2>
+          <p class="text-xs text-[var(--mot-muted)]">
+            Enter the 6-character code shared by your Game Master.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="showJoinForm.set(false)"
+          class="text-xs font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+        >
+          Close
+        </button>
+      </div>
+
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="flex-1 min-w-[220px]">
+          <label for="inviteCode" class="block text-xs font-bold text-[var(--mot-text)]">
+            Invite Code
+          </label>
+          <input
+            id="inviteCode"
+            type="text"
+            name="inviteCode"
+            required
+            [(ngModel)]="joinCode"
+            placeholder="e.g., A1B2C3"
+            class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold uppercase"
+          />
+        </div>
+
+        <button
+          type="submit"
+          [disabled]="campaignStore.isLoading()"
+          class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-50"
+        >
+          @if (campaignStore.isLoading()) {
+            <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+              <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span>Joining...</span>
+          } @else {
+            <span>Join Game</span>
+          }
+        </button>
+      </div>
+    </form>
+  }
+
+  <section class="space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--mot-border)] pb-3.5">
+      <div class="flex items-center gap-3">
+        <h2 class="font-display text-xl font-bold text-[var(--mot-text)]">
+          Your Games
+        </h2>
+        <span
+          class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+        >
+          {{ campaignStore.yourGames().length }}
+        </span>
+      </div>
+    </div>
+
     @if (campaignStore.isLoading() && campaignStore.yourGames().length === 0) {
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         @for (sk of [1, 2, 3]; track sk) {
@@ -205,7 +278,7 @@
         </p>
         <button
           type="button"
-          (click)="openCreateDrawer()"
+          (click)="showJoinForm.set(false); showCreateForm.set(true)"
           class="btn-copper mt-4 rounded-lg px-4 py-2 text-xs font-semibold"
         >
           Create Your First Game
@@ -217,7 +290,6 @@
           <article
             class="group flex flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] transition-colors hover:border-[#C4491A]"
           >
-            <!-- 16:9 Game Cover Banner -->
             <div class="relative aspect-video w-full overflow-hidden bg-[#122220]">
               @if (game.cover_image_url) {
                 <img
@@ -256,7 +328,6 @@
               </button>
             </div>
 
-            <!-- Card Body: Name & Last Game Played -->
             <div class="flex flex-1 flex-col justify-between p-5 space-y-4">
               <div>
                 <h3 class="font-display text-lg font-bold text-[var(--mot-text)]">
@@ -288,7 +359,6 @@
     }
   </section>
 
-  <!-- SECTION 2: GAMES YOU ARE IN (Joined as Player) -->
   <section class="space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--mot-border)] pb-3.5">
       <div class="flex items-center gap-3">
@@ -301,56 +371,8 @@
           {{ campaignStore.joinedGames().length }}
         </span>
       </div>
-
-      <button
-        type="button"
-        (click)="showJoinForm.set(!showJoinForm())"
-        class="text-xs font-bold text-[var(--mot-accent-text)] hover:underline"
-      >
-        {{ showJoinForm() ? 'Close Form' : '+ Join with Invite Code' }}
-      </button>
     </div>
 
-    <!-- Inline Join Game Form -->
-    @if (showJoinForm()) {
-      <form
-        (ngSubmit)="submitJoinGame()"
-        class="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5"
-      >
-        <div class="flex-1 min-w-[220px]">
-          <label for="inviteCode" class="block text-xs font-bold text-[var(--mot-text)]">
-            Enter Table Invite Code
-          </label>
-          <input
-            id="inviteCode"
-            type="text"
-            name="inviteCode"
-            required
-            [(ngModel)]="joinCode"
-            placeholder="e.g., A1B2C3"
-            class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold uppercase"
-          />
-        </div>
-
-        <button
-          type="submit"
-          [disabled]="campaignStore.isLoading()"
-          class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-50"
-        >
-          @if (campaignStore.isLoading()) {
-            <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-              <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-            <span>Joining...</span>
-          } @else {
-            <span>Join Game</span>
-          }
-        </button>
-      </form>
-    }
-
-    <!-- Games You Are In Grid -->
     @if (campaignStore.isLoading() && campaignStore.joinedGames().length === 0) {
       <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         @for (sk of [1, 2]; track sk) {
@@ -390,7 +412,7 @@
         </p>
         <button
           type="button"
-          (click)="openJoinDrawer()"
+          (click)="showCreateForm.set(false); showJoinForm.set(true)"
           class="mt-4 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
         >
           Enter Invite Code

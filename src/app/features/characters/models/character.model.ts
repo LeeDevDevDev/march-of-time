@@ -326,7 +326,6 @@ export function computeDerivedStats(
 
   const unlockedPerks = perkNodes.filter((p) => char.unlocked_perk_ids.includes(p.id));
 
-  // Aggregate structured passive rule_hooks from unlocked perks
   let perkBonusHp = 0;
   let perkBonusSp = 0;
   let perkBonusStanceRecovery = 0;
@@ -366,10 +365,6 @@ export function computeDerivedStats(
     : char.equipped_shield;
   const shieldSpec = SHIELD_TIERS[effectiveShieldTier] ?? SHIELD_TIERS.None;
 
-  // Updated March of Time Core Formulas:
-  // 1. Stance Recovery = 2 + Iron + Perk Bonuses
-  // 2. Max SP = 2 + Iron + Armor SP + Perk Bonuses
-  // 3. Max HP = 5 + (Iron * 2) + Perk Bonuses
   const stanceRecoverySp = 2 + iron + perkBonusStanceRecovery;
   const armorSp = armorSpec.armorSp;
   const maxSp = 2 + iron + armorSp + perkBonusSp;
@@ -379,7 +374,6 @@ export function computeDerivedStats(
   const canDodge = armorSpec.allowsDodge && shieldSpec.allowsDodge;
   const enablesMartialParry = shieldSpec.enablesMartialParry;
 
-  // Heavy weapons can be used to Block even without a shield (or while Two-Handed disables a shield)
   const canBlockWithHeavyWeapon = activeWeaponIsHeavy;
   const heavyBlockBase = getHeavyWeaponBlockBase(activeWeapon);
 
@@ -415,7 +409,6 @@ export function computeDerivedStats(
   const parryMod = technique + parry + rapierBonus + perkBonusParryMod;
   const dodgeMod = agility + dodge + perkBonusDodgeMod;
 
-  // 4. Block Combat Skill: Mitigation = (Shield Base or Heavy Weapon Base) + Block Skill + Perk Bonuses
   const blockMod = blockSkill + perkBonusBlockMod;
   const shieldBlockTotal = usesRaiseShield
     ? blockBaseValue + blockSkill + perkBonusBlockMod
@@ -426,8 +419,6 @@ export function computeDerivedStats(
   );
   const flawlessParryCounterSp = 2 + parryMod + versatileBonus;
 
-  // 5. Level-up Point Budgets:
-  // Even Levels (2, 4, 6, 8, 10) grant +2 Combat Skill Points and +2 Field Skill Points per even level
   const level = Math.max(1, char.level);
   const evenLevels = Math.floor(level / 2);
 
