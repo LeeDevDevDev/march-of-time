@@ -22,6 +22,7 @@ interface CompendiumState {
   perkNodes: PerkNodeModel[];
   keywords: KeywordDefinition[];
   isLoading: boolean;
+  hasLoaded: boolean;
   error: string | null;
   statusMessage: string | null;
 }
@@ -32,12 +33,16 @@ export class CompendiumStore {
   private readonly authStore = inject(AuthStore);
   private readonly notifications = inject(NotificationStore);
 
+  private loadPromise: Promise<void> | null = null;
+  private lastUserId: string | null = null;
+
   readonly #state = signal<CompendiumState>({
     weapons: [],
     skillTrees: [],
     perkNodes: [],
     keywords: DEFAULT_KEYWORDS,
     isLoading: false,
+    hasLoaded: false,
     error: null,
     statusMessage: null,
   });
@@ -68,25 +73,30 @@ export class CompendiumStore {
   );
   readonly allKeywords = computed(() => this.#state().keywords);
 
+  readonly isHydrating = computed(
+    () => this.#state().isLoading && !this.#state().hasLoaded
+  );
   readonly isLoading = computed(() => this.#state().isLoading);
   readonly error = computed(() => this.#state().error);
   readonly statusMessage = computed(() => this.#state().statusMessage);
 
   constructor() {
     effect(() => {
-      const user = this.authStore.user();
-      if (user) {
-        void this.loadCompendium();
-      } else {
-        this.#state.update((s) => ({
-          ...s,
+      const userId = this.authStore.user()?.id ?? null;
+      if (this.lastUserId !== null && userId !== this.lastUserId) {
+        this.loadPromise = null;
+        this.#state.set({
           weapons: [],
           skillTrees: [],
           perkNodes: [],
+          keywords: DEFAULT_KEYWORDS,
+          isLoading: false,
+          hasLoaded: false,
           error: null,
           statusMessage: null,
-        }));
+        });
       }
+      this.lastUserId = userId;
     });
   }
 
@@ -94,21 +104,45 @@ export class CompendiumStore {
     this.#state.update((s) => ({ ...s, error: null, statusMessage: null }));
   }
 
-  async loadCompendium(): Promise<void> {
-    this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
-    try {
-      const result = await this.compendiumService.fetchFullCompendium();
-      this.#state.update((s) => ({
-        ...s,
-        weapons: result.weapons,
-        skillTrees: result.skillTrees,
-        perkNodes: result.perkNodes,
-        keywords: result.keywords,
-        isLoading: false,
-      }));
-    } catch {
-      this.#state.update((s) => ({ ...s, isLoading: false }));
+  ensureLoaded(): Promise<void> {
+    if (this.#state().hasLoaded) {
+      return Promise.resolve();
     }
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
+    return this.loadCompendium();
+  }
+
+  loadCompendium(): Promise<void> {
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
+    this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+    const task = (async () => {
+      try {
+        const result = await this.compendiumService.fetchFullCompendium();
+        this.#state.update((s) => ({
+          ...s,
+          weapons: result.weapons,
+          skillTrees: result.skillTrees,
+          perkNodes: result.perkNodes,
+          keywords: result.keywords,
+          hasLoaded: true,
+          isLoading: false,
+        }));
+      } catch {
+        this.#state.update((s) => ({
+          ...s,
+          hasLoaded: true,
+          isLoading: false,
+        }));
+      } finally {
+        this.loadPromise = null;
+      }
+    })();
+    this.loadPromise = task;
+    return task;
   }
 
   async createKeyword(input: {
@@ -149,7 +183,7 @@ export class CompendiumStore {
     }));
 
     this.notifications.success(
-      'Special Word Created',
+      'Keyword Created',
       `"${created.term}" is now available in the [ autocomplete glossary.`
     );
 
@@ -194,7 +228,7 @@ export class CompendiumStore {
     }));
 
     this.notifications.success(
-      'Special Word Updated',
+      'Keyword Updated',
       `Saved changes to "${term}".`
     );
     return true;
@@ -229,7 +263,7 @@ export class CompendiumStore {
     } else {
       this.notifications.success(
         `Restored "${kw.term}"`,
-        'Special word is active again across all tooltips.'
+        'Keyword is active again across all tooltips.'
       );
     }
   }
@@ -250,7 +284,7 @@ export class CompendiumStore {
     }));
 
     this.notifications.info(
-      'Special Word Deleted',
+      'Keyword Deleted',
       `Removed "${kw.term}" from the active glossary.`,
       {
         label: 'Undo Delete',

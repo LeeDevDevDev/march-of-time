@@ -5,15 +5,15 @@
     </label>
     <div class="flex items-center gap-2">
       <span class="font-mono-num text-[11px] text-[var(--mot-muted)]">
-        Tip: Type <strong>[</strong> to chain &amp; insert special words
+        Tip: Type <strong>[</strong> to chain &amp; insert keywords
       </span>
-      @if (showNewWordButton()) {
+      @if (showNewKeywordButton()) {
         <button
           type="button"
           (click)="requestCreateKeyword.emit('')"
           class="text-xs font-bold text-[var(--mot-accent-text)] hover:underline"
         >
-          + New Word
+          + New Keyword
         </button>
       }
     </div>
@@ -42,7 +42,7 @@
         class="flex items-center justify-between border-b border-[#243B37] bg-[#0D1615] px-3 py-1.5 text-[11px] text-[#8AB0AB]"
       >
         <span>
-          Matching Special Words
+          Matching Keywords
           @if (bracketQuery()) {
             for <strong class="text-[#FF8C5A]">"{{ bracketQuery() }}"</strong>
           }
@@ -52,8 +52,8 @@
 
       @if (matchingBracketKeywords().length === 0) {
         <div class="flex items-center justify-between px-3.5 py-2.5 text-xs text-[#8AB0AB]">
-          <span>No special word matches "{{ bracketQuery() }}".</span>
-          @if (showNewWordButton()) {
+          <span>No keyword matches "{{ bracketQuery() }}".</span>
+          @if (showNewKeywordButton()) {
             <button
               type="button"
               (click)="onRequestCreateFromMenu()"

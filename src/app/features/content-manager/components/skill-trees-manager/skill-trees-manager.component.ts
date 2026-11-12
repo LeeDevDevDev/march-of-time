@@ -67,14 +67,18 @@ export class SkillTreesManagerComponent {
   readonly activeTree = computed(() => {
     const id = this.activeTreeId();
     if (!id) return null;
-    return this.compendiumStore.skillTrees().find((t) => t.id === id) ?? null;
+    return (
+      this.compendiumStore
+        .skillTrees()
+        .find((t) => t.id === id || t.slug === id) ?? null
+    );
   });
 
   readonly activeTreeNodes = computed(() => {
-    const id = this.activeTreeId();
-    if (!id) return [];
+    const tree = this.activeTree();
+    if (!tree) return [];
     return normalizePerkNodesTiers(
-      this.compendiumStore.perkNodes().filter((p) => p.tree_id === id)
+      this.compendiumStore.perkNodes().filter((p) => p.tree_id === tree.id)
     ).sort((a, b) => a.tier - b.tier || compareSiblingPerkNodes(a, b));
   });
 
@@ -105,7 +109,7 @@ export class SkillTreesManagerComponent {
   });
 
   readonly otherTreeAttachCandidates = computed(() => {
-    const currentTreeId = this.activeTreeId();
+    const currentTreeId = this.activeTree()?.id ?? this.activeTreeId();
     const q = this.attachSearch().trim().toLowerCase();
     return this.compendiumStore
       .perkNodes()
@@ -236,7 +240,7 @@ export class SkillTreesManagerComponent {
   }
 
   async attachNodeToActiveTree(candidate: PerkNodeModel): Promise<void> {
-    const treeId = this.activeTreeId();
+    const treeId = this.activeTree()?.id ?? this.activeTreeId();
     if (!treeId) return;
     const ok = await this.compendiumStore.moveOrReparentPerkNode(
       candidate.id,

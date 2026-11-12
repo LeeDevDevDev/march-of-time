@@ -1,11 +1,21 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  inject,
+  input,
+} from '@angular/core';
 import {
   DescriptionSegment,
   KeywordDefinition,
-  resolveChainedKeywords,
   tokenizeTextWithKeywords,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
+import {
+  KeywordTooltipPlacement,
+  KeywordTooltipService,
+} from './keyword-tooltip.service';
 
 @Component({
   selector: 'app-keyword-text',
@@ -14,14 +24,14 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
 })
 export class KeywordTextComponent {
   readonly compendiumStore = inject(CompendiumStore);
+  readonly keywordTooltip = inject(KeywordTooltipService);
+  private readonly hostRef = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly text = input.required<string>();
   readonly excludeTerm = input<string>('');
   readonly showHintWhenIdle = input<boolean>(true);
-  readonly placement = input<'top' | 'bottom'>('bottom');
+  readonly placement = input<KeywordTooltipPlacement>('auto');
   readonly tone = input<'adaptive' | 'dark'>('adaptive');
-
-  readonly hoveredKeyword = signal<KeywordDefinition | null>(null);
 
   readonly activeKeywordsList = computed(() => {
     const excluded = this.excludeTerm().trim().toLowerCase();
@@ -38,18 +48,18 @@ export class KeywordTextComponent {
     this.segments().some((s) => s.keyword !== null)
   );
 
-  readonly chainedKeywords = computed<KeywordDefinition[]>(() =>
-    resolveChainedKeywords(this.hoveredKeyword(), this.compendiumStore.keywords())
-  );
-
-  tokenizeSummary(kw: KeywordDefinition): DescriptionSegment[] {
-    const others = this.compendiumStore
-      .keywords()
-      .filter((item) => item.term.trim().toLowerCase() !== kw.term.trim().toLowerCase());
-    return tokenizeTextWithKeywords(kw.summary, others);
+  constructor() {
+    void this.compendiumStore.ensureLoaded();
+    inject(DestroyRef).onDestroy(() => {
+      this.keywordTooltip.hideIfContainedIn(this.hostRef.nativeElement);
+    });
   }
 
-  stripBrackets(raw: string): string {
-    return (raw ?? '').replace(/\[([^\]]+)\]/g, '$1');
+  showKeyword(kw: KeywordDefinition, target: EventTarget | null): void {
+    this.keywordTooltip.show(kw, target, this.placement());
+  }
+
+  hideKeyword(target: EventTarget | null): void {
+    this.keywordTooltip.hide(target);
   }
 }

@@ -105,6 +105,11 @@ export class CharacterDetailComponent {
   });
 
   constructor() {
+    void this.characterStore.ensureCompendiumLoaded();
+    const initialId = this.characterId();
+    if (initialId) {
+      void this.characterStore.ensureCharacterLoaded(initialId);
+    }
     effect(() => {
       const id = this.characterId();
       if (id) {

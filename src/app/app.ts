@@ -9,12 +9,21 @@ import {
 import { AuthStore } from './core/auth/auth.store';
 import { NotificationStore } from './core/notifications/notification.store';
 import { ThemeStore } from './core/theme/theme.store';
+import { KeywordTooltipOverlayComponent } from './shared/keyword-text/keyword-tooltip-overlay.component';
+import { KeywordTooltipService } from './shared/keyword-text/keyword-tooltip.service';
 import { ToastViewportComponent } from './shared/notifications/toast-viewport.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, DatePipe, ToastViewportComponent],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    DatePipe,
+    ToastViewportComponent,
+    KeywordTooltipOverlayComponent,
+  ],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
@@ -22,6 +31,7 @@ export class App {
   readonly authStore = inject(AuthStore);
   readonly themeStore = inject(ThemeStore);
   readonly notificationStore = inject(NotificationStore);
+  private readonly keywordTooltip = inject(KeywordTooltipService);
   private readonly router = inject(Router);
 
   readonly userMenuOpen = signal(false);
@@ -70,5 +80,6 @@ export class App {
       this.userMenuOpen.set(false);
     }
     this.notificationStore.closeDrawer();
+    this.keywordTooltip.hideImmediately();
   }
 }

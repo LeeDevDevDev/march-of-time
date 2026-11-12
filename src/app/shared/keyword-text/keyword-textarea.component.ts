@@ -27,12 +27,12 @@ export class KeywordTextareaComponent {
   readonly label = input<string>('Rules Description');
   readonly value = input<string>('');
   readonly placeholder = input<string>(
-    'Type [ to search special words (e.g. [Crushing], [Parry], [Sundered])...'
+    'Type [ to search keywords (e.g. [Crushing], [Parry], [Sundered])...'
   );
   readonly rows = input<number>(3);
   readonly required = input<boolean>(true);
   readonly excludeTerm = input<string>('');
-  readonly showNewWordButton = input<boolean>(true);
+  readonly showNewKeywordButton = input<boolean>(true);
 
   readonly valueChange = output<string>();
   readonly requestCreateKeyword = output<string>();
@@ -41,6 +41,10 @@ export class KeywordTextareaComponent {
   readonly bracketQuery = signal('');
   readonly bracketStartIndex = signal<number>(-1);
   readonly bracketSelectedIndex = signal<number>(0);
+
+  constructor() {
+    void this.compendiumStore.ensureLoaded();
+  }
 
   readonly availableKeywords = computed(() => {
     const excluded = this.excludeTerm().trim().toLowerCase();

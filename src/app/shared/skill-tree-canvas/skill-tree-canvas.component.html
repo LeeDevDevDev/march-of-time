@@ -423,10 +423,10 @@
             @if (node.combat_tag && node.combat_tag !== 'None') {
               <button
                 type="button"
-                (mouseenter)="setHoveredKeywordByName(node.combat_tag)"
-                (mouseleave)="hoveredKeyword.set(null)"
-                (focus)="setHoveredKeywordByName(node.combat_tag)"
-                (blur)="hoveredKeyword.set(null)"
+                (mouseenter)="showKeywordTooltipByTerm(node.combat_tag, $event.currentTarget)"
+                (mouseleave)="hideKeywordTooltip($event.currentTarget)"
+                (focus)="showKeywordTooltipByTerm(node.combat_tag, $event.currentTarget)"
+                (blur)="hideKeywordTooltip($event.currentTarget)"
                 [class]="'cursor-help rounded-lg border px-3 py-1 font-bold transition-opacity hover:opacity-90 ' + getCombatTagBadgeClass(node.combat_tag)"
               >
                 {{ node.combat_tag }} · {{ getCombatTagCounterLabel(node.combat_tag) }}
@@ -441,12 +441,15 @@
             @for (seg of descriptionSegments(); track $index) {
               @if (seg.keyword; as kw) {
                 <span
+                  #nodeKwSpan
                   tabindex="0"
-                  (mouseenter)="hoveredKeyword.set(kw)"
-                  (mouseleave)="hoveredKeyword.set(null)"
-                  (focus)="hoveredKeyword.set(kw)"
-                  (blur)="hoveredKeyword.set(null)"
-                  class="cursor-help border-b border-dotted border-[#FF8C5A] font-semibold text-[#FF8C5A] transition-colors hover:text-white"
+                  (mouseenter)="showKeywordTooltip(kw, $event.currentTarget)"
+                  (mouseleave)="hideKeywordTooltip($event.currentTarget)"
+                  (focus)="showKeywordTooltip(kw, $event.currentTarget)"
+                  (blur)="hideKeywordTooltip($event.currentTarget)"
+                  class="cursor-help border-b border-dotted border-[#FF8C5A] font-semibold transition-colors hover:text-white"
+                  [class.text-white]="keywordTooltip.activeAnchor() === nodeKwSpan"
+                  [class.text-[#FF8C5A]]="keywordTooltip.activeAnchor() !== nodeKwSpan"
                 >{{ seg.text }}</span>
               } @else {
                 <span>{{ seg.text }}</span>
@@ -466,56 +469,7 @@
             </div>
           }
 
-          @if (hoveredKeyword(); as kw) {
-            <div class="mt-3.5 space-y-2 border-t border-[#243B37] pt-3">
-              <div
-                class="rounded-lg border border-[#C4491A] bg-[#122220] p-3 transition-all"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <span class="font-display text-xs font-bold text-[#FF8C5A]">
-                    {{ kw.term }}
-                  </span>
-                  <span class="font-mono-num text-xs text-[#8AB0AB]">
-                    {{ kw.category }}
-                  </span>
-                </div>
-                <p class="mt-1 text-xs leading-relaxed text-[#EBF5F3]">
-                  @for (subSeg of tokenizeKeywordSummary(kw); track $index) {
-                    @if (subSeg.keyword) {
-                      <span class="font-bold text-[#FF8C5A] underline decoration-dotted underline-offset-2">
-                        {{ subSeg.text }}
-                      </span>
-                    } @else {
-                      <span>{{ subSeg.text }}</span>
-                    }
-                  }
-                </p>
-              </div>
-
-              @if (chainedHoveredKeywords().length > 0) {
-                <div class="space-y-1.5 border-l-2 border-[#C4491A]/60 pl-2.5">
-                  <p class="font-mono-num text-xs font-semibold text-[#8AB0AB] tabular-nums">
-                    Referenced Rules ({{ chainedHoveredKeywords().length }})
-                  </p>
-                  @for (chainedKw of chainedHoveredKeywords(); track chainedKw.term) {
-                    <div class="rounded-lg border border-[#243B37] bg-[#122220]/80 p-2.5">
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="font-display text-xs font-bold text-[#FF8C5A]">
-                          ↳ {{ chainedKw.term }}
-                        </span>
-                        <span class="font-mono-num text-xs text-[#8AB0AB]">
-                          {{ chainedKw.category }}
-                        </span>
-                      </div>
-                      <p class="mt-1 text-xs leading-relaxed text-[#C6DCD9]">
-                        {{ stripBrackets(chainedKw.summary) }}
-                      </p>
-                    </div>
-                  }
-                </div>
-              }
-            </div>
-          } @else {
+          @if (hasDescriptionKeywords()) {
             <div class="mt-3 border-t border-[#243B37]/60 pt-2.5 text-xs text-[#8AB0AB]">
               Hover over any underlined keyword above to view its rule &amp; linked terms.
             </div>

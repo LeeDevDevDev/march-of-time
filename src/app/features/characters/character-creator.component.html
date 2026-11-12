@@ -87,6 +87,22 @@
       }
     </div>
 
+    @if (isEditMode() && !hasHydratedEditState() && characterStore.isLoading()) {
+      <div class="p-8 space-y-6 animate-pulse" role="status" aria-live="polite" aria-busy="true">
+        <div class="inline-flex items-center gap-2.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-2 font-mono-num text-xs font-semibold text-[var(--mot-muted)]">
+          <svg class="h-4 w-4 animate-spin text-[#C4491A]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <span>Loading Character Builder...</span>
+        </div>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="h-28 rounded-xl bg-[var(--mot-well)]"></div>
+          <div class="h-28 rounded-xl bg-[var(--mot-well)]"></div>
+        </div>
+        <div class="h-44 rounded-xl bg-[var(--mot-well)]"></div>
+      </div>
+    } @else {
     @if (step() === 1) {
       <div class="p-6 sm:p-8 space-y-6">
         <div class="grid grid-cols-1 gap-6 sm:grid-cols-12">
@@ -420,6 +436,15 @@
             </p>
           </div>
 
+          @if (characterStore.isLoading() && characterStore.weapons().length === 0) {
+            <div class="flex items-center gap-2.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 font-mono-num text-xs font-semibold text-[var(--mot-muted)]" role="status" aria-live="polite">
+              <svg class="h-4 w-4 animate-spin text-[#C4491A]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <span>Loading Armory weapons...</span>
+            </div>
+          } @else {
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3">
               <label class="block text-xs font-bold text-[var(--mot-accent-text)]">
@@ -571,6 +596,7 @@
               }
             </div>
           </div>
+          }
         </div>
       </div>
     }
@@ -594,8 +620,44 @@
         </div>
 
         @if (!activeCreatorTree()) {
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-            @for (tree of characterStore.skillTrees(); track tree.id) {
+          @if (characterStore.isLoading() && characterStore.skillTrees().length === 0) {
+            <div class="space-y-4" role="status" aria-live="polite" aria-busy="true">
+              <div class="inline-flex items-center gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2 font-mono-num text-xs font-semibold text-[var(--mot-muted)]">
+                <svg class="h-4 w-4 animate-spin text-[#C4491A]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                  <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Loading Martial Skill Trees...</span>
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                @for (sk of [1, 2, 3]; track sk) {
+                  <div class="animate-pulse rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-5 space-y-4">
+                    <div class="flex items-start justify-between">
+                      <div class="h-11 w-11 rounded-xl bg-[var(--mot-surface)]"></div>
+                      <div class="h-6 w-16 rounded-md bg-[var(--mot-surface)]"></div>
+                    </div>
+                    <div class="h-5 w-2/3 rounded bg-[var(--mot-surface)]"></div>
+                    <div class="h-3.5 w-full rounded bg-[var(--mot-surface)]"></div>
+                    <div class="h-8 w-full rounded-lg bg-[var(--mot-surface)]"></div>
+                  </div>
+                }
+              </div>
+            </div>
+          } @else if (characterStore.skillTrees().length === 0) {
+            <div
+              class="rounded-2xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] p-8 text-center"
+            >
+              <p class="font-display text-base font-bold text-[var(--mot-text)]">
+                No Martial Skill Trees Authored Yet
+              </p>
+              <p class="mt-1 text-xs text-[var(--mot-muted)]">
+                Your unspent Perk Points are saved on your character sheet and can be spent once Skill Trees are added in the Content Forge.
+              </p>
+            </div>
+          } @else {
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+              @for (tree of characterStore.skillTrees(); track tree.id) {
               <article
                 class="flex flex-col justify-between rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-5 transition-colors hover:border-[#C4491A]"
               >
@@ -641,8 +703,9 @@
                   </button>
                 </div>
               </article>
-            }
-          </div>
+              }
+            </div>
+          }
         }
 
         @if (activeCreatorTree(); as tree) {
@@ -669,6 +732,7 @@
           </div>
         }
       </div>
+    }
     }
 
     <div

@@ -22,6 +22,10 @@ export class DashboardComponent {
   newCoverUrl = '';
   joinCode = '';
 
+  constructor() {
+    void this.campaignStore.ensureLoaded();
+  }
+
   openCreateDrawer(): void {
     this.showJoinForm.set(false);
     this.showCreateForm.update((open) => !open);

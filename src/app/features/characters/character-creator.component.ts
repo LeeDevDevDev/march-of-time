@@ -58,7 +58,7 @@ export class CharacterCreatorComponent {
     this.route.snapshot.paramMap.get('id')
   );
   readonly isEditMode = computed(() => !!this.editingCharacterId());
-  private hasHydratedEditState = false;
+  readonly hasHydratedEditState = signal(false);
 
   readonly step = signal<CreatorStep>(1);
 
@@ -164,18 +164,25 @@ export class CharacterCreatorComponent {
   ];
 
   constructor() {
+    void this.characterStore.ensureCompendiumLoaded();
+
     const stepParam = Number(this.route.snapshot.queryParamMap.get('step'));
     if (stepParam >= 1 && stepParam <= 5) {
       this.step.set(stepParam as CreatorStep);
     }
 
+    const initialEditId = this.editingCharacterId();
+    if (initialEditId) {
+      void this.characterStore.ensureCharacterLoaded(initialEditId);
+    }
+
     effect(() => {
       const editId = this.editingCharacterId();
-      if (!editId || this.hasHydratedEditState) return;
+      if (!editId || this.hasHydratedEditState()) return;
       const existing = this.characterStore.getCharacterById(editId);
       if (!existing) return;
 
-      this.hasHydratedEditState = true;
+      this.hasHydratedEditState.set(true);
       this.name.set(existing.name);
       this.level.set(existing.level);
       this.attributes.set({

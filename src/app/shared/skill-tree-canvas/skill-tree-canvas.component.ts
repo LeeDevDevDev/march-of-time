@@ -1,6 +1,8 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
+  DestroyRef,
+  ElementRef,
   EventEmitter,
   Input,
   OnChanges,
@@ -12,13 +14,11 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
-  DescriptionSegment,
   KeywordDefinition,
   PerkNodeModel,
   ResolvedCompendiumVisuals,
   SkillTreeBranchNode,
   SkillTreeModel,
-  buildKeywordLookupMap,
   buildSkillTreeHierarchy,
   compareSiblingPerkNodes,
   formatRuleHookBadges,
@@ -26,13 +26,13 @@ import {
   getCombatTagCounterLabel,
   getDescendantNodeIds,
   normalizePerkNodesTiers,
-  resolveChainedKeywords,
   resolveNodeVisuals,
   resolveTreeVisuals,
   tokenizeTextWithKeywords,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
 import { CompendiumIconComponent } from '../compendium-icon/compendium-icon.component';
+import { KeywordTooltipService } from '../keyword-text/keyword-tooltip.service';
 
 @Component({
   selector: 'app-skill-tree-canvas',
@@ -45,6 +45,8 @@ export class SkillTreeCanvasComponent implements OnChanges {
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
   readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
   readonly compendiumStore = inject(CompendiumStore);
+  readonly keywordTooltip = inject(KeywordTooltipService);
+  private readonly hostRef = inject<ElementRef<HTMLElement>>(ElementRef);
 
   @Input({ required: true }) tree!: SkillTreeModel;
   @Input({ required: true }) allNodes: PerkNodeModel[] = [];
@@ -64,7 +66,6 @@ export class SkillTreeCanvasComponent implements OnChanges {
   private readonly treeIdSignal = signal<string>('');
 
   readonly selectedNodeId = signal<string | null>(null);
-  readonly hoveredKeyword = signal<KeywordDefinition | null>(null);
   readonly targetMoveTreeId = signal<string>('');
 
   readonly draggedNodeId = signal<string | null>(null);
@@ -128,11 +129,8 @@ export class SkillTreeCanvasComponent implements OnChanges {
     );
   });
 
-  readonly chainedHoveredKeywords = computed<KeywordDefinition[]>(() =>
-    resolveChainedKeywords(
-      this.hoveredKeyword(),
-      this.compendiumStore.keywords()
-    )
+  readonly hasDescriptionKeywords = computed(() =>
+    this.descriptionSegments().some((seg) => seg.keyword !== null)
   );
 
   readonly nodeHookBadges = computed(() => {
@@ -141,13 +139,19 @@ export class SkillTreeCanvasComponent implements OnChanges {
     return formatRuleHookBadges(node.rule_hooks);
   });
 
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.keywordTooltip.hideIfContainedIn(this.hostRef.nativeElement);
+    });
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['tree'] && this.tree) {
       const prevTreeId = this.treeIdSignal();
       this.treeIdSignal.set(this.tree.id);
       if (prevTreeId !== this.tree.id) {
         this.resetCamera();
-        this.hoveredKeyword.set(null);
+        this.keywordTooltip.hideIfContainedIn(this.hostRef.nativeElement);
         this.targetMoveTreeId.set('');
       }
     }
@@ -207,7 +211,7 @@ export class SkillTreeCanvasComponent implements OnChanges {
     event.stopPropagation();
     if (this.movedDistance > 6) return;
     this.selectedNodeId.set(node.id);
-    this.hoveredKeyword.set(null);
+    this.keywordTooltip.hideIfContainedIn(this.hostRef.nativeElement);
   }
 
   onAddChildFromNode(event: MouseEvent, parentNode: PerkNodeModel): void {
@@ -393,26 +397,16 @@ export class SkillTreeCanvasComponent implements OnChanges {
     this.dragOverTargetId.set(null);
   }
 
-  setHoveredKeywordByName(term: string): void {
-    const map = buildKeywordLookupMap(this.compendiumStore.keywords());
-    const def = map.get(term.toLowerCase());
-    if (def) {
-      this.hoveredKeyword.set(def);
-    }
+  showKeywordTooltip(kw: KeywordDefinition, target: EventTarget | null): void {
+    this.keywordTooltip.show(kw, target);
   }
 
-  tokenizeKeywordSummary(kw: KeywordDefinition): DescriptionSegment[] {
-    const others = this.compendiumStore
-      .keywords()
-      .filter(
-        (item) =>
-          item.term.trim().toLowerCase() !== kw.term.trim().toLowerCase()
-      );
-    return tokenizeTextWithKeywords(kw.summary, others);
+  showKeywordTooltipByTerm(term: string, target: EventTarget | null): void {
+    this.keywordTooltip.showByTerm(term, target);
   }
 
-  stripBrackets(raw: string): string {
-    return (raw ?? '').replace(/\[([^\]]+)\]/g, '$1');
+  hideKeywordTooltip(target?: EventTarget | null): void {
+    this.keywordTooltip.hide(target);
   }
 
   getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {

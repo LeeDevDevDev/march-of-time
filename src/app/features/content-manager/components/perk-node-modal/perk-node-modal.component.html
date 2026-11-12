@@ -20,7 +20,7 @@
             }
           </h2>
           <p class="text-xs text-[#8AB0AB]">
-            Type <code class="rounded bg-[#0D1615] px-1.5 py-0.5 text-[#FF8C5A]">[</code> in the description to search and insert special words.
+            Type <code class="rounded bg-[#0D1615] px-1.5 py-0.5 text-[#FF8C5A]">[</code> in the description to search and insert keywords.
           </p>
         </div>
         <button
@@ -44,7 +44,7 @@
               name="nodeName"
               required
               [(ngModel)]="nodeForm.name"
-              placeholder="e.g. Sundering Ram or Ironblood Conditioning"
+              placeholder="Node Name"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
             />
           </div>
@@ -160,7 +160,7 @@
               [value]="nodeForm.description"
               (valueChange)="nodeForm.description = $event"
               (requestCreateKeyword)="requestCreateKeyword.emit($event)"
-              placeholder="Type [ to search special words (e.g. [Crushing], [Parry], [Sundered])..."
+              placeholder="Type [ to search keywords (e.g. [Crushing], [Parry], [Sundered])..."
             />
           </div>
 

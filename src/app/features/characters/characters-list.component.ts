@@ -19,6 +19,10 @@ export class CharactersListComponent {
   private readonly router = inject(Router);
   readonly pendingDeleteCharacter = signal<CharacterModel | null>(null);
 
+  constructor() {
+    void this.characterStore.ensureLoaded();
+  }
+
   getStats(char: CharacterModel): DerivedCharacterStats {
     return computeDerivedStats(
       char,

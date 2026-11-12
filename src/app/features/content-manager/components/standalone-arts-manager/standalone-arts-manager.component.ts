@@ -51,7 +51,7 @@ export class StandaloneArtsManagerComponent {
   });
 
   constructor() {
-    void this.characterStore.loadAdminCharacterDirectory();
+    void this.characterStore.ensureAdminDirectoryLoaded();
   }
 
   readonly standaloneFilterOptions: { id: string; label: string }[] = [

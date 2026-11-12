@@ -1,4 +1,12 @@
 import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  NavigationEnd,
+  Router,
+  RouterLink,
+  RouterOutlet,
+} from '@angular/router';
+import { filter } from 'rxjs';
 import {
   KeywordDefinition,
   PerkNodeModel,
@@ -13,6 +21,49 @@ import { PerkNodeModalComponent } from './components/perk-node-modal/perk-node-m
 import { SkillTreesManagerComponent } from './components/skill-trees-manager/skill-trees-manager.component';
 import { StandaloneArtsManagerComponent } from './components/standalone-arts-manager/standalone-arts-manager.component';
 import { WeaponsManagerComponent } from './components/weapons-manager/weapons-manager.component';
+
+export type ContentStudioTab = 'trees' | 'standalone' | 'weapons' | 'keywords';
+
+export function parseContentManagerUrl(rawUrl: string): {
+  tab: ContentStudioTab;
+  treeId: string | null;
+} {
+  const cleanPath = (rawUrl ?? '').split('?')[0].split('#')[0];
+  const segments = cleanPath
+    .split('/')
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    });
+
+  const cmIdx = segments.indexOf('content-manager');
+  const subSegments = cmIdx >= 0 ? segments.slice(cmIdx + 1) : segments;
+  const first = subSegments[0] ?? 'trees';
+
+  if (
+    first === 'standalone' ||
+    first === 'weapons' ||
+    first === 'keywords'
+  ) {
+    return { tab: first, treeId: null };
+  }
+
+  return {
+    tab: 'trees',
+    treeId: first === 'trees' ? (subSegments[1] ?? null) : null,
+  };
+}
+
+@Component({
+  selector: 'app-content-manager-route-slot',
+  standalone: true,
+  template: '',
+})
+export class ContentManagerRouteSlotComponent {}
 
 type PendingDeleteState =
   | {
@@ -60,6 +111,8 @@ type PendingDeleteState =
   selector: 'app-content-manager',
   standalone: true,
   imports: [
+    RouterLink,
+    RouterOutlet,
     SkillTreesManagerComponent,
     StandaloneArtsManagerComponent,
     WeaponsManagerComponent,
@@ -71,6 +124,7 @@ type PendingDeleteState =
 })
 export class ContentManagerComponent implements OnInit {
   readonly compendiumStore = inject(CompendiumStore);
+  private readonly router = inject(Router);
 
   @ViewChild(StandaloneArtsManagerComponent)
   standaloneManager?: StandaloneArtsManagerComponent;
@@ -78,14 +132,46 @@ export class ContentManagerComponent implements OnInit {
   @ViewChild(SkillTreesManagerComponent)
   treesManager?: SkillTreesManagerComponent;
 
-  readonly studioTab = signal<'trees' | 'standalone' | 'weapons' | 'keywords'>(
-    'trees'
-  );
+  readonly studioTab = signal<ContentStudioTab>('trees');
   readonly activeTreeId = signal<string | null>(null);
   readonly pendingDelete = signal<PendingDeleteState | null>(null);
 
+  constructor() {
+    void this.compendiumStore.ensureLoaded();
+    this.syncStateFromUrl(this.router.url);
+    this.router.events
+      .pipe(
+        filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+        takeUntilDestroyed()
+      )
+      .subscribe((event) => {
+        this.syncStateFromUrl(event.urlAfterRedirects || event.url);
+      });
+  }
+
   ngOnInit(): void {
     this.compendiumStore.clearMessages();
+    this.syncStateFromUrl(this.router.url);
+  }
+
+  private syncStateFromUrl(url: string): void {
+    const parsed = parseContentManagerUrl(url);
+    this.studioTab.set(parsed.tab);
+    this.activeTreeId.set(parsed.treeId);
+  }
+
+  onActiveTreeIdChange(nextTreeId: string | null): void {
+    if (!nextTreeId) {
+      this.activeTreeId.set(null);
+      void this.router.navigate(['/content-manager', 'trees']);
+      return;
+    }
+    const matched = this.compendiumStore
+      .skillTrees()
+      .find((t) => t.id === nextTreeId || t.slug === nextTreeId);
+    const routeSegment = matched?.slug || nextTreeId;
+    this.activeTreeId.set(routeSegment);
+    void this.router.navigate(['/content-manager', 'trees', routeSegment]);
   }
 
   onStandaloneNodeSaved(nodeId: string): void {
@@ -98,9 +184,15 @@ export class ContentManagerComponent implements OnInit {
     }, 0);
   }
 
-  onNodeMovedToTree(event: { treeId: string; nodeId: string }): void {
-    this.studioTab.set('trees');
-    this.activeTreeId.set(event.treeId);
+  async onNodeMovedToTree(event: {
+    treeId: string;
+    nodeId: string;
+  }): Promise<void> {
+    const matched = this.compendiumStore
+      .skillTrees()
+      .find((t) => t.id === event.treeId || t.slug === event.treeId);
+    const routeSegment = matched?.slug || event.treeId;
+    await this.router.navigate(['/content-manager', 'trees', routeSegment]);
     setTimeout(() => {
       this.treesManager?.selectCanvasNode(event.nodeId);
     }, 0);
@@ -184,12 +276,12 @@ export class ContentManagerComponent implements OnInit {
     this.pendingDelete.set({
       kind: 'keyword',
       target: kw,
-      title: 'Delete Special Word',
+      title: 'Delete Keyword',
       itemName: kw.term,
       badge: kw.category,
-      message: `Are you sure you want to remove "${kw.term}" from the Special Words & Glossary compendium?`,
+      message: `Are you sure you want to remove "${kw.term}" from the Keywords Glossary compendium?`,
       warningNote: `Any [${kw.term}] tags inside Skill Tree nodes, Weapon traits, or chained keywords will remain as text but will no longer display a hover rule tooltip.`,
-      confirmLabel: 'Delete Special Word',
+      confirmLabel: 'Delete Keyword',
     });
   }
 
@@ -205,8 +297,14 @@ export class ContentManagerComponent implements OnInit {
 
     if (pending.kind === 'tree') {
       const ok = await this.compendiumStore.deleteSkillTree(pending.target.id);
-      if (ok && this.activeTreeId() === pending.target.id) {
+      const currentParam = this.activeTreeId();
+      if (
+        ok &&
+        (currentParam === pending.target.id ||
+          currentParam === pending.target.slug)
+      ) {
         this.activeTreeId.set(null);
+        void this.router.navigate(['/content-manager', 'trees']);
       }
     } else if (pending.kind === 'node') {
       await this.compendiumStore.deletePerkNode(pending.target.id);

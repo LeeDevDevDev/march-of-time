@@ -73,6 +73,52 @@ export const routes: Routes = [
       import('./features/content-manager/content-manager.component').then(
         (m) => m.ContentManagerComponent
       ),
+    children: [
+      {
+        path: '',
+        pathMatch: 'full',
+        redirectTo: 'trees',
+      },
+      {
+        path: 'trees',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'trees/:treeId',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'standalone',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'weapons',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'keywords',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: '**',
+        redirectTo: 'trees',
+      },
+    ],
   },
   {
     path: 'profile',

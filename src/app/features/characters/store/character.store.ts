@@ -14,6 +14,10 @@ interface CharacterState {
   externalCharacters: CharacterModel[];
   adminDirectory: CharacterModel[];
   isLoading: boolean;
+  isLoadingExternal: boolean;
+  isLoadingDirectory: boolean;
+  hasLoaded: boolean;
+  hasLoadedDirectory: boolean;
   error: string | null;
 }
 
@@ -24,18 +28,36 @@ export class CharacterStore {
   private readonly compendiumStore = inject(CompendiumStore);
   private readonly notifications = inject(NotificationStore);
 
+  private userCharactersPromise: Promise<void> | null = null;
+  private directoryPromise: Promise<void> | null = null;
+  private readonly pendingCharacterLoads = new Map<string, Promise<void>>();
+  private lastUserId: string | null = null;
+
   readonly #state = signal<CharacterState>({
     characters: [],
     externalCharacters: [],
     adminDirectory: [],
     isLoading: false,
+    isLoadingExternal: false,
+    isLoadingDirectory: false,
+    hasLoaded: false,
+    hasLoadedDirectory: false,
     error: null,
   });
 
   readonly characters = computed(() => this.#state().characters);
   readonly adminDirectory = computed(() => this.#state().adminDirectory);
+  readonly isHydrating = computed(
+    () => this.#state().isLoading && !this.#state().hasLoaded
+  );
+  readonly isLoadingDirectory = computed(
+    () => this.#state().isLoadingDirectory
+  );
   readonly isLoading = computed(
-    () => this.#state().isLoading || this.compendiumStore.isLoading()
+    () =>
+      this.#state().isLoading ||
+      this.#state().isLoadingExternal ||
+      this.compendiumStore.isLoading()
   );
   readonly error = computed(() => this.#state().error);
   readonly defaultCharacterName = computed(() => {
@@ -57,23 +79,90 @@ export class CharacterStore {
 
   constructor() {
     effect(() => {
-      const user = this.authStore.user();
-      if (user) {
-        void this.loadCharactersForUser(user.id);
-      } else {
-        this.#state.update((s) => ({
-          ...s,
+      const userId = this.authStore.user()?.id ?? null;
+      if (this.lastUserId !== null && userId !== this.lastUserId) {
+        this.userCharactersPromise = null;
+        this.directoryPromise = null;
+        this.pendingCharacterLoads.clear();
+        this.#state.set({
           characters: [],
           externalCharacters: [],
           adminDirectory: [],
+          isLoading: false,
+          isLoadingExternal: false,
+          isLoadingDirectory: false,
+          hasLoaded: false,
+          hasLoadedDirectory: false,
           error: null,
-        }));
+        });
       }
+      this.lastUserId = userId;
     });
   }
 
-  async loadCharactersForUser(userId: string): Promise<void> {
+  ensureCompendiumLoaded(): Promise<void> {
+    return this.compendiumStore.ensureLoaded();
+  }
+
+  ensureUserCharactersLoaded(): Promise<void> {
+    if (this.#state().hasLoaded) {
+      return Promise.resolve();
+    }
+    if (this.userCharactersPromise) {
+      return this.userCharactersPromise;
+    }
+
+    const immediateUser = this.authStore.user();
+    if (immediateUser) {
+      return this.loadCharactersForUser(immediateUser.id);
+    }
+
+    if (this.authStore.isLoading()) {
+      this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+      const waitTask = (async () => {
+        try {
+          await this.authStore.waitForInit();
+          const resolvedUser = this.authStore.user();
+          if (resolvedUser) {
+            await this.fetchCharactersForUserInternal(resolvedUser.id);
+          } else {
+            this.#state.update((s) => ({ ...s, isLoading: false }));
+          }
+        } finally {
+          this.userCharactersPromise = null;
+        }
+      })();
+      this.userCharactersPromise = waitTask;
+      return waitTask;
+    }
+
+    return Promise.resolve();
+  }
+
+  async ensureLoaded(): Promise<void> {
+    await Promise.all([
+      this.ensureUserCharactersLoaded(),
+      this.compendiumStore.ensureLoaded(),
+    ]);
+  }
+
+  loadCharactersForUser(userId: string): Promise<void> {
+    if (this.userCharactersPromise) {
+      return this.userCharactersPromise;
+    }
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+    const task = (async () => {
+      try {
+        await this.fetchCharactersForUserInternal(userId);
+      } finally {
+        this.userCharactersPromise = null;
+      }
+    })();
+    this.userCharactersPromise = task;
+    return task;
+  }
+
+  private async fetchCharactersForUserInternal(userId: string): Promise<void> {
     try {
       const { data, error } =
         await this.characterService.fetchCharactersByOwner(userId);
@@ -81,6 +170,7 @@ export class CharacterStore {
       if (error) {
         this.#state.update((s) => ({
           ...s,
+          hasLoaded: true,
           isLoading: false,
           error,
         }));
@@ -90,10 +180,15 @@ export class CharacterStore {
       this.#state.update((s) => ({
         ...s,
         characters: data,
+        hasLoaded: true,
         isLoading: false,
       }));
     } catch {
-      this.#state.update((s) => ({ ...s, isLoading: false }));
+      this.#state.update((s) => ({
+        ...s,
+        hasLoaded: true,
+        isLoading: false,
+      }));
     }
   }
 
@@ -106,26 +201,80 @@ export class CharacterStore {
     );
   }
 
-  async ensureCharacterLoaded(characterId: string): Promise<void> {
-    if (!characterId || this.getCharacterById(characterId)) return;
-    const { data } = await this.characterService.fetchCharacterById(characterId);
-    if (!data) return;
-    this.#state.update((s) => ({
-      ...s,
-      externalCharacters: [
-        ...s.externalCharacters.filter((c) => c.id !== data.id),
-        data,
-      ],
-    }));
+  ensureCharacterLoaded(characterId: string): Promise<void> {
+    if (!characterId || this.getCharacterById(characterId)) {
+      return Promise.resolve();
+    }
+    const existingPromise = this.pendingCharacterLoads.get(characterId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    this.#state.update((s) => ({ ...s, isLoadingExternal: true }));
+    const task = (async () => {
+      try {
+        const { data } =
+          await this.characterService.fetchCharacterById(characterId);
+        if (!data) return;
+        this.#state.update((s) => ({
+          ...s,
+          externalCharacters: [
+            ...s.externalCharacters.filter((c) => c.id !== data.id),
+            data,
+          ],
+        }));
+      } finally {
+        this.pendingCharacterLoads.delete(characterId);
+        this.#state.update((s) => ({
+          ...s,
+          isLoadingExternal: this.pendingCharacterLoads.size > 0,
+        }));
+      }
+    })();
+
+    this.pendingCharacterLoads.set(characterId, task);
+    return task;
   }
 
-  async loadAdminCharacterDirectory(): Promise<void> {
-    if (!this.authStore.isAdmin()) return;
-    const { data } = await this.characterService.fetchAllCharacters();
-    this.#state.update((s) => ({
-      ...s,
-      adminDirectory: data,
-    }));
+  ensureAdminDirectoryLoaded(): Promise<void> {
+    if (this.#state().hasLoadedDirectory) {
+      return Promise.resolve();
+    }
+    if (this.directoryPromise) {
+      return this.directoryPromise;
+    }
+    return this.loadAdminCharacterDirectory();
+  }
+
+  loadAdminCharacterDirectory(): Promise<void> {
+    if (this.directoryPromise) {
+      return this.directoryPromise;
+    }
+    if (!this.authStore.isAdmin() && !this.authStore.isLoading()) {
+      return Promise.resolve();
+    }
+    this.#state.update((s) => ({ ...s, isLoadingDirectory: true }));
+    const task = (async () => {
+      try {
+        if (this.authStore.isLoading()) {
+          await this.authStore.waitForInit();
+        }
+        if (!this.authStore.isAdmin()) {
+          return;
+        }
+        const { data } = await this.characterService.fetchAllCharacters();
+        this.#state.update((s) => ({
+          ...s,
+          adminDirectory: data,
+          hasLoadedDirectory: true,
+        }));
+      } finally {
+        this.directoryPromise = null;
+        this.#state.update((s) => ({ ...s, isLoadingDirectory: false }));
+      }
+    })();
+    this.directoryPromise = task;
+    return task;
   }
 
   async toggleAdminGrantedPerk(
@@ -206,8 +355,13 @@ export class CharacterStore {
 
       this.#state.update((s) => ({
         ...s,
-        characters: [data, ...s.characters],
-        adminDirectory: s.adminDirectory.length > 0 ? [data, ...s.adminDirectory] : s.adminDirectory,
+        characters: s.hasLoaded ? [data, ...s.characters] : s.characters,
+        externalCharacters: s.hasLoaded
+          ? s.externalCharacters
+          : [data, ...s.externalCharacters.filter((c) => c.id !== data.id)],
+        adminDirectory: s.hasLoadedDirectory
+          ? [data, ...s.adminDirectory.filter((c) => c.id !== data.id)]
+          : s.adminDirectory,
         isLoading: false,
       }));
       this.notifications.success(
@@ -306,6 +460,12 @@ export class CharacterStore {
       isLoading: true,
       error: null,
       characters: s.characters.map((c) => (c.id === characterId ? updated : c)),
+      externalCharacters: s.externalCharacters.map((c) =>
+        c.id === characterId ? updated : c
+      ),
+      adminDirectory: s.adminDirectory.map((c) =>
+        c.id === characterId ? updated : c
+      ),
     }));
 
     try {
@@ -330,6 +490,10 @@ export class CharacterStore {
       this.#state.update((s) => ({
         ...s,
         characters: s.characters.filter((c) => c.id !== characterId),
+        externalCharacters: s.externalCharacters.filter(
+          (c) => c.id !== characterId
+        ),
+        adminDirectory: s.adminDirectory.filter((c) => c.id !== characterId),
       }));
       this.notifications.info(
         'Character Deleted',

@@ -967,7 +967,7 @@
                   [perkBudget]="stats.perkBudget"
                   (toggleUnlock)="toggleCharacterPerk(char.id, $event)"
                 />
-              } @else if (authStore.isAdmin()) {
+              } @else if (authStore.isAdmin() && characterStore.standaloneNodes().length > 0) {
                 <div class="space-y-3">
                   <div
                     class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-3 text-xs text-[var(--mot-muted)]"
@@ -1047,6 +1047,31 @@
                       </div>
                     }
                   </div>
+                </div>
+              } @else if (characterStore.isLoading()) {
+                <div
+                  class="flex h-full min-h-[240px] flex-col items-center justify-center rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-8 text-center"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <svg class="h-6 w-6 animate-spin text-[#C4491A]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                    <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                  <p class="mt-3 font-display text-sm font-bold text-[var(--mot-text)]">
+                    Loading Compendium Skill Trees...
+                  </p>
+                </div>
+              } @else {
+                <div
+                  class="flex h-full min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] p-8 text-center"
+                >
+                  <p class="font-display text-base font-bold text-[var(--mot-text)]">
+                    No Martial Skill Trees Authored Yet
+                  </p>
+                  <p class="mt-1 max-w-md text-xs text-[var(--mot-muted)]">
+                    Skill Trees and Combat Arts created in the Content Forge will appear here automatically.
+                  </p>
                 </div>
               }
             </div>

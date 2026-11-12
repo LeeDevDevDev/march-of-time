@@ -8,6 +8,7 @@ interface CampaignState {
   yourGames: GameCardModel[];
   joinedGames: GameCardModel[];
   isLoading: boolean;
+  hasLoaded: boolean;
   error: string | null;
   needsMigration: boolean;
 }
@@ -18,40 +19,97 @@ export class CampaignStore {
   private readonly authStore = inject(AuthStore);
   private readonly notifications = inject(NotificationStore);
 
+  private loadPromise: Promise<void> | null = null;
+  private lastUserId: string | null = null;
+
   readonly #state = signal<CampaignState>({
     yourGames: [],
     joinedGames: [],
     isLoading: false,
+    hasLoaded: false,
     error: null,
     needsMigration: false,
   });
 
   readonly yourGames = computed(() => this.#state().yourGames);
   readonly joinedGames = computed(() => this.#state().joinedGames);
+  readonly isHydrating = computed(
+    () => this.#state().isLoading && !this.#state().hasLoaded
+  );
   readonly isLoading = computed(() => this.#state().isLoading);
   readonly error = computed(() => this.#state().error);
   readonly needsMigration = computed(() => this.#state().needsMigration);
 
   constructor() {
     effect(() => {
-      const user = this.authStore.user();
-      if (user) {
-        void this.loadGames(user.id);
-      } else {
+      const userId = this.authStore.user()?.id ?? null;
+      if (this.lastUserId !== null && userId !== this.lastUserId) {
+        this.loadPromise = null;
         this.#state.set({
           yourGames: [],
           joinedGames: [],
           isLoading: false,
+          hasLoaded: false,
           error: null,
           needsMigration: false,
         });
       }
+      this.lastUserId = userId;
     });
   }
 
-  async loadGames(userId: string): Promise<void> {
-    this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+  ensureLoaded(): Promise<void> {
+    if (this.#state().hasLoaded) {
+      return Promise.resolve();
+    }
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
 
+    const immediateUser = this.authStore.user();
+    if (immediateUser) {
+      return this.loadGames(immediateUser.id);
+    }
+
+    if (this.authStore.isLoading()) {
+      this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+      const waitTask = (async () => {
+        try {
+          await this.authStore.waitForInit();
+          const resolvedUser = this.authStore.user();
+          if (resolvedUser) {
+            await this.fetchGamesInternal(resolvedUser.id);
+          } else {
+            this.#state.update((s) => ({ ...s, isLoading: false }));
+          }
+        } finally {
+          this.loadPromise = null;
+        }
+      })();
+      this.loadPromise = waitTask;
+      return waitTask;
+    }
+
+    return Promise.resolve();
+  }
+
+  loadGames(userId: string): Promise<void> {
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
+    this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+    const task = (async () => {
+      try {
+        await this.fetchGamesInternal(userId);
+      } finally {
+        this.loadPromise = null;
+      }
+    })();
+    this.loadPromise = task;
+    return task;
+  }
+
+  private async fetchGamesInternal(userId: string): Promise<void> {
     try {
       const res = await this.campaignService.fetchUserCampaigns(userId);
       this.#state.update((s) => ({
@@ -60,10 +118,15 @@ export class CampaignStore {
         joinedGames: res.joinedGames,
         needsMigration: res.needsMigration,
         error: res.error,
+        hasLoaded: true,
         isLoading: false,
       }));
     } catch {
-      this.#state.update((s) => ({ ...s, isLoading: false }));
+      this.#state.update((s) => ({
+        ...s,
+        hasLoaded: true,
+        isLoading: false,
+      }));
     }
   }
 
