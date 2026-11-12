@@ -432,7 +432,9 @@ export function computeDerivedStats(
   const fieldSkillSpent = Object.values(char.field_skills).reduce((a, b) => a + b, 0);
 
   const perkBudget = level;
-  const perkSpent = unlockedPerks.reduce((sum, p) => sum + (p.perk_cost ?? 1), 0);
+  const perkSpent = unlockedPerks
+    .filter((p) => !isStandalonePerkNode(p))
+    .reduce((sum, p) => sum + (p.perk_cost ?? 1), 0);
 
   const fieldSkillTotals = {} as Record<
     FieldSkillName,

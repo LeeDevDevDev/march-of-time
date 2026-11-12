@@ -8,7 +8,7 @@
           Martial Skill Trees
         </h2>
         <p class="text-xs text-[var(--mot-muted)]">
-          Select a Skill Tree to open its interactive branching node canvas, or create a new martial path.
+          Select a Skill Tree to build &amp; arrange its node graph, or create a new martial path.
         </p>
       </div>
 
@@ -97,9 +97,16 @@
                   />
                 </div>
 
-                <div class="flex items-center gap-1.5">
+                <div class="flex items-center gap-1.5 font-mono-num text-xs font-bold tabular-nums">
+                  @if (getMaxTierForTree(tree.id) > 0) {
+                    <span
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1 text-[var(--mot-muted)]"
+                    >
+                      Depth T{{ getMaxTierForTree(tree.id) }}
+                    </span>
+                  }
                   <span
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] tabular-nums"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 text-[var(--mot-text)]"
                   >
                     {{ getPerksForTree(tree.id).length }}
                     {{ getPerksForTree(tree.id).length === 1 ? 'Node' : 'Nodes' }}
@@ -151,7 +158,7 @@
                 (click)="openSkillTreeView(tree.id)"
                 class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
               >
-                View Skill Tree →
+                Open Tree →
               </button>
             </div>
           </article>
@@ -163,10 +170,10 @@
 
 @if (activeTree(); as tree) {
   <section
-    class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
+    class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] px-5 py-4 text-[#EBF5F3] sm:px-6"
   >
-    <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-      <div class="flex items-center gap-4">
+    <div class="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
+      <div class="flex flex-wrap items-center gap-3">
         <button
           type="button"
           (click)="closeSkillTreeView()"
@@ -175,11 +182,32 @@
           ← All Trees
         </button>
 
-        <div>
+        @if (compendiumStore.skillTrees().length > 1) {
+          <select
+            [ngModel]="tree.id"
+            (ngModelChange)="openSkillTreeView($event)"
+            aria-label="Switch active Skill Tree"
+            class="h-9 rounded-xl border border-[#243B37] bg-[#0D1615] px-3 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+          >
+            @for (t of compendiumStore.skillTrees(); track t.id) {
+              <option [value]="t.id">{{ t.name }}</option>
+            }
+          </select>
+        }
+
+        <button
+          type="button"
+          (click)="openNewTreeModal()"
+          class="flex h-9 items-center gap-1 rounded-xl border border-[#243B37] bg-[#0D1615] px-3 text-xs font-semibold text-[#8AB0AB] transition-colors hover:border-[#C4491A] hover:text-white"
+        >
+          + New Tree
+        </button>
+
+        <div class="min-w-0">
           <h1 class="font-display text-lg font-bold text-white sm:text-xl">
             {{ tree.name }}
           </h1>
-          <p class="text-xs text-[#8AB0AB]">
+          <p class="line-clamp-1 text-xs text-[#8AB0AB]">
             {{ tree.description }}
           </p>
         </div>
@@ -191,21 +219,28 @@
           (click)="createKeyword.emit()"
           class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#FF8C5A] hover:border-[#C4491A]"
         >
-          + New Special Word
+          + Special Word
         </button>
         <button
           type="button"
           (click)="openEditTreeModal(tree)"
           class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
         >
-          Edit Tree Info
+          Edit Tree
+        </button>
+        <button
+          type="button"
+          (click)="openAttachModal(null)"
+          class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3.5 py-2 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+        >
+          + Add Existing Ability
         </button>
         <button
           type="button"
           (click)="createRootNode.emit(tree.id)"
           class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
         >
-          + Add Tier 1 Root Node
+          + Add Tier 1 Node
         </button>
       </div>
     </div>
@@ -217,6 +252,7 @@
     mode="admin"
     (addRootNode)="createRootNode.emit(tree.id)"
     (branchChildNode)="branchChildNode.emit($event)"
+    (attachExistingNode)="openAttachModal($event)"
     (editNode)="editNode.emit($event)"
     (deleteNode)="deleteNode.emit($event)"
   />
@@ -235,9 +271,16 @@
       <div
         class="flex shrink-0 items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
       >
-        <h2 class="font-display text-lg font-bold">
-          {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
-        </h2>
+        <div>
+          <h2 class="font-display text-lg font-bold">
+            {{ editingTreeId() ? 'Edit Skill Tree' : 'Create Skill Tree' }}
+          </h2>
+          @if (!editingTreeId()) {
+            <p class="text-xs text-[#8AB0AB]">
+              Opens immediately onto the interactive canvas so you can start placing Tier 1 nodes.
+            </p>
+          }
+        </div>
         <button
           type="button"
           (click)="closeTreeModal()"
@@ -265,13 +308,12 @@
 
         <div>
           <label for="treeDesc" class="block text-xs font-bold text-[var(--mot-text)]">
-            Martial Philosophy &amp; Combat Focus
+            Martial Philosophy &amp; Combat Focus (Optional)
           </label>
           <textarea
             id="treeDesc"
             name="treeDesc"
             rows="3"
-            required
             [(ngModel)]="treeFormDescription"
             placeholder="Describe what kind of Combat Arts and Passive Upgrades belong to this path..."
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm"
@@ -299,7 +341,7 @@
           </button>
           <button
             type="submit"
-            [disabled]="compendiumStore.isLoading()"
+            [disabled]="compendiumStore.isLoading() || !treeFormName.trim()"
             class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
           >
             @if (compendiumStore.isLoading()) {
@@ -309,11 +351,174 @@
               </svg>
               <span>Saving...</span>
             } @else {
-              <span>{{ editingTreeId() ? 'Save Tree Changes' : 'Create Skill Tree' }}</span>
+              <span>{{ editingTreeId() ? 'Save Tree Changes' : 'Create & Open Tree →' }}</span>
             }
           </button>
         </div>
       </form>
+    </div>
+  </div>
+}
+
+@if (attachModalOpen() && activeTree(); as tree) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+    (mousedown)="onAttachBackdropMouseDown($event)"
+  >
+    <div
+      class="mot-float flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+      (mousedown)="$event.stopPropagation()"
+      (click)="$event.stopPropagation()"
+    >
+      <div
+        class="flex shrink-0 items-center justify-between border-b border-[#243B37] bg-[#122220] px-6 py-4 text-white"
+      >
+        <div>
+          <h2 class="font-display text-lg font-bold">
+            Add Existing Ability to {{ tree.name }}
+          </h2>
+          <p class="text-xs text-[#8AB0AB]">
+            Place a Standalone ability or move a node from another Skill Tree directly into this tree.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="closeAttachModal()"
+          class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+        >
+          Close
+        </button>
+      </div>
+
+      <div class="mot-scroll-gutter flex-1 overflow-y-auto p-6 space-y-4">
+        <div>
+          <label for="attachParentSelect" class="block text-xs font-bold text-[var(--mot-text)]">
+            Where to Place in {{ tree.name }}
+          </label>
+          <select
+            id="attachParentSelect"
+            [ngModel]="attachParentId()"
+            (ngModelChange)="attachParentId.set($event)"
+            class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
+          >
+            <option value="">Tier 1 — Root Node (No Prerequisite)</option>
+            @for (existingNode of activeTreeNodes(); track existingNode.id) {
+              <option [value]="existingNode.id">
+                Tier {{ existingNode.tier + 1 }} — Child under "{{ existingNode.name }}"
+              </option>
+            }
+          </select>
+        </div>
+
+        <div class="flex flex-col justify-between gap-2.5 sm:flex-row sm:items-center">
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              (click)="attachSourceTab.set('standalone')"
+              class="rounded-lg border px-3 py-1.5 font-mono-num text-xs font-bold tabular-nums transition-colors"
+              [class.btn-copper]="attachSourceTab() === 'standalone'"
+              [class.border-[var(--mot-border)]]="attachSourceTab() !== 'standalone'"
+              [class.bg-[var(--mot-well)]]="attachSourceTab() !== 'standalone'"
+              [class.text-[var(--mot-muted)]]="attachSourceTab() !== 'standalone'"
+            >
+              Standalone Pool ({{ standaloneAttachCandidates().length }})
+            </button>
+            <button
+              type="button"
+              (click)="attachSourceTab.set('other_trees')"
+              class="rounded-lg border px-3 py-1.5 font-mono-num text-xs font-bold tabular-nums transition-colors"
+              [class.btn-copper]="attachSourceTab() === 'other_trees'"
+              [class.border-[var(--mot-border)]]="attachSourceTab() !== 'other_trees'"
+              [class.bg-[var(--mot-well)]]="attachSourceTab() !== 'other_trees'"
+              [class.text-[var(--mot-muted)]]="attachSourceTab() !== 'other_trees'"
+            >
+              Other Trees ({{ otherTreeAttachCandidates().length }})
+            </button>
+          </div>
+
+          <input
+            type="search"
+            [ngModel]="attachSearch()"
+            (ngModelChange)="attachSearch.set($event)"
+            placeholder="Filter abilities..."
+            class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
+          />
+        </div>
+
+        @if (visibleAttachCandidates().length === 0) {
+          <div
+            class="rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] p-6 text-center text-xs text-[var(--mot-muted)]"
+          >
+            @if (attachSourceTab() === 'standalone') {
+              No matching Standalone abilities found. Any node removed from a tree appears here ready to be placed into another tree.
+            } @else {
+              No matching nodes found in other Skill Trees.
+            }
+          </div>
+        } @else {
+          <div class="space-y-2">
+            @for (cand of visibleAttachCandidates(); track cand.id) {
+              <div
+                class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3"
+              >
+                <div class="flex min-w-0 items-center gap-3">
+                  <div
+                    class="flex h-10 w-10 shrink-0 items-center justify-center border-2 bg-[#122220]"
+                    [class.rounded-xl]="cand.node_type === 'combat_art'"
+                    [class.rounded-full]="cand.node_type !== 'combat_art'"
+                    [style.border-color]="getNodeVisuals(cand).color"
+                  >
+                    <app-compendium-icon
+                      [icon]="getNodeVisuals(cand).icon"
+                      [color]="getNodeVisuals(cand).color"
+                      [tintCustom]="getNodeVisuals(cand).tintCustom"
+                      sizeClass="h-5 w-5"
+                    />
+                  </div>
+
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                        {{ cand.name }}
+                      </span>
+                      <span
+                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-bold text-[var(--mot-muted)]"
+                      >
+                        {{ cand.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
+                      </span>
+                      @if (cand.node_type === 'combat_art' && cand.combat_tag && cand.combat_tag !== 'None') {
+                        <span
+                          [class]="'rounded border px-2 py-0.5 font-mono-num text-[11px] font-bold ' + getCombatTagBadgeClass(cand.combat_tag)"
+                        >
+                          {{ cand.combat_tag }}
+                        </span>
+                      }
+                      @if (attachSourceTab() === 'other_trees') {
+                        <span
+                          class="rounded border border-[#C4491A]/40 bg-[#C4491A]/10 px-2 py-0.5 font-mono-num text-[11px] font-semibold text-[var(--mot-accent-text)]"
+                        >
+                          From {{ treeNameById(cand.tree_id) }}
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-0.5 line-clamp-1 text-xs text-[var(--mot-muted)]">
+                      {{ cand.description }}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  (click)="attachNodeToActiveTree(cand)"
+                  class="btn-copper shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
+                >
+                  {{ attachSourceTab() === 'standalone' ? 'Add to Tree' : 'Move Here' }}
+                </button>
+              </div>
+            }
+          </div>
+        }
+      </div>
     </div>
   </div>
 }

@@ -6,6 +6,7 @@ import {
   PerkNodeModel,
   SkillTreeModel,
   WeaponModel,
+  normalizePerkNodesTiers,
 } from './compendium.model';
 
 export interface CompendiumBundle {
@@ -36,7 +37,7 @@ export class CompendiumService {
       return {
         weapons: bundle.weapons ?? [],
         skillTrees: bundle.skillTrees ?? [],
-        perkNodes: bundle.perkNodes ?? [],
+        perkNodes: normalizePerkNodesTiers(bundle.perkNodes ?? []),
         keywords:
           bundle.keywords && bundle.keywords.length > 0
             ? bundle.keywords
@@ -58,7 +59,9 @@ export class CompendiumService {
     return {
       weapons: (wepsRes.data as WeaponModel[]) ?? [],
       skillTrees: (treesRes.data as SkillTreeModel[]) ?? [],
-      perkNodes: (perksRes.data as PerkNodeModel[]) ?? [],
+      perkNodes: normalizePerkNodesTiers(
+        (perksRes.data as PerkNodeModel[]) ?? []
+      ),
       keywords:
         kwRes.data && kwRes.data.length > 0
           ? (kwRes.data as KeywordDefinition[])
@@ -244,17 +247,38 @@ export class CompendiumService {
       icon_tint_custom?: boolean | null;
     }
   ): Promise<{ data: PerkNodeModel | null; error: string | null }> {
-    const { data, error } = await this.supabase
+    const requestedTier =
+      typeof payload['tier'] === 'number' && payload['tier'] >= 1
+        ? payload['tier']
+        : 1;
+    const baseInsert = {
+      ...payload,
+      tier: requestedTier,
+      icon: visuals.icon ?? null,
+      icon_color: visuals.icon_color ?? null,
+      icon_tint_custom: visuals.icon_tint_custom ?? true,
+      is_active: true,
+    };
+
+    let { data, error } = await this.supabase
       .from('perk_nodes')
-      .insert({
-        ...payload,
-        icon: visuals.icon ?? null,
-        icon_color: visuals.icon_color ?? null,
-        icon_tint_custom: visuals.icon_tint_custom ?? true,
-        is_active: true,
-      })
+      .insert(baseInsert)
       .select('*')
       .single();
+
+    if (
+      error &&
+      requestedTier > 5 &&
+      (error.code === '23514' || error.message.toLowerCase().includes('tier'))
+    ) {
+      const retry = await this.supabase
+        .from('perk_nodes')
+        .insert({ ...baseInsert, tier: 5 })
+        .select('*')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error || !data) {
       return {
@@ -263,7 +287,10 @@ export class CompendiumService {
       };
     }
 
-    return { data: data as PerkNodeModel, error: null };
+    return {
+      data: { ...(data as PerkNodeModel), tier: requestedTier },
+      error: null,
+    };
   }
 
   async updatePerkNodeRecord(
@@ -276,18 +303,40 @@ export class CompendiumService {
       is_active?: boolean;
     }
   ): Promise<{ data: PerkNodeModel | null; error: string | null }> {
-    const { data, error } = await this.supabase
+    const requestedTier =
+      typeof payload['tier'] === 'number' && payload['tier'] >= 1
+        ? payload['tier']
+        : 1;
+    const baseUpdate = {
+      ...payload,
+      tier: requestedTier,
+      icon: visuals.icon ?? null,
+      icon_color: visuals.icon_color ?? null,
+      icon_tint_custom: visuals.icon_tint_custom ?? true,
+      is_active: visuals.is_active ?? true,
+    };
+
+    let { data, error } = await this.supabase
       .from('perk_nodes')
-      .update({
-        ...payload,
-        icon: visuals.icon ?? null,
-        icon_color: visuals.icon_color ?? null,
-        icon_tint_custom: visuals.icon_tint_custom ?? true,
-        is_active: visuals.is_active ?? true,
-      })
+      .update(baseUpdate)
       .eq('id', nodeId)
       .select('*')
       .single();
+
+    if (
+      error &&
+      requestedTier > 5 &&
+      (error.code === '23514' || error.message.toLowerCase().includes('tier'))
+    ) {
+      const retry = await this.supabase
+        .from('perk_nodes')
+        .update({ ...baseUpdate, tier: 5 })
+        .eq('id', nodeId)
+        .select('*')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error || !data) {
       return {
@@ -296,7 +345,65 @@ export class CompendiumService {
       };
     }
 
-    return { data: data as PerkNodeModel, error: null };
+    return {
+      data: { ...(data as PerkNodeModel), tier: requestedTier },
+      error: null,
+    };
+  }
+
+  async updatePerkNodePlacement(
+    nodeId: string,
+    patch: {
+      tree_id: string | null;
+      parent_node_id: string | null;
+      tier: number;
+      rule_hooks: PerkNodeModel['rule_hooks'];
+    }
+  ): Promise<{ data: PerkNodeModel | null; error: string | null }> {
+    const requestedTier = Math.max(1, patch.tier);
+    let { data, error } = await this.supabase
+      .from('perk_nodes')
+      .update({
+        tree_id: patch.tree_id,
+        parent_node_id: patch.parent_node_id,
+        tier: requestedTier,
+        rule_hooks: patch.rule_hooks,
+      })
+      .eq('id', nodeId)
+      .select('*')
+      .single();
+
+    if (
+      error &&
+      requestedTier > 5 &&
+      (error.code === '23514' || error.message.toLowerCase().includes('tier'))
+    ) {
+      const retry = await this.supabase
+        .from('perk_nodes')
+        .update({
+          tree_id: patch.tree_id,
+          parent_node_id: patch.parent_node_id,
+          tier: 5,
+          rule_hooks: patch.rule_hooks,
+        })
+        .eq('id', nodeId)
+        .select('*')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error || !data) {
+      return {
+        data: null,
+        error: error?.message ?? 'Unable to move node.',
+      };
+    }
+
+    return {
+      data: { ...(data as PerkNodeModel), tier: requestedTier },
+      error: null,
+    };
   }
 
   async updatePerkNodeActiveStatus(

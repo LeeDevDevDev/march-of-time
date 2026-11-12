@@ -7,8 +7,12 @@ import {
   PerkNodeModel,
   SkillTreeModel,
   WeaponModel,
+  compareSiblingPerkNodes,
+  computePerkNodeTier,
+  getDescendantNodeIds,
   isCompendiumItemActive,
   isStandalonePerkNode,
+  normalizePerkNodesTiers,
 } from './compendium.model';
 import { CompendiumService, slugifyText } from './compendium.service';
 
@@ -458,6 +462,82 @@ export class CompendiumStore {
     return true;
   }
 
+  private computeNextSiblingSortOrder(
+    treeId: string | null,
+    parentNodeId: string | null,
+    excludeNodeId?: string
+  ): number {
+    if (!treeId) return 10;
+    const activeNodes = this.perkNodes().filter((p) => p.tree_id === treeId);
+    const activeIds = new Set(activeNodes.map((p) => p.id));
+    const effectiveParent =
+      parentNodeId && activeIds.has(parentNodeId) ? parentNodeId : null;
+
+    const siblings = activeNodes
+      .filter((p) => {
+        if (excludeNodeId && p.id === excludeNodeId) return false;
+        const pParent =
+          p.parent_node_id && activeIds.has(p.parent_node_id)
+            ? p.parent_node_id
+            : null;
+        return pParent === effectiveParent;
+      })
+      .sort(compareSiblingPerkNodes);
+
+    if (siblings.length === 0) return 10;
+    const maxOrder = siblings.reduce((max, s, idx) => {
+      const val =
+        typeof s.rule_hooks?.__sort_order === 'number'
+          ? s.rule_hooks.__sort_order
+          : (idx + 1) * 10;
+      return Math.max(max, val);
+    }, 0);
+    return maxOrder + 10;
+  }
+
+  private async cascadeChangedPlacements(
+    previousNodes: PerkNodeModel[],
+    nextNodes: PerkNodeModel[],
+    skipNodeId?: string
+  ): Promise<void> {
+    const prevById = new Map(previousNodes.map((n) => [n.id, n]));
+    const tasks: Promise<unknown>[] = [];
+
+    for (const node of nextNodes) {
+      if (skipNodeId && node.id === skipNodeId) continue;
+      const prev = prevById.get(node.id);
+      if (!prev) continue;
+      const prevParent = prev.parent_node_id ?? null;
+      const nextParent = node.parent_node_id ?? null;
+      const prevOrder = prev.rule_hooks?.__sort_order;
+      const nextOrder = node.rule_hooks?.__sort_order;
+
+      if (
+        prev.tree_id !== node.tree_id ||
+        prevParent !== nextParent ||
+        prev.tier !== node.tier ||
+        prevOrder !== nextOrder
+      ) {
+        tasks.push(
+          this.compendiumService.updatePerkNodePlacement(node.id, {
+            tree_id: node.tree_id,
+            parent_node_id: nextParent,
+            tier: node.tier,
+            rule_hooks: {
+              ...(node.rule_hooks ?? {}),
+              __tier: node.tier,
+              __is_standalone: !node.tree_id,
+            },
+          })
+        );
+      }
+    }
+
+    if (tasks.length > 0) {
+      await Promise.all(tasks);
+    }
+  }
+
   async createPerkNode(
     draft: Omit<PerkNodeModel, 'id' | 'slug'> & { slug?: string }
   ): Promise<PerkNodeModel | null> {
@@ -478,13 +558,28 @@ export class CompendiumStore {
     }));
 
     const isStandalone = !draft.tree_id;
-    const enrichedHooks = {
+    const parentNodeId = isStandalone ? null : draft.parent_node_id || null;
+    const computedTier = isStandalone
+      ? 1
+      : computePerkNodeTier(
+          draft.tree_id,
+          parentNodeId,
+          this.#state().perkNodes
+        );
+    const sortOrder =
+      typeof draft.rule_hooks?.__sort_order === 'number'
+        ? draft.rule_hooks.__sort_order
+        : this.computeNextSiblingSortOrder(draft.tree_id || null, parentNodeId);
+
+    const enrichedHooks: PerkNodeModel['rule_hooks'] = {
       ...(draft.rule_hooks ?? {}),
       __icon: draft.icon ?? undefined,
       __icon_color: draft.icon_color ?? undefined,
       __icon_tint_custom: draft.icon_tint_custom ?? true,
       __is_active: true,
       __is_standalone: isStandalone,
+      __sort_order: isStandalone ? undefined : sortOrder,
+      __tier: computedTier,
     };
 
     const { data, error } = await this.compendiumService.insertPerkNode(
@@ -493,7 +588,7 @@ export class CompendiumStore {
         slug,
         name: trimmedName,
         node_type: draft.node_type,
-        tier: isStandalone ? 1 : draft.tier,
+        tier: computedTier,
         perk_cost: draft.perk_cost,
         ap_cost: draft.node_type === 'combat_art' ? draft.ap_cost : null,
         cooldown_rounds:
@@ -501,7 +596,7 @@ export class CompendiumStore {
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
         rule_hooks: enrichedHooks,
-        parent_node_id: isStandalone ? null : draft.parent_node_id || null,
+        parent_node_id: parentNodeId,
         is_official: true,
         created_by: this.authStore.user()?.id ?? null,
       },
@@ -522,11 +617,14 @@ export class CompendiumStore {
       return null;
     }
 
+    const normalizedList = normalizePerkNodesTiers([
+      ...this.#state().perkNodes,
+      data,
+    ]).sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
+
     this.#state.update((s) => ({
       ...s,
-      perkNodes: [...s.perkNodes, data].sort(
-        (a, b) => a.tier - b.tier || a.name.localeCompare(b.name)
-      ),
+      perkNodes: normalizedList,
       isLoading: false,
       statusMessage: isStandalone
         ? `Created Standalone Ability "${data.name}".`
@@ -537,7 +635,7 @@ export class CompendiumStore {
       isStandalone ? 'Standalone Ability Created' : 'Skill Tree Node Created',
       isStandalone
         ? `"${data.name}" is now available in the Standalone Combat Arts roster.`
-        : `Added Tier ${data.tier} "${data.name}" to the Skill Tree.`
+        : `Added Tier ${computedTier} "${data.name}" to the Skill Tree.`
     );
     return data;
   }
@@ -549,8 +647,44 @@ export class CompendiumStore {
     const trimmedName = draft.name.trim();
     if (!trimmedName) return false;
 
-    const existing = this.#state().perkNodes.find((p) => p.id === nodeId);
-    const isStandalone = !draft.tree_id;
+    const previousNodes = this.#state().perkNodes;
+    const existing = previousNodes.find((p) => p.id === nodeId);
+    const targetTreeId = draft.tree_id || null;
+    const isStandalone = !targetTreeId;
+    const oldTreeId =
+      existing && !isStandalonePerkNode(existing) ? existing.tree_id : null;
+    const isLeavingOldTree = Boolean(oldTreeId && oldTreeId !== targetTreeId);
+
+    let parentNodeId = isStandalone ? null : draft.parent_node_id || null;
+    if (targetTreeId && parentNodeId) {
+      const descendants = getDescendantNodeIds(nodeId, previousNodes);
+      const parentInTargetTree = previousNodes.find(
+        (p) => p.id === parentNodeId && p.tree_id === targetTreeId
+      );
+      if (
+        !parentInTargetTree ||
+        parentNodeId === nodeId ||
+        descendants.has(parentNodeId)
+      ) {
+        parentNodeId =
+          oldTreeId === targetTreeId ? (existing?.parent_node_id ?? null) : null;
+      }
+    }
+
+    const samePlacement =
+      existing &&
+      oldTreeId === targetTreeId &&
+      (existing.parent_node_id ?? null) === parentNodeId;
+
+    const sortOrder = isStandalone
+      ? undefined
+      : samePlacement && typeof existing?.rule_hooks?.__sort_order === 'number'
+        ? existing.rule_hooks.__sort_order
+        : this.computeNextSiblingSortOrder(targetTreeId, parentNodeId, nodeId);
+
+    const computedTier = isStandalone
+      ? 1
+      : computePerkNodeTier(targetTreeId, parentNodeId, previousNodes);
 
     this.#state.update((s) => ({
       ...s,
@@ -559,22 +693,24 @@ export class CompendiumStore {
       statusMessage: null,
     }));
 
-    const enrichedHooks = {
+    const enrichedHooks: PerkNodeModel['rule_hooks'] = {
       ...(draft.rule_hooks ?? {}),
       __icon: draft.icon ?? undefined,
       __icon_color: draft.icon_color ?? undefined,
       __icon_tint_custom: draft.icon_tint_custom ?? true,
       __is_active: existing?.is_active ?? true,
       __is_standalone: isStandalone,
+      __sort_order: sortOrder,
+      __tier: computedTier,
     };
 
     const { data, error } = await this.compendiumService.updatePerkNodeRecord(
       nodeId,
       {
-        tree_id: draft.tree_id || null,
+        tree_id: targetTreeId,
         name: trimmedName,
         node_type: draft.node_type,
-        tier: isStandalone ? 1 : draft.tier,
+        tier: computedTier,
         perk_cost: draft.perk_cost,
         ap_cost: draft.node_type === 'combat_art' ? draft.ap_cost : null,
         cooldown_rounds:
@@ -582,7 +718,7 @@ export class CompendiumStore {
         combat_tag: draft.node_type === 'combat_art' ? draft.combat_tag : 'None',
         description: draft.description.trim(),
         rule_hooks: enrichedHooks,
-        parent_node_id: isStandalone ? null : draft.parent_node_id || null,
+        parent_node_id: parentNodeId,
       },
       {
         icon: draft.icon,
@@ -602,11 +738,38 @@ export class CompendiumStore {
       return false;
     }
 
+    const intermediateNodes = previousNodes.map((p) => {
+      if (p.id === nodeId) return data;
+      if (
+        isLeavingOldTree &&
+        p.tree_id === oldTreeId &&
+        p.parent_node_id === nodeId
+      ) {
+        return {
+          ...p,
+          parent_node_id: existing?.parent_node_id ?? null,
+        };
+      }
+      return p;
+    });
+
+    const normalizedNodes = normalizePerkNodesTiers(intermediateNodes).map(
+      (n) => ({
+        ...n,
+        rule_hooks: {
+          ...(n.rule_hooks ?? {}),
+          __tier: n.tier,
+        },
+      })
+    );
+
+    await this.cascadeChangedPlacements(previousNodes, normalizedNodes, nodeId);
+
     this.#state.update((s) => ({
       ...s,
-      perkNodes: s.perkNodes
-        .map((p) => (p.id === nodeId ? data : p))
-        .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name)),
+      perkNodes: normalizedNodes.sort(
+        (a, b) => a.tier - b.tier || a.name.localeCompare(b.name)
+      ),
       isLoading: false,
       statusMessage: `Updated "${data.name}".`,
     }));
@@ -615,6 +778,221 @@ export class CompendiumStore {
       isStandalone ? 'Standalone Ability Updated' : 'Skill Tree Node Updated',
       `Saved changes to "${data.name}".`
     );
+    return true;
+  }
+
+  async moveOrReparentPerkNode(
+    nodeId: string,
+    targetTreeId: string | null,
+    newParentNodeId: string | null = null
+  ): Promise<boolean> {
+    const previousNodes = this.#state().perkNodes;
+    const existing = previousNodes.find((p) => p.id === nodeId);
+    if (!existing) return false;
+
+    const cleanTargetTreeId = targetTreeId || null;
+    const cleanParentId = cleanTargetTreeId ? newParentNodeId || null : null;
+    const oldTreeId = isStandalonePerkNode(existing) ? null : existing.tree_id;
+
+    if (cleanTargetTreeId && cleanParentId) {
+      if (cleanParentId === nodeId) {
+        this.notifications.warning(
+          'Invalid Placement',
+          'A node cannot be connected under itself.'
+        );
+        return false;
+      }
+      const descendants = getDescendantNodeIds(nodeId, previousNodes);
+      if (oldTreeId === cleanTargetTreeId && descendants.has(cleanParentId)) {
+        this.notifications.warning(
+          'Invalid Branch Loop',
+          `"${existing.name}" cannot be placed under one of its own child nodes.`
+        );
+        return false;
+      }
+      const parentExists = previousNodes.some(
+        (p) => p.id === cleanParentId && p.tree_id === cleanTargetTreeId
+      );
+      if (!parentExists) {
+        this.notifications.warning(
+          'Invalid Parent Node',
+          'Selected parent node was not found in the target Skill Tree.'
+        );
+        return false;
+      }
+    }
+
+    if (
+      oldTreeId === cleanTargetTreeId &&
+      (existing.parent_node_id ?? null) === cleanParentId
+    ) {
+      return true;
+    }
+
+    const isLeavingOldTree = Boolean(
+      oldTreeId && oldTreeId !== cleanTargetTreeId
+    );
+    const nextSortOrder = cleanTargetTreeId
+      ? this.computeNextSiblingSortOrder(
+          cleanTargetTreeId,
+          cleanParentId,
+          nodeId
+        )
+      : undefined;
+
+    const movedDraft = previousNodes.map((p) => {
+      if (p.id === nodeId) {
+        return {
+          ...p,
+          tree_id: cleanTargetTreeId,
+          parent_node_id: cleanParentId,
+          rule_hooks: {
+            ...(p.rule_hooks ?? {}),
+            __is_standalone: !cleanTargetTreeId,
+            __sort_order: nextSortOrder,
+          },
+        };
+      }
+      if (
+        isLeavingOldTree &&
+        p.tree_id === oldTreeId &&
+        p.parent_node_id === nodeId
+      ) {
+        return {
+          ...p,
+          parent_node_id: existing.parent_node_id ?? null,
+        };
+      }
+      return p;
+    });
+
+    const normalizedNodes = normalizePerkNodesTiers(movedDraft).map((n) => ({
+      ...n,
+      rule_hooks: {
+        ...(n.rule_hooks ?? {}),
+        __tier: n.tier,
+      },
+    }));
+
+    const updatedTarget = normalizedNodes.find((n) => n.id === nodeId)!;
+
+    this.#state.update((s) => ({
+      ...s,
+      perkNodes: normalizedNodes.sort(
+        (a, b) => a.tier - b.tier || a.name.localeCompare(b.name)
+      ),
+      error: null,
+    }));
+
+    const { error } = await this.compendiumService.updatePerkNodePlacement(
+      nodeId,
+      {
+        tree_id: updatedTarget.tree_id,
+        parent_node_id: updatedTarget.parent_node_id ?? null,
+        tier: updatedTarget.tier,
+        rule_hooks: updatedTarget.rule_hooks,
+      }
+    );
+
+    if (error) {
+      this.#state.update((s) => ({
+        ...s,
+        perkNodes: previousNodes,
+        error,
+      }));
+      this.notifications.error('Unable to Move Node', error);
+      return false;
+    }
+
+    await this.cascadeChangedPlacements(previousNodes, normalizedNodes, nodeId);
+
+    if (!cleanTargetTreeId) {
+      this.notifications.info(
+        'Removed from Skill Tree',
+        `"${existing.name}" is now in Standalone Arts and can be added to another tree anytime.`
+      );
+    } else if (oldTreeId !== cleanTargetTreeId) {
+      const targetTreeName =
+        this.#state().skillTrees.find((t) => t.id === cleanTargetTreeId)
+          ?.name ?? 'Skill Tree';
+      this.notifications.success(
+        `Added to ${targetTreeName}`,
+        `"${existing.name}" placed at Tier ${updatedTarget.tier}.`
+      );
+    } else {
+      const parentName = cleanParentId
+        ? normalizedNodes.find((n) => n.id === cleanParentId)?.name
+        : null;
+      this.notifications.success(
+        'Node Rearranged',
+        parentName
+          ? `"${existing.name}" now branches from "${parentName}" (Tier ${updatedTarget.tier}).`
+          : `"${existing.name}" promoted to Tier 1 Root.`
+      );
+    }
+
+    return true;
+  }
+
+  async reorderSiblingPerkNode(
+    nodeId: string,
+    direction: 'left' | 'right'
+  ): Promise<boolean> {
+    const previousNodes = this.#state().perkNodes;
+    const target = previousNodes.find((p) => p.id === nodeId);
+    if (!target || !target.tree_id) return false;
+
+    const treeNodes = this.perkNodes().filter(
+      (p) => p.tree_id === target.tree_id
+    );
+    const activeIds = new Set(treeNodes.map((p) => p.id));
+    const effectiveParent =
+      target.parent_node_id && activeIds.has(target.parent_node_id)
+        ? target.parent_node_id
+        : null;
+
+    const siblings = treeNodes
+      .filter((p) => {
+        const pParent =
+          p.parent_node_id && activeIds.has(p.parent_node_id)
+            ? p.parent_node_id
+            : null;
+        return pParent === effectiveParent;
+      })
+      .sort(compareSiblingPerkNodes);
+
+    const idx = siblings.findIndex((s) => s.id === nodeId);
+    const swapIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= siblings.length) {
+      return false;
+    }
+
+    const reordered = [...siblings];
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+
+    const orderMap = new Map<string, number>();
+    reordered.forEach((s, i) => {
+      orderMap.set(s.id, (i + 1) * 10);
+    });
+
+    const nextNodes = previousNodes.map((p) => {
+      const assigned = orderMap.get(p.id);
+      if (assigned === undefined) return p;
+      return {
+        ...p,
+        rule_hooks: {
+          ...(p.rule_hooks ?? {}),
+          __sort_order: assigned,
+        },
+      };
+    });
+
+    this.#state.update((s) => ({
+      ...s,
+      perkNodes: nextNodes,
+    }));
+
+    await this.cascadeChangedPlacements(previousNodes, nextNodes);
     return true;
   }
 
@@ -696,13 +1074,42 @@ export class CompendiumStore {
       return false;
     }
 
+    const previousNodes = this.#state().perkNodes;
+    const promotedDraft = previousNodes.map((p) => {
+      if (p.id === nodeId) {
+        return { ...p, is_active: false, rule_hooks: nextHooks };
+      }
+      if (
+        existing?.tree_id &&
+        p.tree_id === existing.tree_id &&
+        p.parent_node_id === nodeId &&
+        isCompendiumItemActive(p)
+      ) {
+        return {
+          ...p,
+          parent_node_id: existing.parent_node_id ?? null,
+        };
+      }
+      return p;
+    });
+
+    const normalizedNodes = normalizePerkNodesTiers(promotedDraft).map((n) =>
+      n.id === nodeId
+        ? n
+        : {
+            ...n,
+            rule_hooks: {
+              ...(n.rule_hooks ?? {}),
+              __tier: n.tier,
+            },
+          }
+    );
+
+    await this.cascadeChangedPlacements(previousNodes, normalizedNodes, nodeId);
+
     this.#state.update((s) => ({
       ...s,
-      perkNodes: s.perkNodes.map((p) =>
-        p.id === nodeId
-          ? { ...p, is_active: false, rule_hooks: nextHooks }
-          : p
-      ),
+      perkNodes: normalizedNodes,
       isLoading: false,
       statusMessage: `Deleted "${existing?.name ?? 'Ability'}".`,
     }));

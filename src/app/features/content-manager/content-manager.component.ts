@@ -75,6 +75,9 @@ export class ContentManagerComponent implements OnInit {
   @ViewChild(StandaloneArtsManagerComponent)
   standaloneManager?: StandaloneArtsManagerComponent;
 
+  @ViewChild(SkillTreesManagerComponent)
+  treesManager?: SkillTreesManagerComponent;
+
   readonly studioTab = signal<'trees' | 'standalone' | 'weapons' | 'keywords'>(
     'trees'
   );
@@ -87,6 +90,20 @@ export class ContentManagerComponent implements OnInit {
 
   onStandaloneNodeSaved(nodeId: string): void {
     this.standaloneManager?.selectNode(nodeId);
+  }
+
+  onTreeNodeSaved(nodeId: string): void {
+    setTimeout(() => {
+      this.treesManager?.selectCanvasNode(nodeId);
+    }, 0);
+  }
+
+  onNodeMovedToTree(event: { treeId: string; nodeId: string }): void {
+    this.studioTab.set('trees');
+    this.activeTreeId.set(event.treeId);
+    setTimeout(() => {
+      this.treesManager?.selectCanvasNode(event.nodeId);
+    }, 0);
   }
 
   confirmDeleteTree(tree: SkillTreeModel): void {
@@ -139,8 +156,10 @@ export class ContentManagerComponent implements OnInit {
         : `Are you sure you want to delete "${node.name}" from this skill tree?`,
       warningNote:
         dependentChildren.length > 0
-          ? `This node is a prerequisite for ${dependentChildren.length} child node(s) (${dependentChildren.map((c) => c.name).join(', ')}). Deleting it will unlink their parent connection.`
-          : 'Characters or NPC tokens who unlocked this ability will no longer receive its Combat Art or passive stat hooks.',
+          ? `This node is a prerequisite for ${dependentChildren.length} child node(s) (${dependentChildren.map((c) => c.name).join(', ')}). Deleting it promotes those children up one tier. Use "Remove from Tree" in the Inspector if you want to keep this ability in Standalone Arts instead.`
+          : isStandalone
+            ? 'Existing characters who already have this ability keep their unlocked perk safely intact.'
+            : 'Use "Remove from Tree" in the Inspector if you only want to detach this ability from the tree without deleting it.',
       confirmLabel: isStandalone ? 'Delete Standalone Ability' : 'Delete Node',
     });
   }

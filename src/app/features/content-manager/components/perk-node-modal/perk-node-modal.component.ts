@@ -7,7 +7,10 @@ import {
   RULE_HOOK_DEFINITIONS,
   RuleHookDefinition,
   RuleHookRow,
+  compareSiblingPerkNodes,
+  computePerkNodeTier,
   formatRuleHookBadges,
+  getDescendantNodeIds,
   hooksObjectToRows,
   isStandalonePerkNode,
   resolveNodeVisuals,
@@ -28,6 +31,7 @@ export class PerkNodeModalComponent {
 
   readonly requestCreateKeyword = output<string>();
   readonly standaloneNodeSaved = output<string>();
+  readonly treeNodeSaved = output<string>();
 
   readonly ruleHookDefinitions = RULE_HOOK_DEFINITIONS;
   readonly sheetStatHookDefs = RULE_HOOK_DEFINITIONS.filter(
@@ -45,7 +49,6 @@ export class PerkNodeModalComponent {
     tree_id: string | null;
     name: string;
     node_type: 'combat_art' | 'passive_upgrade';
-    tier: number;
     perk_cost: number;
     ap_cost: number;
     cooldown_rounds: number;
@@ -59,7 +62,6 @@ export class PerkNodeModalComponent {
     tree_id: '',
     name: '',
     node_type: 'combat_art',
-    tier: 1,
     perk_cost: 1,
     ap_cost: 2,
     cooldown_rounds: 3,
@@ -87,7 +89,6 @@ export class PerkNodeModalComponent {
       tree_id: defaultTreeId,
       name: '',
       node_type: 'combat_art',
-      tier: 1,
       perk_cost: 1,
       ap_cost: 2,
       cooldown_rounds: 3,
@@ -114,7 +115,6 @@ export class PerkNodeModalComponent {
       tree_id: parentNode.tree_id,
       name: '',
       node_type: parentNode.node_type,
-      tier: Math.min(5, parentNode.tier + 1),
       perk_cost: 1,
       ap_cost: 2,
       cooldown_rounds: 3,
@@ -137,7 +137,6 @@ export class PerkNodeModalComponent {
       tree_id: isStandalonePerkNode(node) ? null : node.tree_id,
       name: node.name,
       node_type: node.node_type,
-      tier: node.tier,
       perk_cost: node.perk_cost ?? 1,
       ap_cost: node.ap_cost ?? 1,
       cooldown_rounds: node.cooldown_rounds ?? 2,
@@ -162,16 +161,60 @@ export class PerkNodeModalComponent {
     }
   }
 
+  onTreeSelectionChange(newTreeId: string | null): void {
+    this.nodeForm.tree_id = newTreeId;
+    if (!newTreeId) {
+      this.nodeForm.parent_node_id = null;
+      return;
+    }
+    if (this.nodeForm.parent_node_id) {
+      const stillInTree = this.compendiumStore
+        .perkNodes()
+        .some(
+          (p) =>
+            p.id === this.nodeForm.parent_node_id && p.tree_id === newTreeId
+        );
+      if (!stillInTree) {
+        this.nodeForm.parent_node_id = null;
+      }
+    }
+  }
+
   availableParentNodes(): PerkNodeModel[] {
+    const treeId = this.nodeForm.tree_id;
+    if (!treeId) return [];
     const editingId = this.editingNodeId();
-    return this.compendiumStore
-      .perkNodes()
+    const allNodes = this.compendiumStore.perkNodes();
+    const descendants = editingId
+      ? getDescendantNodeIds(editingId, allNodes)
+      : new Set<string>();
+
+    return allNodes
       .filter(
         (p) =>
-          p.tree_id === this.nodeForm.tree_id &&
+          p.tree_id === treeId &&
           p.id !== editingId &&
-          p.tier < this.nodeForm.tier
-      );
+          !descendants.has(p.id)
+      )
+      .sort((a, b) => a.tier - b.tier || compareSiblingPerkNodes(a, b));
+  }
+
+  getComputedFormTier(): number {
+    if (!this.nodeForm.tree_id) return 1;
+    return computePerkNodeTier(
+      this.nodeForm.tree_id,
+      this.nodeForm.parent_node_id,
+      this.compendiumStore.perkNodes()
+    );
+  }
+
+  getSelectedParentName(): string | null {
+    if (!this.nodeForm.tree_id || !this.nodeForm.parent_node_id) return null;
+    return (
+      this.compendiumStore
+        .perkNodes()
+        .find((p) => p.id === this.nodeForm.parent_node_id)?.name ?? null
+    );
   }
 
   getHookDef(key: EditableRuleHookKey): RuleHookDefinition | undefined {
@@ -247,7 +290,7 @@ export class PerkNodeModalComponent {
       tree_id: this.nodeForm.tree_id || null,
       name: this.nodeForm.name,
       node_type: this.nodeForm.node_type,
-      tier: isStandalone ? 1 : Number(this.nodeForm.tier) || 1,
+      tier: isStandalone ? 1 : this.getComputedFormTier(),
       perk_cost: Number(this.nodeForm.perk_cost) || 1,
       ap_cost:
         this.nodeForm.node_type === 'combat_art'
@@ -275,6 +318,8 @@ export class PerkNodeModalComponent {
       if (ok) {
         if (isStandalone) {
           this.standaloneNodeSaved.emit(editId);
+        } else {
+          this.treeNodeSaved.emit(editId);
         }
         this.closeModal();
       }
@@ -283,6 +328,8 @@ export class PerkNodeModalComponent {
       if (created) {
         if (isStandalone) {
           this.standaloneNodeSaved.emit(created.id);
+        } else {
+          this.treeNodeSaved.emit(created.id);
         }
         this.closeModal();
       }

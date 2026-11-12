@@ -56,11 +56,12 @@
             <select
               id="nodeTree"
               name="nodeTree"
-              [(ngModel)]="nodeForm.tree_id"
+              [ngModel]="nodeForm.tree_id"
+              (ngModelChange)="onTreeSelectionChange($event)"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
             >
               <option [ngValue]="null">
-                Standalone (Solo / NPC Ability — No Skill Tree)
+                Standalone (DM / Admin Granted — NPC &amp; Player Boon)
               </option>
               @for (t of compendiumStore.skillTrees(); track t.id) {
                 <option [ngValue]="t.id">{{ t.name }}</option>
@@ -85,46 +86,51 @@
 
           @if (nodeForm.tree_id) {
             <div>
-              <label for="nodeTier" class="block text-xs font-bold text-[var(--mot-text)]">
-                Tree Tier (1–5)
+              <span class="block text-xs font-bold text-[var(--mot-text)]">
+                Automatic Tree Tier
+              </span>
+              <div
+                class="mt-1.5 flex h-[40px] items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 font-mono-num text-xs tabular-nums"
+              >
+                <span class="font-bold text-[var(--mot-accent-text)]">
+                  Tier {{ getComputedFormTier() }}
+                </span>
+                <span class="truncate text-[var(--mot-muted)]">
+                  @if (getSelectedParentName(); as pName) {
+                    Branches from "{{ pName }}"
+                  } @else {
+                    Root Node
+                  }
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label for="nodePerkCost" class="block text-xs font-bold text-[var(--mot-text)]">
+                Perk Point Cost
               </label>
               <input
-                id="nodeTier"
+                id="nodePerkCost"
                 type="number"
-                name="nodeTier"
+                name="nodePerkCost"
                 min="1"
-                max="5"
-                [(ngModel)]="nodeForm.tier"
+                max="10"
+                [(ngModel)]="nodeForm.perk_cost"
                 class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold"
               />
             </div>
           } @else {
-            <div>
+            <div class="sm:col-span-2">
               <span class="block text-xs font-bold text-[var(--mot-text)]">
-                Tree Prerequisite
+                Assignment Rule
               </span>
               <div
                 class="badge-jade mt-1.5 flex h-[40px] items-center rounded-xl border px-3.5 font-mono-num text-xs font-bold"
               >
-                Standalone · No Tree Required
+                DM / Admin Granted Only (0 Perk Cost · Unassigned from Skill Trees)
               </div>
             </div>
           }
-
-          <div>
-            <label for="nodePerkCost" class="block text-xs font-bold text-[var(--mot-text)]">
-              Perk Point Cost
-            </label>
-            <input
-              id="nodePerkCost"
-              type="number"
-              name="nodePerkCost"
-              min="1"
-              max="5"
-              [(ngModel)]="nodeForm.perk_cost"
-              class="mot-input mt-1.5 px-3.5 py-2 font-mono-num text-sm font-bold"
-            />
-          </div>
 
           @if (nodeForm.tree_id) {
             <div class="sm:col-span-2">
@@ -137,10 +143,10 @@
                 [(ngModel)]="nodeForm.parent_node_id"
                 class="mot-input mt-1.5 px-3.5 py-2 text-sm"
               >
-                <option [ngValue]="null">None (Root / Tier 1 Node)</option>
+                <option [ngValue]="null">None (Tier 1 Root Node)</option>
                 @for (candidate of availableParentNodes(); track candidate.id) {
                   <option [ngValue]="candidate.id">
-                    Tier {{ candidate.tier }} — {{ candidate.name }}
+                    Tier {{ candidate.tier }} — {{ candidate.name }} (places at Tier {{ candidate.tier + 1 }})
                   </option>
                 }
               </select>

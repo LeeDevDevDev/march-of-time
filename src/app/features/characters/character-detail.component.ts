@@ -1,5 +1,6 @@
-import { Component, HostListener, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { AuthStore } from '../../core/auth/auth.store';
 import {
   ResolvedCompendiumVisuals,
   formatWeaponHookBadges,
@@ -56,6 +57,7 @@ export interface SheetRollResult {
 export class CharacterDetailComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly notifications = inject(NotificationStore);
+  readonly authStore = inject(AuthStore);
   readonly characterStore = inject(CharacterStore);
 
   readonly attributeList = ATTRIBUTE_LIST;
@@ -88,17 +90,28 @@ export class CharacterDetailComponent {
 
   readonly effectivePickerTab = computed(() => {
     const tab = this.perkPickerTab();
-    if (tab === '__standalone__') return '__standalone__';
+    if (tab === '__standalone__' && this.authStore.isAdmin()) {
+      return '__standalone__';
+    }
     const trees = this.characterStore.skillTrees();
     if (tab && trees.some((t) => t.id === tab)) return tab;
-    return trees[0]?.id ?? '__standalone__';
+    return trees[0]?.id ?? (this.authStore.isAdmin() ? '__standalone__' : '');
   });
 
   readonly activePickerTree = computed<SkillTreeModel | null>(() => {
     const tab = this.effectivePickerTab();
-    if (tab === '__standalone__') return null;
+    if (!tab || tab === '__standalone__') return null;
     return this.characterStore.skillTrees().find((t) => t.id === tab) ?? null;
   });
+
+  constructor() {
+    effect(() => {
+      const id = this.characterId();
+      if (id) {
+        void this.characterStore.ensureCharacterLoaded(id);
+      }
+    });
+  }
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
@@ -412,6 +425,12 @@ export class CharacterDetailComponent {
   }
 
   async toggleCharacterPerk(characterId: string, node: PerkNodeModel): Promise<void> {
+    if (isStandalonePerkNode(node)) {
+      if (!this.authStore.isAdmin()) return;
+      await this.characterStore.toggleAdminGrantedPerk(characterId, node);
+      return;
+    }
+
     await this.characterStore.updateCharacter(characterId, (c) => {
       const has = c.unlocked_perk_ids.includes(node.id);
       if (has) {

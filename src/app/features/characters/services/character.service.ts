@@ -21,6 +21,36 @@ export class CharacterService {
     return { data: (data as CharacterModel[]) ?? [], error: null };
   }
 
+  async fetchAllCharacters(): Promise<{
+    data: CharacterModel[];
+    error: string | null;
+  }> {
+    const { data, error } = await this.supabase
+      .from('characters')
+      .select('*')
+      .order('name', { ascending: true });
+
+    if (error) {
+      return { data: [], error: error.message };
+    }
+    return { data: (data as CharacterModel[]) ?? [], error: null };
+  }
+
+  async fetchCharacterById(
+    characterId: string
+  ): Promise<{ data: CharacterModel | null; error: string | null }> {
+    const { data, error } = await this.supabase
+      .from('characters')
+      .select('*')
+      .eq('id', characterId)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+    return { data: (data as CharacterModel | null) ?? null, error: null };
+  }
+
   async insertCharacter(
     payload: Omit<CharacterModel, 'id'>
   ): Promise<{ data: CharacterModel | null; error: string | null }> {
@@ -42,8 +72,8 @@ export class CharacterService {
   async updateCharacterRecord(
     characterId: string,
     clamped: CharacterModel
-  ): Promise<void> {
-    await this.supabase
+  ): Promise<string | null> {
+    const { error } = await this.supabase
       .from('characters')
       .update({
         name: clamped.name,
@@ -64,6 +94,7 @@ export class CharacterService {
         updated_at: new Date().toISOString(),
       })
       .eq('id', characterId);
+    return error?.message ?? null;
   }
 
   async deleteCharacterRecord(characterId: string): Promise<string | null> {

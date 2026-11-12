@@ -1,5 +1,6 @@
 import {
   Component,
+  ViewChild,
   computed,
   inject,
   model,
@@ -11,6 +12,11 @@ import {
   PerkNodeModel,
   ResolvedCompendiumVisuals,
   SkillTreeModel,
+  compareSiblingPerkNodes,
+  getCombatTagBadgeClass,
+  isStandalonePerkNode,
+  normalizePerkNodesTiers,
+  resolveNodeVisuals,
   resolveTreeVisuals,
 } from '../../../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../../../core/compendium/compendium.store';
@@ -31,6 +37,10 @@ import { SkillTreeCanvasComponent } from '../../../../shared/skill-tree-canvas/s
 })
 export class SkillTreesManagerComponent {
   readonly compendiumStore = inject(CompendiumStore);
+  readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
+
+  @ViewChild(SkillTreeCanvasComponent)
+  treeCanvas?: SkillTreeCanvasComponent;
 
   readonly activeTreeId = model<string | null>(null);
 
@@ -60,6 +70,14 @@ export class SkillTreesManagerComponent {
     return this.compendiumStore.skillTrees().find((t) => t.id === id) ?? null;
   });
 
+  readonly activeTreeNodes = computed(() => {
+    const id = this.activeTreeId();
+    if (!id) return [];
+    return normalizePerkNodesTiers(
+      this.compendiumStore.perkNodes().filter((p) => p.tree_id === id)
+    ).sort((a, b) => a.tier - b.tier || compareSiblingPerkNodes(a, b));
+  });
+
   readonly treeModalOpen = signal(false);
   readonly editingTreeId = signal<string | null>(null);
   treeFormName = '';
@@ -67,6 +85,50 @@ export class SkillTreesManagerComponent {
   treeFormIcon = 'greatsword';
   treeFormColor = '#FF8C5A';
   treeFormTintCustom = true;
+
+  readonly attachModalOpen = signal(false);
+  readonly attachParentId = signal<string>('');
+  readonly attachSourceTab = signal<'standalone' | 'other_trees'>('standalone');
+  readonly attachSearch = signal('');
+
+  readonly standaloneAttachCandidates = computed(() => {
+    const q = this.attachSearch().trim().toLowerCase();
+    return this.compendiumStore
+      .standaloneNodes()
+      .filter(
+        (n) =>
+          !q ||
+          n.name.toLowerCase().includes(q) ||
+          n.description.toLowerCase().includes(q)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  readonly otherTreeAttachCandidates = computed(() => {
+    const currentTreeId = this.activeTreeId();
+    const q = this.attachSearch().trim().toLowerCase();
+    return this.compendiumStore
+      .perkNodes()
+      .filter(
+        (n) =>
+          !isStandalonePerkNode(n) &&
+          n.tree_id !== currentTreeId &&
+          (!q ||
+            n.name.toLowerCase().includes(q) ||
+            n.description.toLowerCase().includes(q))
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  readonly visibleAttachCandidates = computed(() =>
+    this.attachSourceTab() === 'standalone'
+      ? this.standaloneAttachCandidates()
+      : this.otherTreeAttachCandidates()
+  );
+
+  selectCanvasNode(nodeId: string): void {
+    this.treeCanvas?.selectNodeById(nodeId);
+  }
 
   openSkillTreeView(treeId: string): void {
     this.compendiumStore.clearMessages();
@@ -82,14 +144,34 @@ export class SkillTreesManagerComponent {
     return resolveTreeVisuals(tree);
   }
 
-  getPerksForTree(treeId: string): PerkNodeModel[] {
-    return this.compendiumStore
-      .perkNodes()
-      .filter((p) => p.tree_id === treeId)
-      .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
+  getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+    return resolveNodeVisuals(node);
   }
 
-  countNodeType(treeId: string, type: 'combat_art' | 'passive_upgrade'): number {
+  treeNameById(treeId: string | null | undefined): string {
+    if (!treeId) return 'Standalone';
+    return (
+      this.compendiumStore.skillTrees().find((t) => t.id === treeId)?.name ??
+      'Other Tree'
+    );
+  }
+
+  getPerksForTree(treeId: string): PerkNodeModel[] {
+    return normalizePerkNodesTiers(
+      this.compendiumStore.perkNodes().filter((p) => p.tree_id === treeId)
+    ).sort((a, b) => a.tier - b.tier || compareSiblingPerkNodes(a, b));
+  }
+
+  getMaxTierForTree(treeId: string): number {
+    const perks = this.getPerksForTree(treeId);
+    if (perks.length === 0) return 0;
+    return perks.reduce((max, p) => Math.max(max, p.tier), 1);
+  }
+
+  countNodeType(
+    treeId: string,
+    type: 'combat_art' | 'passive_upgrade'
+  ): number {
     return this.compendiumStore
       .perkNodes()
       .filter((p) => p.tree_id === treeId && p.node_type === type).length;
@@ -128,6 +210,45 @@ export class SkillTreesManagerComponent {
     }
   }
 
+  openAttachModal(defaultParent: PerkNodeModel | null = null): void {
+    this.compendiumStore.clearMessages();
+    this.attachParentId.set(defaultParent?.id ?? '');
+    this.attachSearch.set('');
+    if (
+      this.standaloneAttachCandidates().length === 0 &&
+      this.otherTreeAttachCandidates().length > 0
+    ) {
+      this.attachSourceTab.set('other_trees');
+    } else {
+      this.attachSourceTab.set('standalone');
+    }
+    this.attachModalOpen.set(true);
+  }
+
+  closeAttachModal(): void {
+    this.attachModalOpen.set(false);
+  }
+
+  onAttachBackdropMouseDown(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      this.closeAttachModal();
+    }
+  }
+
+  async attachNodeToActiveTree(candidate: PerkNodeModel): Promise<void> {
+    const treeId = this.activeTreeId();
+    if (!treeId) return;
+    const ok = await this.compendiumStore.moveOrReparentPerkNode(
+      candidate.id,
+      treeId,
+      this.attachParentId() || null
+    );
+    if (ok) {
+      this.closeAttachModal();
+      this.selectCanvasNode(candidate.id);
+    }
+  }
+
   async saveTree(): Promise<void> {
     const editId = this.editingTreeId();
     if (editId) {
@@ -147,7 +268,10 @@ export class SkillTreesManagerComponent {
         icon_color: this.treeFormColor,
         icon_tint_custom: this.treeFormTintCustom,
       });
-      if (created) this.closeTreeModal();
+      if (created) {
+        this.closeTreeModal();
+        this.activeTreeId.set(created.id);
+      }
     }
   }
 }

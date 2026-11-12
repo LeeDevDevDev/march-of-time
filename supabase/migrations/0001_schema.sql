@@ -69,7 +69,7 @@ create table if not exists public.perk_nodes (
   slug text unique not null,
   name text not null,
   node_type text not null check (node_type in ('combat_art', 'passive_upgrade')),
-  tier int not null default 1 check (tier between 1 and 5),
+  tier int not null default 1 check (tier >= 1),
   perk_cost int not null default 1,
   ap_cost int,
   cooldown_rounds int,
@@ -93,6 +93,12 @@ alter table public.perk_nodes
 
 alter table public.perk_nodes
   alter column tree_id drop not null;
+
+alter table public.perk_nodes
+  drop constraint if exists perk_nodes_tier_check;
+
+alter table public.perk_nodes
+  add constraint perk_nodes_tier_check check (tier >= 1);
 
 create index if not exists idx_perk_nodes_is_active on public.perk_nodes (is_active);
 create index if not exists idx_perk_nodes_standalone on public.perk_nodes (node_type, name) where tree_id is null;

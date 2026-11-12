@@ -4,10 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   ResolvedCompendiumVisuals,
   formatWeaponHookBadges,
-  getCombatTagBadgeClass,
-  getCombatTagCounterLabel,
   getTreeArchetypeIcon,
-  resolveNodeVisuals,
   resolveTreeVisuals,
   resolveWeaponVisuals,
 } from '../../core/compendium/compendium.model';
@@ -29,9 +26,9 @@ import {
   SkillTreeModel,
   WeaponModel,
   computeDerivedStats,
-  formatRuleHookBadges,
   getHeavyWeaponBlockBase,
   getWeaponPropertyTags,
+  isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
 } from './models/character.model';
@@ -56,8 +53,6 @@ export class CharacterCreatorComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   readonly Number = Number;
-  readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
-  readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
 
   readonly editingCharacterId = signal<string | null>(
     this.route.snapshot.paramMap.get('id')
@@ -288,20 +283,12 @@ export class CharacterCreatorComponent {
     return resolveTreeVisuals(tree);
   }
 
-  getNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
-    return resolveNodeVisuals(node);
-  }
-
   getWeaponVisuals(weapon: WeaponModel): ResolvedCompendiumVisuals {
     return resolveWeaponVisuals(weapon);
   }
 
   getWeaponHookBadges(weapon: WeaponModel | null | undefined): string[] {
     return formatWeaponHookBadges(weapon);
-  }
-
-  getHookBadges(node: PerkNodeModel): string[] {
-    return formatRuleHookBadges(node.rule_hooks);
   }
 
   countSelectedInTree(treeId: string): number {
@@ -312,6 +299,7 @@ export class CharacterCreatorComponent {
   }
 
   togglePerk(node: PerkNodeModel): void {
+    if (isStandalonePerkNode(node)) return;
     const perkId = node.id;
     this.unlockedPerkIds.update((ids) => {
       if (ids.includes(perkId)) {

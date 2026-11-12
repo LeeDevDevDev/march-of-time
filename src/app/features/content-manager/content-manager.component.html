@@ -300,6 +300,7 @@
       (createStandaloneNode)="perkNodeModal.openNewStandaloneNodeModal()"
       (editStandaloneNode)="perkNodeModal.openEditNodeModal($event)"
       (deleteStandaloneNode)="confirmDeleteNode($event)"
+      (nodeMovedToTree)="onNodeMovedToTree($event)"
     />
   }
 
@@ -320,6 +321,7 @@
     #perkNodeModal
     (requestCreateKeyword)="keywordsManager.openNewKeywordModal($event)"
     (standaloneNodeSaved)="onStandaloneNodeSaved($event)"
+    (treeNodeSaved)="onTreeNodeSaved($event)"
   />
 
   <app-confirm-dialog

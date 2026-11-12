@@ -4,12 +4,15 @@ import { CompendiumStore } from '../../../core/compendium/compendium.store';
 import { NotificationStore } from '../../../core/notifications/notification.store';
 import {
   CharacterModel,
+  PerkNodeModel,
   computeDerivedStats,
 } from '../models/character.model';
 import { CharacterService } from '../services/character.service';
 
 interface CharacterState {
   characters: CharacterModel[];
+  externalCharacters: CharacterModel[];
+  adminDirectory: CharacterModel[];
   isLoading: boolean;
   error: string | null;
 }
@@ -23,11 +26,14 @@ export class CharacterStore {
 
   readonly #state = signal<CharacterState>({
     characters: [],
+    externalCharacters: [],
+    adminDirectory: [],
     isLoading: false,
     error: null,
   });
 
   readonly characters = computed(() => this.#state().characters);
+  readonly adminDirectory = computed(() => this.#state().adminDirectory);
   readonly isLoading = computed(
     () => this.#state().isLoading || this.compendiumStore.isLoading()
   );
@@ -58,6 +64,8 @@ export class CharacterStore {
         this.#state.update((s) => ({
           ...s,
           characters: [],
+          externalCharacters: [],
+          adminDirectory: [],
           error: null,
         }));
       }
@@ -90,7 +98,63 @@ export class CharacterStore {
   }
 
   getCharacterById(id: string): CharacterModel | undefined {
-    return this.#state().characters.find((c) => c.id === id);
+    const state = this.#state();
+    return (
+      state.characters.find((c) => c.id === id) ??
+      state.externalCharacters.find((c) => c.id === id) ??
+      state.adminDirectory.find((c) => c.id === id)
+    );
+  }
+
+  async ensureCharacterLoaded(characterId: string): Promise<void> {
+    if (!characterId || this.getCharacterById(characterId)) return;
+    const { data } = await this.characterService.fetchCharacterById(characterId);
+    if (!data) return;
+    this.#state.update((s) => ({
+      ...s,
+      externalCharacters: [
+        ...s.externalCharacters.filter((c) => c.id !== data.id),
+        data,
+      ],
+    }));
+  }
+
+  async loadAdminCharacterDirectory(): Promise<void> {
+    if (!this.authStore.isAdmin()) return;
+    const { data } = await this.characterService.fetchAllCharacters();
+    this.#state.update((s) => ({
+      ...s,
+      adminDirectory: data,
+    }));
+  }
+
+  async toggleAdminGrantedPerk(
+    characterId: string,
+    node: PerkNodeModel
+  ): Promise<void> {
+    if (!this.authStore.isAdmin()) return;
+    const target = this.getCharacterById(characterId);
+    if (!target) return;
+    const has = target.unlocked_perk_ids.includes(node.id);
+    await this.updateCharacter(characterId, (c) => {
+      const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
+      if (has) {
+        delete nextCooldowns[node.id];
+      }
+      return {
+        ...c,
+        unlocked_perk_ids: has
+          ? c.unlocked_perk_ids.filter((id) => id !== node.id)
+          : [...c.unlocked_perk_ids, node.id],
+        active_cooldowns: nextCooldowns,
+      };
+    });
+    this.notifications.success(
+      has ? 'Standalone Ability Revoked' : 'Standalone Ability Granted',
+      has
+        ? `Removed "${node.name}" from ${target.name}.`
+        : `Granted "${node.name}" to ${target.name}.`
+    );
   }
 
   async createCharacter(
@@ -143,6 +207,7 @@ export class CharacterStore {
       this.#state.update((s) => ({
         ...s,
         characters: [data, ...s.characters],
+        adminDirectory: s.adminDirectory.length > 0 ? [data, ...s.adminDirectory] : s.adminDirectory,
         isLoading: false,
       }));
       this.notifications.success(
@@ -179,9 +244,21 @@ export class CharacterStore {
     this.#state.update((s) => ({
       ...s,
       characters: s.characters.map((c) => (c.id === characterId ? clamped : c)),
+      externalCharacters: s.externalCharacters.map((c) =>
+        c.id === characterId ? clamped : c
+      ),
+      adminDirectory: s.adminDirectory.map((c) =>
+        c.id === characterId ? clamped : c
+      ),
     }));
 
-    await this.characterService.updateCharacterRecord(characterId, clamped);
+    const err = await this.characterService.updateCharacterRecord(
+      characterId,
+      clamped
+    );
+    if (err) {
+      this.notifications.error('Unable to Update Character', err);
+    }
   }
 
   async saveBuilderChanges(

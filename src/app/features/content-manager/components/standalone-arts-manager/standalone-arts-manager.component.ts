@@ -1,5 +1,6 @@
 import { Component, computed, inject, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import {
   PerkNodeModel,
   ResolvedCompendiumVisuals,
@@ -11,25 +12,47 @@ import {
 import { CompendiumStore } from '../../../../core/compendium/compendium.store';
 import { CompendiumIconComponent } from '../../../../shared/compendium-icon/compendium-icon.component';
 import { KeywordTextComponent } from '../../../../shared/keyword-text/keyword-text.component';
+import { CharacterStore } from '../../../characters/store/character.store';
 
 @Component({
   selector: 'app-standalone-arts-manager',
   standalone: true,
-  imports: [FormsModule, CompendiumIconComponent, KeywordTextComponent],
+  imports: [FormsModule, RouterLink, CompendiumIconComponent, KeywordTextComponent],
   templateUrl: './standalone-arts-manager.component.html',
 })
 export class StandaloneArtsManagerComponent {
   readonly compendiumStore = inject(CompendiumStore);
+  readonly characterStore = inject(CharacterStore);
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
   readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
 
   readonly createStandaloneNode = output<void>();
   readonly editStandaloneNode = output<PerkNodeModel>();
   readonly deleteStandaloneNode = output<PerkNodeModel>();
+  readonly nodeMovedToTree = output<{ treeId: string; nodeId: string }>();
 
   readonly standaloneSearch = signal('');
   readonly standaloneTypeFilter = signal('All');
   readonly selectedStandaloneId = signal<string | null>(null);
+  readonly characterSearch = signal('');
+  readonly targetTreeId = signal('');
+
+  readonly assignableCharacters = computed(() => {
+    const dir = this.characterStore.adminDirectory();
+    const own = this.characterStore.characters();
+    const byId = new Map(dir.map((c) => [c.id, c]));
+    for (const c of own) {
+      if (!byId.has(c.id)) byId.set(c.id, c);
+    }
+    const q = this.characterSearch().trim().toLowerCase();
+    return Array.from(byId.values())
+      .filter((c) => !q || c.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  constructor() {
+    void this.characterStore.loadAdminCharacterDirectory();
+  }
 
   readonly standaloneFilterOptions: { id: string; label: string }[] = [
     { id: 'All', label: 'All Standalone' },
@@ -93,5 +116,28 @@ export class StandaloneArtsManagerComponent {
 
   getNodeHookBadges(node: PerkNodeModel): string[] {
     return formatRuleHookBadges(node.rule_hooks);
+  }
+
+  async toggleGrantToCharacter(characterId: string, node: PerkNodeModel): Promise<void> {
+    await this.characterStore.toggleAdminGrantedPerk(characterId, node);
+  }
+
+  async moveStandaloneNodeToTree(
+    node: PerkNodeModel,
+    openTreeAfter = false
+  ): Promise<void> {
+    const treeId = this.targetTreeId();
+    if (!treeId) return;
+    const ok = await this.compendiumStore.moveOrReparentPerkNode(
+      node.id,
+      treeId,
+      null
+    );
+    if (ok) {
+      this.targetTreeId.set('');
+      if (openTreeAfter) {
+        this.nodeMovedToTree.emit({ treeId, nodeId: node.id });
+      }
+    }
   }
 }

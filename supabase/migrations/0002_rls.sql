@@ -197,9 +197,11 @@ create policy "Owners can insert their own characters"
   with check (auth.uid() = owner_id);
 
 drop policy if exists "Owners can update their own characters" on public.characters;
-create policy "Owners can update their own characters"
+drop policy if exists "Owners and admins can update characters" on public.characters;
+create policy "Owners and admins can update characters"
   on public.characters for update to authenticated
-  using (auth.uid() = owner_id);
+  using (auth.uid() = owner_id or public.is_admin())
+  with check (auth.uid() = owner_id or public.is_admin());
 
 drop policy if exists "Owners can delete their own characters" on public.characters;
 create policy "Owners can delete their own characters"

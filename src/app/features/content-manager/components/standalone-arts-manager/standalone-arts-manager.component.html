@@ -49,7 +49,7 @@
             No Standalone Combat Arts or Passives Found
           </p>
           <p class="mt-1 text-xs text-[var(--mot-muted)]">
-            Author standalone Combat Arts or Passive Upgrades that can be assigned directly to characters or NPC tokens without a Skill Tree.
+            Author DM / Admin-granted Combat Arts or Passive Upgrades for NPCs and special character boons without a Skill Tree.
           </p>
           <button
             type="button"
@@ -296,28 +296,130 @@
             <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-3">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-white">
-                  Standalone Assignment &amp; VTT Scope
+                  DM / Admin Assignment &amp; VTT Scope
                 </span>
-                <span class="font-mono-num text-[11px] font-semibold text-[#8AB0AB]">
-                  Read-only · Edit to modify
+                <span class="font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                  Hidden from Player Builder
                 </span>
               </div>
 
               <div class="divide-y divide-[#243B37] rounded-xl border border-[#243B37] bg-[#122220] text-xs">
                 <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span class="font-semibold text-[#8AB0AB]">Skill Tree Prerequisite</span>
-                  <span class="font-mono-num font-bold text-[#38B29A] sm:text-right">
-                    None (Standalone / Solo Ability)
+                  <span class="font-semibold text-[#8AB0AB]">Player Self-Selection</span>
+                  <span class="font-mono-num font-bold text-[#FF8C5A] sm:text-right">
+                    Disabled (DM / Admin Grant Only)
                   </span>
                 </div>
 
                 <div class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span class="font-semibold text-[#8AB0AB]">Character &amp; NPC Assignment</span>
-                  <span class="font-mono-num font-bold text-[#38BDF8] sm:text-right">
-                    Equippable on Characters &amp; VTT Tokens
+                  <span class="font-semibold text-[#8AB0AB]">Perk Budget Cost</span>
+                  <span class="font-mono-num font-bold text-[#5EEAD4] sm:text-right">
+                    0 Perk Points (Bonus Sheet Ability)
                   </span>
                 </div>
               </div>
+            </div>
+
+            @if (compendiumStore.skillTrees().length > 0) {
+              <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-bold text-white">
+                    Place into a Skill Tree
+                  </span>
+                  <span class="font-mono-num text-xs text-[#8AB0AB]">
+                    Adds as Tier 1 Root
+                  </span>
+                </div>
+
+                <select
+                  [ngModel]="targetTreeId()"
+                  (ngModelChange)="targetTreeId.set($event)"
+                  aria-label="Choose target Skill Tree"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+                >
+                  <option value="">Choose Skill Tree...</option>
+                  @for (tree of compendiumStore.skillTrees(); track tree.id) {
+                    <option [value]="tree.id">{{ tree.name }}</option>
+                  }
+                </select>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    [disabled]="!targetTreeId()"
+                    (click)="moveStandaloneNodeToTree(selNode, false)"
+                    class="rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] disabled:opacity-35"
+                  >
+                    Move to Tree
+                  </button>
+                  <button
+                    type="button"
+                    [disabled]="!targetTreeId()"
+                    (click)="moveStandaloneNodeToTree(selNode, true)"
+                    class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-35"
+                  >
+                    Move &amp; Open →
+                  </button>
+                </div>
+              </div>
+            }
+
+            <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-4 space-y-3 tabular-nums">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold text-white">
+                  Grant to Character / NPC Sheet
+                </span>
+                <span class="font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                  {{ assignableCharacters().length }} Sheets
+                </span>
+              </div>
+
+              @if (characterStore.adminDirectory().length > 4 || characterSearch()) {
+                <input
+                  type="search"
+                  [ngModel]="characterSearch()"
+                  (ngModelChange)="characterSearch.set($event)"
+                  placeholder="Filter character or NPC sheets..."
+                  aria-label="Filter character or NPC sheets"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs text-[#EBF5F3] placeholder-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
+                />
+              }
+
+              @if (assignableCharacters().length === 0) {
+                <p class="text-xs text-[#8AB0AB]">
+                  No matching character sheets found.
+                </p>
+              } @else {
+                <div class="max-h-56 divide-y divide-[#243B37] overflow-y-auto rounded-xl border border-[#243B37] bg-[#122220]">
+                  @for (char of assignableCharacters(); track char.id) {
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                      <div class="min-w-0">
+                        <a
+                          [routerLink]="['/characters', char.id]"
+                          class="truncate font-semibold text-white no-underline hover:text-[#FF8C5A]"
+                        >
+                          {{ char.name }}
+                        </a>
+                        <span class="ml-1.5 font-mono-num text-xs text-[#8AB0AB]">
+                          Lv.{{ char.level }}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        (click)="toggleGrantToCharacter(char.id, selNode)"
+                        [class]="
+                          char.unlocked_perk_ids.includes(selNode.id)
+                            ? 'btn-copper shrink-0 rounded-lg px-2.5 py-1 font-mono-num text-xs font-bold'
+                            : 'shrink-0 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 font-mono-num text-xs font-bold text-[#EBF5F3] hover:border-[#C4491A]'
+                        "
+                      >
+                        {{ char.unlocked_perk_ids.includes(selNode.id) ? 'Granted' : 'Grant' }}
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </div>
         </aside>

@@ -291,6 +291,8 @@ export interface PerkRuleHooks {
   __icon_tint_custom?: boolean;
   __is_active?: boolean;
   __is_standalone?: boolean;
+  __sort_order?: number;
+  __tier?: number;
 }
 
 export type EditableRuleHookKey = Exclude<
@@ -301,6 +303,8 @@ export type EditableRuleHookKey = Exclude<
   | '__icon_tint_custom'
   | '__is_active'
   | '__is_standalone'
+  | '__sort_order'
+  | '__tier'
 >;
 
 export interface RuleHookDefinition {
@@ -1030,6 +1034,91 @@ export interface SkillTreeBranchNode {
   children: SkillTreeBranchNode[];
 }
 
+export function getPerkNodeSortOrder(node: PerkNodeModel): number {
+  const raw = node.rule_hooks?.__sort_order;
+  return typeof raw === 'number' && Number.isFinite(raw)
+    ? raw
+    : Number.MAX_SAFE_INTEGER;
+}
+
+export function compareSiblingPerkNodes(a: PerkNodeModel, b: PerkNodeModel): number {
+  const orderA = getPerkNodeSortOrder(a);
+  const orderB = getPerkNodeSortOrder(b);
+  if (orderA !== orderB) {
+    return orderA - orderB;
+  }
+  return a.name.localeCompare(b.name);
+}
+
+export function getDescendantNodeIds(
+  rootNodeId: string,
+  allNodes: PerkNodeModel[]
+): Set<string> {
+  const descendants = new Set<string>();
+  const childrenByParent = new Map<string, string[]>();
+
+  for (const n of allNodes) {
+    if (!n.parent_node_id) continue;
+    const list = childrenByParent.get(n.parent_node_id) ?? [];
+    list.push(n.id);
+    childrenByParent.set(n.parent_node_id, list);
+  }
+
+  const stack = [...(childrenByParent.get(rootNodeId) ?? [])];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === rootNodeId || descendants.has(id)) continue;
+    descendants.add(id);
+    const next = childrenByParent.get(id);
+    if (next) stack.push(...next);
+  }
+
+  return descendants;
+}
+
+export function computePerkNodeTier(
+  treeId: string | null | undefined,
+  parentNodeId: string | null | undefined,
+  allNodes: PerkNodeModel[]
+): number {
+  if (!treeId || !parentNodeId) return 1;
+
+  const treeById = new Map<string, PerkNodeModel>();
+  for (const n of allNodes) {
+    if (n.tree_id === treeId) {
+      treeById.set(n.id, n);
+    }
+  }
+
+  let depth = 1;
+  let cursorId: string | null | undefined = parentNodeId;
+  const visited = new Set<string>();
+
+  while (cursorId && !visited.has(cursorId)) {
+    const parent = treeById.get(cursorId);
+    if (!parent) break;
+    visited.add(cursorId);
+    depth += 1;
+    cursorId = parent.parent_node_id;
+  }
+
+  return depth;
+}
+
+export function normalizePerkNodesTiers(allNodes: PerkNodeModel[]): PerkNodeModel[] {
+  return allNodes.map((node) => {
+    if (isStandalonePerkNode(node)) {
+      return node.tier === 1 ? node : { ...node, tier: 1 };
+    }
+    const computedTier = computePerkNodeTier(
+      node.tree_id,
+      node.parent_node_id,
+      allNodes
+    );
+    return node.tier === computedTier ? node : { ...node, tier: computedTier };
+  });
+}
+
 /**
  * Builds a hierarchical forest of root nodes and their recursive child branches
  * for rendering a connected visual Skill Tree.
@@ -1038,13 +1127,9 @@ export function buildSkillTreeHierarchy(
   treeId: string,
   allNodes: PerkNodeModel[]
 ): SkillTreeBranchNode[] {
-  const treeNodes = allNodes
-    .filter((n) => n.tree_id === treeId)
-    .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name));
-
+  const treeNodes = allNodes.filter((n) => n.tree_id === treeId);
   const nodeIds = new Set(treeNodes.map((n) => n.id));
   const childrenMap = new Map<string, PerkNodeModel[]>();
-
   const roots: PerkNodeModel[] = [];
 
   for (const n of treeNodes) {
@@ -1057,18 +1142,31 @@ export function buildSkillTreeHierarchy(
     }
   }
 
-  const buildBranch = (current: PerkNodeModel, visited = new Set<string>()): SkillTreeBranchNode => {
+  roots.sort(compareSiblingPerkNodes);
+  for (const list of childrenMap.values()) {
+    list.sort(compareSiblingPerkNodes);
+  }
+
+  const buildBranch = (
+    current: PerkNodeModel,
+    depth: number,
+    visited = new Set<string>()
+  ): SkillTreeBranchNode => {
     visited.add(current.id);
     const directChildren = (childrenMap.get(current.id) ?? []).filter(
       (c) => !visited.has(c.id)
     );
+    const effectiveNode =
+      current.tier === depth ? current : { ...current, tier: depth };
     return {
-      node: current,
-      children: directChildren.map((child) => buildBranch(child, new Set(visited))),
+      node: effectiveNode,
+      children: directChildren.map((child) =>
+        buildBranch(child, depth + 1, new Set(visited))
+      ),
     };
   };
 
-  return roots.map((r) => buildBranch(r));
+  return roots.map((r) => buildBranch(r, 1));
 }
 
 /**
