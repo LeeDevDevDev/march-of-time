@@ -93,8 +93,8 @@ export class WeaponsManagerComponent {
     gov_attribute: AttributeName;
     gov_skill: CombatSkillName;
     base_damage: number;
-    reach_tiles: number;
-    thrown_range_tiles: number | null;
+    reach_feet: number;
+    thrown_range_feet: number | null;
     trait_name: string;
     trait_description: string;
     two_handed: boolean;
@@ -115,8 +115,8 @@ export class WeaponsManagerComponent {
     gov_attribute: 'Brawn',
     gov_skill: 'Strike',
     base_damage: 4,
-    reach_tiles: 1,
-    thrown_range_tiles: null,
+    reach_feet: 5,
+    thrown_range_feet: null,
     trait_name: '',
     trait_description: '',
     two_handed: false,
@@ -168,8 +168,8 @@ export class WeaponsManagerComponent {
       gov_attribute: 'Brawn',
       gov_skill: 'Strike',
       base_damage: 4,
-      reach_tiles: 1,
-      thrown_range_tiles: null,
+      reach_feet: 5,
+      thrown_range_feet: null,
       trait_name: '',
       trait_description: '',
       two_handed: false,
@@ -200,8 +200,11 @@ export class WeaponsManagerComponent {
       gov_attribute: w.gov_attribute || 'Brawn',
       gov_skill: w.gov_skill || 'Strike',
       base_damage: w.base_damage ?? 4,
-      reach_tiles: w.reach_tiles ?? 1,
-      thrown_range_tiles: w.thrown_range_tiles ?? null,
+      reach_feet: Math.max(5, Math.round((w.reach_tiles ?? 1) * 5)),
+      thrown_range_feet:
+        w.thrown_range_tiles && w.thrown_range_tiles > 0
+          ? Math.round(w.thrown_range_tiles * 5)
+          : null,
       trait_name: w.trait_name || '',
       trait_description: w.trait_description || '',
       two_handed: isWeaponTwoHanded(w),
@@ -276,11 +279,14 @@ export class WeaponsManagerComponent {
       gov_attribute: this.weaponForm.gov_attribute,
       gov_skill: this.weaponForm.gov_skill,
       base_damage: Number(this.weaponForm.base_damage) || 3,
-      reach_tiles: Number(this.weaponForm.reach_tiles) || 1,
+      reach_tiles: Math.max(
+        1,
+        Math.round((Number(this.weaponForm.reach_feet) || 5) / 5)
+      ),
       thrown_range_tiles:
-        this.weaponForm.thrown_range_tiles &&
-        Number(this.weaponForm.thrown_range_tiles) > 0
-          ? Number(this.weaponForm.thrown_range_tiles)
+        this.weaponForm.thrown_range_feet &&
+        Number(this.weaponForm.thrown_range_feet) > 0
+          ? Math.max(1, Math.round(Number(this.weaponForm.thrown_range_feet) / 5))
           : null,
       trait_name: this.weaponForm.trait_name,
       trait_description: this.weaponForm.trait_description,

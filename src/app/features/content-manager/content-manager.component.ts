@@ -12,6 +12,8 @@ import {
   PerkNodeModel,
   SkillTreeModel,
   WeaponModel,
+  getNodeParentIds,
+  isCombatArtUpgradeNode,
   isStandalonePerkNode,
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
@@ -229,9 +231,15 @@ export class ContentManagerComponent implements OnInit {
   confirmDeleteNode(node: PerkNodeModel): void {
     this.compendiumStore.clearMessages();
     const isStandalone = isStandalonePerkNode(node);
-    const dependentChildren = this.compendiumStore
+    const treeNodes = this.compendiumStore
       .perkNodes()
-      .filter((n) => n.parent_node_id === node.id);
+      .filter((n) => n.tree_id === node.tree_id);
+    const incomingCount = isStandalone
+      ? 0
+      : getNodeParentIds(node, treeNodes).length;
+    const dependentChildren = isStandalone
+      ? []
+      : treeNodes.filter((n) => getNodeParentIds(n, treeNodes).includes(node.id));
 
     this.pendingDelete.set({
       kind: 'node',
@@ -241,14 +249,14 @@ export class ContentManagerComponent implements OnInit {
         : 'Delete Skill Tree Node',
       itemName: node.name,
       badge: isStandalone
-        ? `Standalone · ${node.node_type === 'combat_art' ? 'Combat Art' : 'Passive'}`
-        : `Tier ${node.tier} · ${node.node_type === 'combat_art' ? 'Combat Art' : 'Passive'}`,
+        ? `Standalone · ${node.node_type === 'combat_art' ? 'Combat Art' : isCombatArtUpgradeNode(node) ? 'Combat Art Upgrade' : 'Passive'}`
+        : `${incomingCount === 0 ? 'Starting Node' : 'Connected Node'} · ${node.node_type === 'combat_art' ? 'Combat Art' : isCombatArtUpgradeNode(node) ? 'Combat Art Upgrade' : 'Passive'}`,
       message: isStandalone
         ? `Are you sure you want to delete the standalone ability "${node.name}" from the compendium?`
         : `Are you sure you want to delete "${node.name}" from this skill tree?`,
       warningNote:
         dependentChildren.length > 0
-          ? `This node is a prerequisite for ${dependentChildren.length} child node(s) (${dependentChildren.map((c) => c.name).join(', ')}). Deleting it promotes those children up one tier. Use "Remove from Tree" in the Inspector if you want to keep this ability in Standalone Arts instead.`
+          ? `This node connects into ${dependentChildren.length} downstream node(s) (${dependentChildren.map((c) => c.name).join(', ')}). Deleting it disconnects its routes (downstream nodes keep any other connected routes or become Starting Nodes). Use "Remove from Tree" in the Inspector if you want to keep this ability in Standalone Arts instead.`
           : isStandalone
             ? 'Existing characters who already have this ability keep their unlocked perk safely intact.'
             : 'Use "Remove from Tree" in the Inspector if you only want to detach this ability from the tree without deleting it.',

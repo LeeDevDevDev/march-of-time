@@ -14,6 +14,8 @@ import {
   SkillTreeModel,
   compareSiblingPerkNodes,
   getCombatTagBadgeClass,
+  getNodeParentIds,
+  isCombatArtUpgradeNode,
   isStandalonePerkNode,
   normalizePerkNodesTiers,
   resolveNodeVisuals,
@@ -38,6 +40,7 @@ import { SkillTreeCanvasComponent } from '../../../../shared/skill-tree-canvas/s
 export class SkillTreesManagerComponent {
   readonly compendiumStore = inject(CompendiumStore);
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
+  readonly isCombatArtUpgradeNode = isCombatArtUpgradeNode;
 
   @ViewChild(SkillTreeCanvasComponent)
   treeCanvas?: SkillTreeCanvasComponent;
@@ -166,10 +169,13 @@ export class SkillTreesManagerComponent {
     ).sort((a, b) => a.tier - b.tier || compareSiblingPerkNodes(a, b));
   }
 
-  getMaxTierForTree(treeId: string): number {
+  countRoutesForTree(treeId: string): number {
     const perks = this.getPerksForTree(treeId);
     if (perks.length === 0) return 0;
-    return perks.reduce((max, p) => Math.max(max, p.tier), 1);
+    return perks.reduce(
+      (sum, p) => sum + getNodeParentIds(p, perks).length,
+      0
+    );
   }
 
   countNodeType(
@@ -178,7 +184,18 @@ export class SkillTreesManagerComponent {
   ): number {
     return this.compendiumStore
       .perkNodes()
-      .filter((p) => p.tree_id === treeId && p.node_type === type).length;
+      .filter(
+        (p) =>
+          p.tree_id === treeId &&
+          p.node_type === type &&
+          (type !== 'passive_upgrade' || !isCombatArtUpgradeNode(p))
+      ).length;
+  }
+
+  countArtUpgrades(treeId: string): number {
+    return this.compendiumStore
+      .perkNodes()
+      .filter((p) => p.tree_id === treeId && isCombatArtUpgradeNode(p)).length;
   }
 
   openNewTreeModal(): void {

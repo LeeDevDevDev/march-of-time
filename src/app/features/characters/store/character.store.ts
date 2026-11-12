@@ -5,7 +5,9 @@ import { NotificationStore } from '../../../core/notifications/notification.stor
 import {
   CharacterModel,
   PerkNodeModel,
+  UPGRADE_SLOT_PREFIX,
   computeDerivedStats,
+  getUpgradeSlotKey,
 } from '../models/character.model';
 import { CharacterService } from '../services/character.service';
 
@@ -289,6 +291,12 @@ export class CharacterStore {
       const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
       if (has) {
         delete nextCooldowns[node.id];
+        delete nextCooldowns[getUpgradeSlotKey(node.id)];
+        for (const [k, val] of Object.entries(nextCooldowns)) {
+          if (k.startsWith(UPGRADE_SLOT_PREFIX) && val === node.id) {
+            delete nextCooldowns[k];
+          }
+        }
       }
       return {
         ...c,

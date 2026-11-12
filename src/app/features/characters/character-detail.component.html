@@ -25,7 +25,7 @@
               <p class="mt-1 text-xs text-[#8AB0AB] tabular-nums">
                 {{ armorTiers[char.equipped_armor].label }} ·
                 {{ shieldTiers[char.equipped_shield].label }}{{ stats.shieldDisabledByTwoHanded ? ' (Stowed: Two-Handed Active)' : '' }} ·
-                Move {{ stats.moveTiles }} Tiles ({{ stats.moveFeet }} ft) per 1 AP
+                Move {{ stats.moveFeet }} ft per 1 AP
               </p>
             </div>
           </div>
@@ -348,7 +348,7 @@
                   <span class="font-bold text-[var(--mot-text)]">Dodge Reaction (1 AP)</span>
                   <span class="block text-[var(--mot-muted)]">
                     @if (stats.canDodge) {
-                      Shifts 1 tile · Flawless (≥ +5) refunds 1 AP
+                      Shifts 5 ft · Flawless (≥ +5) refunds 1 AP
                     } @else {
                       Disabled (Heavy Armor / Tower Shield Trade-off)
                     }
@@ -358,7 +358,7 @@
                   <div class="flex items-center gap-1.5">
                     <button
                       type="button"
-                      (click)="roll2d10('Dodge Check', stats.dodgeMod, 'Shifts 1 Tile · Flawless (+5) refunds 1 AP')"
+                      (click)="roll2d10('Dodge Check', stats.dodgeMod, 'Shifts 5 ft · Flawless (+5) refunds 1 AP')"
                       title="Roll 2d10 Dodge without spending AP"
                       class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
                     >
@@ -708,77 +708,177 @@
                 No combat arts or perks unlocked yet. Click <strong>Manage Perks</strong> above to spend your Perk Points on Skill Tree nodes.
               </p>
             } @else {
-              <div class="mt-3.5 space-y-2.5">
-                @for (perk of stats.unlockedPerks; track perk.id) {
+              <div class="mt-3.5 space-y-3">
+                @if (stats.playerChoiceUpgradeSlots.length > 0) {
                   <div
-                    class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5"
+                    class="rounded-xl border border-[#F59E0B]/45 bg-[var(--mot-well)] p-3.5 space-y-2.5"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <span class="font-display text-xs font-bold text-[var(--mot-text)]">
+                        Slotted Combat Art Upgrades
+                      </span>
+                      <span class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                        Choose which Combat Art receives each flexible upgrade
+                      </span>
+                    </div>
+
+                    <div class="space-y-2">
+                      @for (slot of stats.playerChoiceUpgradeSlots; track slot.upgradeNode.id) {
+                        <div
+                          class="flex flex-col justify-between gap-2.5 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] p-3 sm:flex-row sm:items-center"
+                        >
+                          <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                              <span class="text-xs font-bold text-[#F59E0B]">✦</span>
+                              <span class="font-display text-xs font-bold text-[var(--mot-text)]">
+                                {{ slot.upgradeNode.name }}
+                              </span>
+                              <span
+                                class="rounded bg-[#122220] px-1.5 py-0.5 font-mono-num text-[11px] font-bold text-[#FF8C5A]"
+                              >
+                                {{ getPerkOriginLabel(slot.upgradeNode) }}
+                              </span>
+                            </div>
+                            @if (getArtUpgradeBadges(slot.upgradeNode).length > 0) {
+                              <div class="mt-1 flex flex-wrap gap-1">
+                                @for (b of getArtUpgradeBadges(slot.upgradeNode); track $index) {
+                                  <span
+                                    class="rounded border border-[#F59E0B]/40 bg-[var(--mot-well)] px-1.5 py-0.5 font-mono-num text-[11px] font-semibold text-[#F59E0B]"
+                                  >
+                                    {{ b }}
+                                  </span>
+                                }
+                              </div>
+                            }
+                          </div>
+
+                          @if (slot.eligibleArts.length > 0) {
+                            <div class="flex shrink-0 items-center gap-2">
+                              <label
+                                [for]="'upgradeSlot_' + slot.upgradeNode.id"
+                                class="text-xs font-semibold text-[var(--mot-muted)]"
+                              >
+                                Target:
+                              </label>
+                              <select
+                                [id]="'upgradeSlot_' + slot.upgradeNode.id"
+                                [ngModel]="slot.selectedArtId"
+                                (ngModelChange)="setArtUpgradeSlot(char.id, slot.upgradeNode.id, $event)"
+                                class="mot-input w-48 px-2.5 py-1.5 text-xs font-bold"
+                              >
+                                @for (artOption of slot.eligibleArts; track artOption.id) {
+                                  <option [value]="artOption.id">
+                                    {{ artOption.name }}
+                                  </option>
+                                }
+                              </select>
+                            </div>
+                          } @else {
+                            <span class="font-mono-num text-xs text-[var(--mot-muted)]">
+                              Unlock a Combat Art in {{ getPerkOriginLabel(slot.upgradeNode) }} to slot
+                            </span>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+
+                @for (art of stats.resolvedCombatArts; track art.baseNode.id) {
+                  <div
+                    class="rounded-xl border p-3.5 transition-colors"
+                    [class.border-[#F59E0B]/55]="art.appliedUpgrades.length > 0"
+                    [class.border-[var(--mot-border)]]="art.appliedUpgrades.length === 0"
+                    [class.bg-[var(--mot-well)]]="true"
                   >
                     <div class="flex flex-wrap items-start justify-between gap-3">
-                      <div class="flex items-start gap-3">
+                      <div class="flex min-w-0 flex-1 items-start gap-3">
                         <div
-                          class="flex h-10 w-10 shrink-0 items-center justify-center border-2 bg-[#122220]"
-                          [class.rounded-xl]="perk.node_type === 'combat_art'"
-                          [class.rounded-full]="perk.node_type === 'passive_upgrade'"
-                          [style.border-color]="getNodeVisuals(perk).color"
+                          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                          [style.border-color]="getNodeVisuals(art.baseNode).color"
                         >
                           <app-compendium-icon
-                            [icon]="getNodeVisuals(perk).icon"
-                            [color]="getNodeVisuals(perk).color"
-                            [tintCustom]="getNodeVisuals(perk).tintCustom"
+                            [icon]="getNodeVisuals(art.baseNode).icon"
+                            [color]="getNodeVisuals(art.baseNode).color"
+                            [tintCustom]="getNodeVisuals(art.baseNode).tintCustom"
                             sizeClass="h-5 w-5"
                           />
                         </div>
 
-                        <div class="min-w-0">
+                        <div class="min-w-0 flex-1">
                           <div class="flex flex-wrap items-center gap-1.5">
                             <span
                               class="rounded bg-[#122220] px-1.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
                             >
-                              {{ isStandalone(perk) ? 'GRANTED' : 'T' + perk.tier }}
+                              {{ getPerkOriginLabel(art.baseNode) }}
                             </span>
                             <span class="font-display text-sm font-bold text-[var(--mot-text)]">
-                              {{ perk.name }}
+                              {{ art.baseNode.name }}
                             </span>
-                            @if (perk.node_type === 'passive_upgrade') {
+                            @if (art.appliedUpgrades.length > 0) {
                               <span
-                                class="badge-jade rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                                class="rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-2 py-0.5 font-mono-num text-xs font-bold text-[#F59E0B]"
                               >
-                                Passive
+                                Upgraded{{ art.appliedUpgrades.length > 1 ? ' ×' + art.appliedUpgrades.length : '' }}
                               </span>
                             }
-                            @if (perk.combat_tag && perk.combat_tag !== 'None') {
+                            @for (tag of art.combatTags; track tag) {
                               <span
                                 [class]="
                                   'rounded border px-2 py-0.5 font-mono-num text-xs font-bold ' +
-                                  getCombatTagBadgeClass(perk.combat_tag)
+                                  getCombatTagBadgeClass(tag)
                                 "
                               >
-                                {{ perk.combat_tag }} · {{ getCombatTagCounterLabel(perk.combat_tag) }}
+                                {{ tag }} · {{ getCombatTagCounterLabel(tag) }}
                               </span>
                             }
-                            @if (perk.ap_cost) {
-                              <span
-                                class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]"
-                              >
-                                {{ perk.ap_cost }} AP
-                              </span>
-                            }
-                            @if (perk.cooldown_rounds) {
+                            <span
+                              class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]"
+                            >
+                              {{ art.apCost }} AP{{ art.apCost !== art.baseApCost ? ' (base ' + art.baseApCost + ')' : '' }}
+                            </span>
+                            @if (art.cooldownRounds > 0 || art.baseCooldownRounds > 0) {
                               <span
                                 class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-muted)]"
                               >
-                                {{ perk.cooldown_rounds }}-Rnd CD
+                                {{ art.cooldownRounds }}-Rnd CD{{ art.cooldownRounds !== art.baseCooldownRounds ? ' (base ' + art.baseCooldownRounds + ')' : '' }}
                               </span>
+                            }
+                            @if (art.weaponRequirementLabel; as wepReqLabel) {
+                              @if (art.meetsWeaponRequirement) {
+                                <span
+                                  class="badge-jade rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                                >
+                                  ✓ {{ wepReqLabel.replace('Requires ', '') }}
+                                </span>
+                              } @else {
+                                <span
+                                  class="badge-warn rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                                >
+                                  {{ wepReqLabel }}
+                                </span>
+                              }
                             }
                           </div>
 
+                          @if (!art.meetsWeaponRequirement && art.weaponRequirementUnmetReason) {
+                            <div class="mt-1.5 font-mono-num text-xs font-semibold text-[#F59E0B]">
+                              {{ art.weaponRequirementUnmetReason }}
+                              @if (art.alternateSlotSatisfiesWeaponReq && art.alternateSlotWeaponName) {
+                                <span class="text-[var(--mot-muted)]">
+                                  · Ready in Slot {{ char.active_weapon_slot === 1 ? 2 : 1 }} ({{ art.alternateSlotWeaponName }})
+                                </span>
+                              }
+                            </div>
+                          }
+
                           <div class="mt-1.5 text-xs text-[var(--mot-muted)]">
-                            <app-keyword-text [text]="perk.description" [showHintWhenIdle]="false" />
+                            <app-keyword-text [text]="art.baseNode.description" [showHintWhenIdle]="false" />
                           </div>
 
-                          @if (getHookBadges(perk).length > 0) {
+                          @if (art.effectBadges.length > 0) {
                             <div class="mt-2 flex flex-wrap gap-1.5">
-                              @for (badge of getHookBadges(perk); track $index) {
+                              @for (badge of art.effectBadges; track $index) {
                                 <span
                                   class="badge-jade rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
                                 >
@@ -787,37 +887,127 @@
                               }
                             </div>
                           }
+
+                          @if (art.appliedUpgrades.length > 0) {
+                            <div
+                              class="mt-2.5 space-y-1.5 rounded-lg border border-[#F59E0B]/35 bg-[var(--mot-surface)] px-3 py-2"
+                            >
+                              @for (upg of art.appliedUpgrades; track upg.id) {
+                                <div class="text-xs">
+                                  <span class="font-display font-bold text-[#F59E0B]">
+                                    ✦ {{ upg.name }}:
+                                  </span>
+                                  <span class="ml-1 text-[var(--mot-muted)]">
+                                    <app-keyword-text [text]="upg.description" [showHintWhenIdle]="false" />
+                                  </span>
+                                </div>
+                              }
+                            </div>
+                          }
                         </div>
                       </div>
 
-                      @if (perk.node_type === 'combat_art') {
-                        <div class="flex shrink-0 items-center gap-1.5">
-                          @if (getPerkCooldown(char, perk.id) > 0) {
-                            <span
-                              class="badge-warn rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold"
-                            >
-                              CD: {{ getPerkCooldown(char, perk.id) }} Rnd
-                            </span>
+                      <div class="flex shrink-0 items-center gap-1.5">
+                        @if (getPerkCooldown(char, art.baseNode.id) > 0) {
+                          <span
+                            class="badge-warn rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold"
+                          >
+                            CD: {{ getPerkCooldown(char, art.baseNode.id) }} Rnd
+                          </span>
+                          <button
+                            type="button"
+                            (click)="clearPerkCooldown(char.id, art.baseNode.id)"
+                            title="Clear cooldown early"
+                            class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                          >
+                            Ready
+                          </button>
+                        } @else {
+                          @if (!art.meetsWeaponRequirement && art.alternateSlotSatisfiesWeaponReq && art.alternateSlotWeaponName) {
                             <button
                               type="button"
-                              (click)="clearPerkCooldown(char.id, perk.id)"
-                              title="Clear cooldown early"
-                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                              (click)="switchWeapon(char.id)"
+                              [disabled]="char.current_ap < 1"
+                              class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-2.5 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)] hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
                             >
-                              Ready
-                            </button>
-                          } @else {
-                            <button
-                              type="button"
-                              (click)="useCombatArt(char.id, perk, stats)"
-                              [disabled]="char.current_ap < (perk.ap_cost ?? 1)"
-                              class="btn-copper rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold disabled:opacity-40"
-                            >
-                              Use ({{ perk.ap_cost ?? 1 }} AP)
+                              1 AP: Switch ({{ art.alternateSlotWeaponName }})
                             </button>
                           }
+                          <button
+                            type="button"
+                            (click)="useCombatArt(char.id, art, stats)"
+                            [disabled]="char.current_ap < art.apCost || !art.meetsWeaponRequirement"
+                            [title]="!art.meetsWeaponRequirement ? (art.weaponRequirementUnmetReason ?? '') : ''"
+                            class="btn-copper rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold disabled:opacity-40"
+                          >
+                            {{ art.meetsWeaponRequirement ? 'Use (' + art.apCost + ' AP)' : 'Locked (' + art.apCost + ' AP)' }}
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                }
+
+                @for (perk of stats.displayPassivePerks; track perk.id) {
+                  <div
+                    class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5"
+                  >
+                    <div class="flex items-start gap-3">
+                      <div
+                        class="flex h-10 w-10 shrink-0 items-center justify-center border-2 bg-[#122220]"
+                        [class.rounded-xl]="isCombatArtUpgradeNode(perk)"
+                        [class.rounded-full]="!isCombatArtUpgradeNode(perk)"
+                        [style.border-color]="getNodeVisuals(perk).color"
+                      >
+                        <app-compendium-icon
+                          [icon]="getNodeVisuals(perk).icon"
+                          [color]="getNodeVisuals(perk).color"
+                          [tintCustom]="getNodeVisuals(perk).tintCustom"
+                          sizeClass="h-5 w-5"
+                        />
+                      </div>
+
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          <span
+                            class="rounded bg-[#122220] px-1.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A]"
+                          >
+                            {{ getPerkOriginLabel(perk) }}
+                          </span>
+                          <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                            {{ perk.name }}
+                          </span>
+                          @if (isCombatArtUpgradeNode(perk)) {
+                            <span
+                              class="rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-2 py-0.5 font-mono-num text-xs font-bold text-[#F59E0B]"
+                            >
+                              Art Upgrade (Unlock Target Art to Activate)
+                            </span>
+                          } @else {
+                            <span
+                              class="badge-jade rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                            >
+                              Passive
+                            </span>
+                          }
                         </div>
-                      }
+
+                        <div class="mt-1.5 text-xs text-[var(--mot-muted)]">
+                          <app-keyword-text [text]="perk.description" [showHintWhenIdle]="false" />
+                        </div>
+
+                        @if (getHookBadges(perk).length > 0) {
+                          <div class="mt-2 flex flex-wrap gap-1.5">
+                            @for (badge of getHookBadges(perk); track $index) {
+                              <span
+                                class="badge-jade rounded border px-2 py-0.5 font-mono-num text-xs font-bold"
+                              >
+                                {{ badge }}
+                              </span>
+                            }
+                          </div>
+                        }
+                      </div>
                     </div>
                   </div>
                 }
@@ -988,8 +1178,8 @@
                         <div class="flex items-start gap-3">
                           <div
                             class="flex h-10 w-10 shrink-0 items-center justify-center border-2 bg-[#122220]"
-                            [class.rounded-xl]="node.node_type === 'combat_art'"
-                            [class.rounded-full]="node.node_type === 'passive_upgrade'"
+                            [class.rounded-xl]="node.node_type === 'combat_art' || isCombatArtUpgradeNode(node)"
+                            [class.rounded-full]="node.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(node)"
                             [style.border-color]="getNodeVisuals(node).color"
                           >
                             <app-compendium-icon
@@ -1021,6 +1211,17 @@
                                     {{ node.combat_tag }} · {{ getCombatTagCounterLabel(node.combat_tag) }}
                                   </span>
                                 }
+                                @if (getNodeWeaponReqLabel(node); as nodeWepReq) {
+                                  <span
+                                    class="badge-warn rounded border px-1.5 py-0.5 font-mono-num text-xs font-bold"
+                                  >
+                                    {{ nodeWepReq }}
+                                  </span>
+                                }
+                              } @else if (isCombatArtUpgradeNode(node)) {
+                                <span class="rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-1.5 py-0.5 font-mono-num text-xs font-bold text-[#F59E0B]">
+                                  Art Upgrade
+                                </span>
                               } @else {
                                 <span class="badge-jade rounded border px-1.5 py-0.5 font-mono-num text-xs font-bold">
                                   Passive

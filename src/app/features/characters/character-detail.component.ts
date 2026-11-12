@@ -1,11 +1,14 @@
 import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
 import {
   ResolvedCompendiumVisuals,
+  formatArtUpgradeBadges,
   formatWeaponHookBadges,
   getCombatTagBadgeClass,
   getCombatTagCounterLabel,
+  pruneUnreachableUnlockedPerks,
   resolveNodeVisuals,
   resolveTreeVisuals,
   resolveWeaponVisuals,
@@ -22,12 +25,17 @@ import {
   DerivedCharacterStats,
   FIELD_SKILL_LIST,
   PerkNodeModel,
+  ResolvedCombatArt,
   SHIELD_TIERS,
   SkillTreeModel,
+  UPGRADE_SLOT_PREFIX,
   WeaponModel,
   computeDerivedStats,
   formatRuleHookBadges,
+  formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
+  getUpgradeSlotKey,
+  isCombatArtUpgradeNode,
   isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
@@ -47,6 +55,7 @@ export interface SheetRollResult {
   selector: 'app-character-detail',
   standalone: true,
   imports: [
+    FormsModule,
     RouterLink,
     CompendiumIconComponent,
     KeywordTextComponent,
@@ -67,6 +76,7 @@ export class CharacterDetailComponent {
   readonly shieldTiers = SHIELD_TIERS;
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
   readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
+  readonly isCombatArtUpgradeNode = isCombatArtUpgradeNode;
 
   readonly perkPickerOpen = signal(false);
   readonly perkPickerTab = signal<string>('');
@@ -176,9 +186,13 @@ export class CharacterDetailComponent {
 
   async resetRoundAp(id: string): Promise<void> {
     await this.characterStore.updateCharacter(id, (c) => {
-      const nextCooldowns: Record<string, number> = {};
+      const nextCooldowns: Record<string, number | string> = {};
       for (const [key, val] of Object.entries(c.active_cooldowns ?? {})) {
         if (key === '__shield_raised') continue;
+        if (key.startsWith(UPGRADE_SLOT_PREFIX)) {
+          nextCooldowns[key] = val;
+          continue;
+        }
         const remaining = Number(val) - 1;
         if (remaining > 0) {
           nextCooldowns[key] = remaining;
@@ -225,7 +239,7 @@ export class CharacterDetailComponent {
     this.roll2d10(
       'Dodge Reaction',
       stats.dodgeMod,
-      '1 AP spent · Shifts 1 Tile · Flawless (+5) refunds 1 AP'
+      '1 AP spent · Shifts 5 ft · Flawless (+5) refunds 1 AP'
     );
   }
 
@@ -255,20 +269,26 @@ export class CharacterDetailComponent {
 
   async useCombatArt(
     id: string,
-    perk: PerkNodeModel,
+    art: ResolvedCombatArt,
     stats: DerivedCharacterStats
   ): Promise<void> {
     const char = this.character();
-    const apCost = perk.ap_cost ?? 1;
-    if (!char || char.current_ap < apCost || this.getPerkCooldown(char, perk.id) > 0) {
+    const perkId = art.baseNode.id;
+    const apCost = art.apCost;
+    if (
+      !char ||
+      !art.meetsWeaponRequirement ||
+      char.current_ap < apCost ||
+      this.getPerkCooldown(char, perkId) > 0
+    ) {
       return;
     }
 
     await this.characterStore.updateCharacter(id, (c) => {
       if (c.current_ap < apCost) return c;
       const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
-      if ((perk.cooldown_rounds ?? 0) > 0) {
-        nextCooldowns[perk.id] = perk.cooldown_rounds!;
+      if (art.cooldownRounds > 0) {
+        nextCooldowns[perkId] = art.cooldownRounds;
       }
       return {
         ...c,
@@ -277,20 +297,57 @@ export class CharacterDetailComponent {
       };
     });
 
-    const badges = formatRuleHookBadges(perk.rule_hooks);
-    const counter = getCombatTagCounterLabel(perk.combat_tag);
     const detailParts = [`${apCost} AP spent`];
-    if (counter) detailParts.push(counter);
-    if (badges.length > 0) detailParts.push(badges.join(' · '));
+    if (art.appliedUpgrades.length > 0) {
+      detailParts.push(
+        `Upgraded (${art.appliedUpgrades.map((u) => u.name).join(', ')})`
+      );
+    }
+    if (art.bonusFlatDamage !== 0) {
+      detailParts.push(
+        `${stats.flatWeaponDamage + art.bonusFlatDamage} Total Flat DMG`
+      );
+    }
+    if (art.effectBadges.length > 0) {
+      detailParts.push(art.effectBadges.join(' · '));
+    }
 
-    if (perk.combat_tag && perk.combat_tag !== 'None') {
-      this.roll2d10(perk.name, stats.attackRollMod, detailParts.join(' · '));
+    if (
+      art.combatTags.length > 0 ||
+      art.bonusAttackMod !== 0 ||
+      art.bonusFlatDamage !== 0
+    ) {
+      this.roll2d10(
+        art.baseNode.name,
+        stats.attackRollMod + art.bonusAttackMod,
+        detailParts.join(' · ')
+      );
     } else {
       this.notifications.success(
-        `Activated ${perk.name}`,
+        `Activated ${art.baseNode.name}`,
         detailParts.join(' · ')
       );
     }
+  }
+
+  async setArtUpgradeSlot(
+    characterId: string,
+    upgradeNodeId: string,
+    targetArtId: string
+  ): Promise<void> {
+    await this.characterStore.updateCharacter(characterId, (c) => {
+      const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
+      const slotKey = getUpgradeSlotKey(upgradeNodeId);
+      if (targetArtId) {
+        nextCooldowns[slotKey] = targetArtId;
+      } else {
+        delete nextCooldowns[slotKey];
+      }
+      return {
+        ...c,
+        active_cooldowns: nextCooldowns,
+      };
+    });
   }
 
   async clearPerkCooldown(id: string, perkId: string): Promise<void> {
@@ -304,7 +361,9 @@ export class CharacterDetailComponent {
     });
   }
 
-  isShieldRaised(char: { active_cooldowns?: Record<string, number> }): boolean {
+  isShieldRaised(char: {
+    active_cooldowns?: Record<string, number | string>;
+  }): boolean {
     return Boolean(char.active_cooldowns?.['__shield_raised']);
   }
 
@@ -357,7 +416,10 @@ export class CharacterDetailComponent {
     stats: DerivedCharacterStats
   ): number {
     const perkBonus = stats.unlockedPerks.reduce(
-      (sum, p) => sum + Number(p.rule_hooks?.bonus_attack_mod ?? 0),
+      (sum, p) =>
+        p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)
+          ? sum + Number(p.rule_hooks?.bonus_attack_mod ?? 0)
+          : sum,
       0
     );
     return (
@@ -373,7 +435,10 @@ export class CharacterDetailComponent {
     stats: DerivedCharacterStats
   ): number {
     const perkBonus = stats.unlockedPerks.reduce(
-      (sum, p) => sum + Number(p.rule_hooks?.bonus_flat_damage ?? 0),
+      (sum, p) =>
+        p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)
+          ? sum + Number(p.rule_hooks?.bonus_flat_damage ?? 0)
+          : sum,
       0
     );
     return weapon.base_damage + (char.attributes[weapon.gov_attribute] ?? 0) + perkBonus;
@@ -425,8 +490,29 @@ export class CharacterDetailComponent {
     return formatRuleHookBadges(node.rule_hooks);
   }
 
+  getArtUpgradeBadges(node: PerkNodeModel): string[] {
+    return formatArtUpgradeBadges(node.rule_hooks?.__art_upgrade);
+  }
+
+  getNodeWeaponReqLabel(node: PerkNodeModel): string | null {
+    if (node.node_type !== 'combat_art') return null;
+    return formatWeaponRequirementLabel(
+      node.rule_hooks?.__weapon_req,
+      this.characterStore.allWeapons()
+    );
+  }
+
   isStandalone(node: PerkNodeModel): boolean {
     return isStandalonePerkNode(node);
+  }
+
+  getPerkOriginLabel(node: PerkNodeModel): string {
+    if (isStandalonePerkNode(node)) return 'GRANTED';
+    return (
+      this.characterStore
+        .skillTrees()
+        .find((t) => t.id === node.tree_id)?.name ?? 'Skill Tree'
+    );
   }
 
   async toggleCharacterPerk(characterId: string, node: PerkNodeModel): Promise<void> {
@@ -440,24 +526,30 @@ export class CharacterDetailComponent {
       const has = c.unlocked_perk_ids.includes(node.id);
       if (has) {
         const allNodes = this.characterStore.allPerkNodes();
-        const toRemove = new Set<string>([node.id]);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const p of allNodes) {
-            if (p.parent_node_id && toRemove.has(p.parent_node_id) && !toRemove.has(p.id)) {
-              toRemove.add(p.id);
-              changed = true;
-            }
+        const nextUnlocked = pruneUnreachableUnlockedPerks(
+          c.unlocked_perk_ids.filter((id) => id !== node.id),
+          allNodes
+        );
+        const keptSet = new Set(nextUnlocked);
+        const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
+        for (const oldId of c.unlocked_perk_ids) {
+          if (!keptSet.has(oldId)) {
+            delete nextCooldowns[oldId];
+            delete nextCooldowns[getUpgradeSlotKey(oldId)];
           }
         }
-        const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
-        for (const removedId of toRemove) {
-          delete nextCooldowns[removedId];
+        for (const [k, val] of Object.entries(nextCooldowns)) {
+          if (
+            k.startsWith(UPGRADE_SLOT_PREFIX) &&
+            typeof val === 'string' &&
+            !keptSet.has(val)
+          ) {
+            delete nextCooldowns[k];
+          }
         }
         return {
           ...c,
-          unlocked_perk_ids: c.unlocked_perk_ids.filter((id) => !toRemove.has(id)),
+          unlocked_perk_ids: nextUnlocked,
           active_cooldowns: nextCooldowns,
         };
       }

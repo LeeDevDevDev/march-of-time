@@ -76,30 +76,38 @@
             <select
               id="nodeType"
               name="nodeType"
-              [(ngModel)]="nodeForm.node_type"
+              [ngModel]="uiNodeKind()"
+              (ngModelChange)="onUiNodeKindChange($event)"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-semibold"
             >
               <option value="combat_art">Combat Art (Active Ability)</option>
-              <option value="passive_upgrade">Passive Upgrade (Permanent Stat/Rule)</option>
+              <option value="combat_art_upgrade">
+                Combat Art Upgrade (Modifies an Art in Tree)
+              </option>
+              <option value="passive_upgrade">
+                Passive Upgrade (Permanent Stat/Rule)
+              </option>
             </select>
           </div>
 
           @if (nodeForm.tree_id) {
             <div>
               <span class="block text-xs font-bold text-[var(--mot-text)]">
-                Automatic Tree Tier
+                Graph Placement
               </span>
               <div
                 class="mt-1.5 flex h-[40px] items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 font-mono-num text-xs tabular-nums"
               >
                 <span class="font-bold text-[var(--mot-accent-text)]">
-                  Tier {{ getComputedFormTier() }}
+                  {{ selectedParentIds().length === 0 ? 'Starting Node' : 'Connected Node' }}
                 </span>
                 <span class="truncate text-[var(--mot-muted)]">
-                  @if (getSelectedParentName(); as pName) {
-                    Branches from "{{ pName }}"
+                  @if (selectedParentNodes().length === 0) {
+                    No Prerequisite
+                  } @else if (selectedParentNodes().length === 1) {
+                    From "{{ selectedParentNodes()[0].name }}"
                   } @else {
-                    Root Node
+                    {{ selectedParentNodes().length }} Routes ({{ unlockMode() === 'all' ? 'All' : 'Any' }})
                   }
                 </span>
               </div>
@@ -133,23 +141,101 @@
           }
 
           @if (nodeForm.tree_id) {
-            <div class="sm:col-span-2">
-              <label for="nodeParent" class="block text-xs font-bold text-[var(--mot-text)]">
-                Connected Parent Node (Prerequisite)
-              </label>
-              <select
-                id="nodeParent"
-                name="nodeParent"
-                [(ngModel)]="nodeForm.parent_node_id"
-                class="mot-input mt-1.5 px-3.5 py-2 text-sm"
-              >
-                <option [ngValue]="null">None (Tier 1 Root Node)</option>
-                @for (candidate of availableParentNodes(); track candidate.id) {
-                  <option [ngValue]="candidate.id">
-                    Tier {{ candidate.tier }} — {{ candidate.name }} (places at Tier {{ candidate.tier + 1 }})
-                  </option>
+            <div class="sm:col-span-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs font-bold text-[var(--mot-text)]">
+                  Prerequisite Routes
+                </span>
+                @if (selectedParentIds().length > 0) {
+                  <button
+                    type="button"
+                    (click)="clearAllParents()"
+                    class="font-mono-num text-[11px] font-bold text-[var(--mot-muted)] hover:text-[var(--mot-accent-text)]"
+                  >
+                    Clear All (Make Starting Node)
+                  </button>
                 }
-              </select>
+              </div>
+
+              @if (selectedParentNodes().length === 0) {
+                <div class="rounded-lg border border-dashed border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2 text-xs text-[var(--mot-muted)]">
+                  Starting Node — unlocked directly without any prerequisite route. You can also drag route wires on the canvas anytime.
+                </div>
+              } @else {
+                <div class="flex flex-wrap gap-1.5">
+                  @for (pNode of selectedParentNodes(); track pNode.id) {
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] pl-2.5 pr-1.5 py-1 text-xs font-semibold text-[var(--mot-text)]"
+                    >
+                      <span>{{ pNode.name }}</span>
+                      <button
+                        type="button"
+                        (click)="removeSelectedParent(pNode.id)"
+                        class="flex h-4 w-4 items-center justify-center rounded text-[var(--mot-muted)] hover:text-[var(--mot-hp-text)]"
+                        [title]="'Disconnect ' + pNode.name"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  }
+                </div>
+              }
+
+              @if (selectedParentNodes().length >= 2) {
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <span class="text-xs font-semibold text-[var(--mot-muted)]">
+                    When multiple routes lead into this node:
+                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="unlockMode.set('any')"
+                      class="rounded-md border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                      [class.btn-copper]="unlockMode() !== 'all'"
+                      [class.border-[var(--mot-border)]]="unlockMode() === 'all'"
+                      [class.bg-[var(--mot-surface)]]="unlockMode() === 'all'"
+                      [class.text-[var(--mot-muted)]]="unlockMode() === 'all'"
+                    >
+                      Any Route (OR)
+                    </button>
+                    <button
+                      type="button"
+                      (click)="unlockMode.set('all')"
+                      class="rounded-md border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                      [class.badge-jade]="unlockMode() === 'all'"
+                      [class.border-[var(--mot-border)]]="unlockMode() !== 'all'"
+                      [class.bg-[var(--mot-surface)]]="unlockMode() !== 'all'"
+                      [class.text-[var(--mot-muted)]]="unlockMode() !== 'all'"
+                    >
+                      All Routes (AND)
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (availableParentNodes().length > 0) {
+                <div class="flex items-center gap-2 pt-0.5">
+                  <select
+                    name="addParentPicker"
+                    [ngModel]="addParentPickerId()"
+                    (ngModelChange)="addParentPickerId.set($event)"
+                    class="mot-input min-w-0 flex-1 px-3 py-1.5 text-xs font-semibold"
+                  >
+                    <option value="">+ Connect prerequisite route from...</option>
+                    @for (candidate of availableParentNodes(); track candidate.id) {
+                      <option [value]="candidate.id">{{ candidate.name }}</option>
+                    }
+                  </select>
+                  <button
+                    type="button"
+                    [disabled]="!addParentPickerId()"
+                    (click)="addSelectedParentFromPicker()"
+                    class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-bold text-[var(--mot-accent-text)] hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
+                  >
+                    Connect
+                  </button>
+                </div>
+              }
             </div>
           }
 
@@ -160,14 +246,14 @@
               [value]="nodeForm.description"
               (valueChange)="nodeForm.description = $event"
               (requestCreateKeyword)="requestCreateKeyword.emit($event)"
-              placeholder="Type [ to search keywords (e.g. [Crushing], [Parry], [Sundered])..."
+              placeholder="Type [ to search keywords (e.g. [Crushing], [Piercing], [Sundered])..."
             />
           </div>
 
           <div class="sm:col-span-2">
             <app-icon-picker
               label="Node Medallion Icon &amp; Color"
-              [shape]="nodeForm.node_type === 'combat_art' ? 'square' : 'circle'"
+              [shape]="uiNodeKind() === 'passive_upgrade' ? 'circle' : 'square'"
               [icon]="nodeForm.icon"
               (iconChange)="nodeForm.icon = $event"
               [color]="nodeForm.icon_color"
@@ -178,7 +264,7 @@
           </div>
         </div>
 
-        @if (nodeForm.node_type === 'combat_art') {
+        @if (uiNodeKind() === 'combat_art') {
           <div
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3"
           >
@@ -194,7 +280,7 @@
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label class="block text-xs font-bold text-[var(--mot-text)]">
-                  AP Cost (1–4)
+                  AP Cost (0–4)
                 </label>
                 <input
                   type="number"
@@ -226,7 +312,8 @@
                 </label>
                 <select
                   name="combatTag"
-                  [(ngModel)]="nodeForm.combat_tag"
+                  [ngModel]="nodeForm.combat_tag"
+                  (ngModelChange)="onCombatTagChange($event)"
                   class="mot-input mt-1 px-3 py-2 text-sm font-bold"
                 >
                   <option value="None">None</option>
@@ -234,6 +321,403 @@
                   <option value="Piercing">Piercing (No Block)</option>
                   <option value="Sweeping">Sweeping (No Dodge)</option>
                 </select>
+              </div>
+            </div>
+
+            <div class="space-y-3 border-t border-[var(--mot-border)] pt-3.5">
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h4 class="font-display text-xs font-bold text-[var(--mot-text)]">
+                    Weapon &amp; Equipment Prerequisite (Optional)
+                  </h4>
+                  <p class="text-[11px] text-[var(--mot-muted)]">
+                    Restrict which active weapon or shield is required to execute this Combat Art. Leave unselected if any weapon can use it.
+                  </p>
+                </div>
+
+                @if (currentWeaponRequirementLabel(); as reqLabel) {
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="badge-warn rounded-md border px-2 py-0.5 font-mono-num text-[11px] font-bold"
+                    >
+                      {{ reqLabel }}
+                    </span>
+                    <button
+                      type="button"
+                      (click)="clearWeaponReq()"
+                      class="font-mono-num text-[11px] font-bold text-[var(--mot-muted)] hover:text-[var(--mot-accent-text)]"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                } @else {
+                  <span
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-semibold text-[var(--mot-muted)]"
+                  >
+                    Any Weapon
+                  </span>
+                }
+              </div>
+
+              <div class="space-y-1.5">
+                <span class="block text-[11px] font-bold text-[var(--mot-text)]">
+                  Allowed Weapon Category (select 1 or more, or leave blank for any):
+                </span>
+                <div class="flex flex-wrap gap-1.5">
+                  @for (cat of availableWeaponCategories(); track cat) {
+                    <button
+                      type="button"
+                      (click)="toggleReqCategory(cat)"
+                      class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                      [class.btn-copper]="reqCategories().includes(cat)"
+                      [class.border-[var(--mot-border)]]="!reqCategories().includes(cat)"
+                      [class.bg-[var(--mot-surface)]]="!reqCategories().includes(cat)"
+                      [class.text-[var(--mot-muted)]]="!reqCategories().includes(cat)"
+                    >
+                      {{ reqCategories().includes(cat) ? '✓ ' : '' }}{{ cat }}
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <div class="space-y-1.5">
+                <span class="block text-[11px] font-bold text-[var(--mot-text)]">
+                  Wielding &amp; Property Filters (Optional):
+                </span>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    (click)="toggleReqHandedness('one_handed')"
+                    class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                    [class.btn-copper]="reqHandedness() === 'one_handed'"
+                    [class.border-[var(--mot-border)]]="reqHandedness() !== 'one_handed'"
+                    [class.bg-[var(--mot-surface)]]="reqHandedness() !== 'one_handed'"
+                    [class.text-[var(--mot-muted)]]="reqHandedness() !== 'one_handed'"
+                  >
+                    {{ reqHandedness() === 'one_handed' ? '✓ ' : '' }}One-Handed
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="toggleReqHandedness('two_handed')"
+                    class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                    [class.btn-copper]="reqHandedness() === 'two_handed'"
+                    [class.border-[var(--mot-border)]]="reqHandedness() !== 'two_handed'"
+                    [class.bg-[var(--mot-surface)]]="reqHandedness() !== 'two_handed'"
+                    [class.text-[var(--mot-muted)]]="reqHandedness() !== 'two_handed'"
+                  >
+                    {{ reqHandedness() === 'two_handed' ? '✓ ' : '' }}Two-Handed
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="reqGuardWeapon.set(!reqGuardWeapon())"
+                    class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                    [class.badge-jade]="reqGuardWeapon()"
+                    [class.border-[var(--mot-border)]]="!reqGuardWeapon()"
+                    [class.bg-[var(--mot-surface)]]="!reqGuardWeapon()"
+                    [class.text-[var(--mot-muted)]]="!reqGuardWeapon()"
+                  >
+                    {{ reqGuardWeapon() ? '✓ ' : '' }}Guard Weapon
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="reqThrown.set(!reqThrown())"
+                    class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                    [class.badge-piercing]="reqThrown()"
+                    [class.border-[var(--mot-border)]]="!reqThrown()"
+                    [class.bg-[var(--mot-surface)]]="!reqThrown()"
+                    [class.text-[var(--mot-muted)]]="!reqThrown()"
+                  >
+                    {{ reqThrown() ? '✓ ' : '' }}Thrown Weapon
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="reqShield.set(!reqShield())"
+                    class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
+                    [class.badge-jade]="reqShield()"
+                    [class.border-[var(--mot-border)]]="!reqShield()"
+                    [class.bg-[var(--mot-surface)]]="!reqShield()"
+                    [class.text-[var(--mot-muted)]]="!reqShield()"
+                  >
+                    {{ reqShield() ? '✓ ' : '' }}Equipped Shield
+                  </button>
+                </div>
+              </div>
+
+              @if (compendiumStore.weapons().length > 0) {
+                <div class="space-y-1.5">
+                  <span class="block text-[11px] font-bold text-[var(--mot-text)]">
+                    Specific Armory Weapon(s) (Optional — only if restricted to exact weapons):
+                  </span>
+
+                  @if (selectedReqWeapons().length > 0) {
+                    <div class="flex flex-wrap gap-1.5">
+                      @for (wep of selectedReqWeapons(); track wep.id) {
+                        <span
+                          class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] py-1 pl-2.5 pr-1.5 text-xs font-semibold text-[var(--mot-text)]"
+                        >
+                          <span>{{ wep.name }}</span>
+                          <span class="font-mono-num text-[11px] text-[var(--mot-muted)]">({{ wep.category }})</span>
+                          <button
+                            type="button"
+                            (click)="removeReqSpecificWeapon(wep.id)"
+                            class="flex h-4 w-4 items-center justify-center rounded text-[var(--mot-muted)] hover:text-[var(--mot-hp-text)]"
+                            [title]="'Remove ' + wep.name"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      }
+                    </div>
+                  }
+
+                  @if (availableSpecificWeapons().length > 0) {
+                    <div class="flex items-center gap-2 pt-0.5">
+                      <select
+                        name="addSpecificWeaponPicker"
+                        [ngModel]="addSpecificWeaponId()"
+                        (ngModelChange)="addSpecificWeaponId.set($event)"
+                        class="mot-input min-w-0 flex-1 px-3 py-1.5 text-xs font-semibold"
+                      >
+                        <option value="">+ Restrict to specific Armory weapon...</option>
+                        @for (wep of availableSpecificWeapons(); track wep.id) {
+                          <option [value]="wep.id">{{ wep.name }} ({{ wep.category }})</option>
+                        }
+                      </select>
+                      <button
+                        type="button"
+                        [disabled]="!addSpecificWeaponId()"
+                        (click)="addReqSpecificWeapon()"
+                        class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-bold text-[var(--mot-accent-text)] hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        @if (uiNodeKind() === 'combat_art_upgrade') {
+          <div
+            class="rounded-xl border border-[#F59E0B]/50 bg-[var(--mot-well)] p-4 space-y-4"
+          >
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="font-display text-sm font-bold text-[var(--mot-text)]">
+                  Combat Art Upgrade Configuration
+                </h3>
+                <span
+                  class="rounded border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-2 py-0.5 font-mono-num text-[11px] font-bold text-[#F59E0B]"
+                >
+                  Art Modifier
+                </span>
+              </div>
+              <p class="mt-0.5 text-xs text-[var(--mot-muted)]">
+                Choose which Combat Art receives this upgrade — independent of which route connects here — and stack new tags, AP/Cooldown changes, and bonus effects onto it.
+              </p>
+            </div>
+
+            @if (nodeForm.tree_id) {
+              <div class="space-y-2.5">
+                <span class="block text-xs font-bold text-[var(--mot-text)]">
+                  Which Combat Art Does This Node Upgrade?
+                </span>
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    (click)="upgradeTargetMode.set('specific_arts')"
+                    class="rounded-xl border px-3.5 py-2.5 text-left transition-all"
+                    [class.border-[#F59E0B]]="upgradeTargetMode() === 'specific_arts'"
+                    [class.bg-[#122220]]="upgradeTargetMode() === 'specific_arts'"
+                    [class.text-white]="upgradeTargetMode() === 'specific_arts'"
+                    [class.border-[var(--mot-border)]]="upgradeTargetMode() !== 'specific_arts'"
+                    [class.bg-[var(--mot-surface)]]="upgradeTargetMode() !== 'specific_arts'"
+                    [class.text-[var(--mot-text)]]="upgradeTargetMode() !== 'specific_arts'"
+                  >
+                    <div class="font-display text-xs font-bold">
+                      Pin Specific Art(s) in Tree
+                    </div>
+                    <div
+                      class="mt-0.5 text-[11px]"
+                      [class.text-[#8AB0AB]]="upgradeTargetMode() === 'specific_arts'"
+                      [class.text-[var(--mot-muted)]]="upgradeTargetMode() !== 'specific_arts'"
+                    >
+                      Upgrades 1+ chosen Combat Arts anywhere in this tree (even 3–4 nodes back).
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="upgradeTargetMode.set('player_choice_tree')"
+                    class="rounded-xl border px-3.5 py-2.5 text-left transition-all"
+                    [class.border-[#F59E0B]]="upgradeTargetMode() === 'player_choice_tree'"
+                    [class.bg-[#122220]]="upgradeTargetMode() === 'player_choice_tree'"
+                    [class.text-white]="upgradeTargetMode() === 'player_choice_tree'"
+                    [class.border-[var(--mot-border)]]="upgradeTargetMode() !== 'player_choice_tree'"
+                    [class.bg-[var(--mot-surface)]]="upgradeTargetMode() !== 'player_choice_tree'"
+                    [class.text-[var(--mot-text)]]="upgradeTargetMode() !== 'player_choice_tree'"
+                  >
+                    <div class="font-display text-xs font-bold">
+                      Player Chooses 1 Art in Tree
+                    </div>
+                    <div
+                      class="mt-0.5 text-[11px]"
+                      [class.text-[#8AB0AB]]="upgradeTargetMode() === 'player_choice_tree'"
+                      [class.text-[var(--mot-muted)]]="upgradeTargetMode() !== 'player_choice_tree'"
+                    >
+                      Player slots which unlocked Combat Art in this tree gets modified.
+                    </div>
+                  </button>
+                </div>
+
+                @if (upgradeTargetMode() === 'specific_arts') {
+                  @if (availableTreeCombatArts().length === 0) {
+                    <div class="rounded-lg border border-dashed border-[#F59E0B]/50 bg-[var(--mot-surface)] px-3.5 py-3 text-xs text-[var(--mot-muted)]">
+                      No Combat Arts exist in this Skill Tree yet. Switch to <strong class="text-[var(--mot-text)]">Player Chooses 1 Art in Tree</strong> or create a Combat Art node first.
+                    </div>
+                  } @else {
+                    <div class="space-y-1.5 pt-1">
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-[var(--mot-muted)]">
+                          Select 1 or more Combat Arts in this tree:
+                        </span>
+                        <span class="font-mono-num font-bold text-[#F59E0B]">
+                          {{ upgradeTargetArtIds().length }} Selected
+                        </span>
+                      </div>
+
+                      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        @for (art of availableTreeCombatArts(); track art.id) {
+                          <button
+                            type="button"
+                            (click)="toggleUpgradeTargetArt(art.id)"
+                            class="flex items-center justify-between gap-2.5 rounded-xl border p-2.5 text-left transition-all"
+                            [class.border-[#F59E0B]]="upgradeTargetArtIds().includes(art.id)"
+                            [class.bg-[#122220]]="upgradeTargetArtIds().includes(art.id)"
+                            [class.text-white]="upgradeTargetArtIds().includes(art.id)"
+                            [class.border-[var(--mot-border)]]="!upgradeTargetArtIds().includes(art.id)"
+                            [class.bg-[var(--mot-surface)]]="!upgradeTargetArtIds().includes(art.id)"
+                            [class.text-[var(--mot-text)]]="!upgradeTargetArtIds().includes(art.id)"
+                          >
+                            <div class="flex min-w-0 items-center gap-2.5">
+                              <div
+                                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-[#0D1615]"
+                                [style.border-color]="getNodeVisuals(art).color"
+                              >
+                                <app-compendium-icon
+                                  [icon]="getNodeVisuals(art).icon"
+                                  [color]="getNodeVisuals(art).color"
+                                  [tintCustom]="getNodeVisuals(art).tintCustom"
+                                  sizeClass="h-4 w-4"
+                                />
+                              </div>
+                              <div class="min-w-0">
+                                <div class="truncate font-display text-xs font-bold">
+                                  {{ art.name }}
+                                </div>
+                                <div
+                                  class="font-mono-num text-[11px] tabular-nums"
+                                  [class.text-[#8AB0AB]]="upgradeTargetArtIds().includes(art.id)"
+                                  [class.text-[var(--mot-muted)]]="!upgradeTargetArtIds().includes(art.id)"
+                                >
+                                  {{ art.ap_cost ?? 1 }} AP · {{ art.cooldown_rounds ?? 0 }}R CD{{ art.combat_tag && art.combat_tag !== 'None' ? ' · ' + art.combat_tag : '' }}
+                                </div>
+                              </div>
+                            </div>
+
+                            <span
+                              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border font-mono-num text-[11px] font-bold"
+                              [class.border-[#F59E0B]]="upgradeTargetArtIds().includes(art.id)"
+                              [class.bg-[#F59E0B]]="upgradeTargetArtIds().includes(art.id)"
+                              [class.text-[#0D1615]]="upgradeTargetArtIds().includes(art.id)"
+                              [class.border-[var(--mot-border)]]="!upgradeTargetArtIds().includes(art.id)"
+                            >
+                              {{ upgradeTargetArtIds().includes(art.id) ? '✓' : '' }}
+                            </span>
+                          </button>
+                        }
+                      </div>
+
+                      @if (!isUpgradeConfigValid()) {
+                        <p class="font-mono-num text-xs font-semibold text-[#F59E0B]">
+                          Select at least 1 target Combat Art above, or switch to "Player Chooses 1 Art in Tree".
+                        </p>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+            } @else {
+              <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3.5 py-2.5 text-xs text-[var(--mot-muted)]">
+                <strong class="text-[var(--mot-text)]">Standalone Upgrade:</strong>
+                When granted by the DM, the player can slot this upgrade onto any 1 unlocked Combat Art on their Character Sheet.
+              </div>
+            }
+
+            <div class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+              <div>
+                <span class="block text-xs font-bold text-[var(--mot-text)]">
+                  Add Defense Triangle Tag(s) (Stacks with Existing Tag)
+                </span>
+                <span class="text-[11px] text-[var(--mot-muted)]">
+                  If the base Combat Art already has a tag (e.g. Crushing), adding Piercing gives it both tags simultaneously.
+                </span>
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                @for (tag of upgradeableTags; track tag) {
+                  <button
+                    type="button"
+                    (click)="toggleUpgradeCombatTag(tag)"
+                    [class]="
+                      upgradeCombatTags().includes(tag)
+                        ? 'rounded-lg border px-3 py-1.5 font-mono-num text-xs font-bold transition-all ring-2 ring-offset-1 ring-offset-[var(--mot-well)] ' + getCombatTagBadgeClass(tag)
+                        : 'rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 font-mono-num text-xs font-semibold text-[var(--mot-muted)] transition-all hover:border-[#F59E0B] hover:text-[var(--mot-text)]'
+                    "
+                  >
+                    {{ upgradeCombatTags().includes(tag) ? '✓ + ' : '+ ' }}{{ tag }} ({{ getCombatTagCounterLabel(tag) }})
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 border-t border-[var(--mot-border)] pt-3 sm:grid-cols-2">
+              <div>
+                <label for="upgradeApDelta" class="block text-xs font-bold text-[var(--mot-text)]">
+                  AP Cost Modifier (e.g. −1 lowers AP)
+                </label>
+                <input
+                  id="upgradeApDelta"
+                  type="number"
+                  name="upgradeApDelta"
+                  min="-4"
+                  max="3"
+                  [ngModel]="upgradeApDelta()"
+                  (ngModelChange)="upgradeApDelta.set(+$event || 0)"
+                  class="mot-input mt-1 px-3 py-2 font-mono-num text-sm font-bold"
+                />
+              </div>
+
+              <div>
+                <label for="upgradeCooldownDelta" class="block text-xs font-bold text-[var(--mot-text)]">
+                  Cooldown Modifier in Rounds (e.g. −1 lowers CD)
+                </label>
+                <input
+                  id="upgradeCooldownDelta"
+                  type="number"
+                  name="upgradeCooldownDelta"
+                  min="-6"
+                  max="4"
+                  [ngModel]="upgradeCooldownDelta()"
+                  (ngModelChange)="upgradeCooldownDelta.set(+$event || 0)"
+                  class="mot-input mt-1 px-3 py-2 font-mono-num text-sm font-bold"
+                />
               </div>
             </div>
           </div>
@@ -245,17 +729,25 @@
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 class="font-display text-sm font-bold text-[var(--mot-text)]">
-                Composable Rule Hooks (Automated Sheet &amp; Combat Effects)
+                @if (uiNodeKind() === 'combat_art_upgrade') {
+                  Bonus Damage &amp; On-Hit Modifiers Added to Target Art
+                } @else {
+                  Composable Rule Hooks (Automated Sheet &amp; Combat Effects)
+                }
               </h3>
               <p class="text-xs text-[var(--mot-muted)]">
-                Attach only the mechanical modifiers this node uses.
+                @if (uiNodeKind() === 'combat_art_upgrade') {
+                  Attach extra damage, attack roll bonuses, SP damage, Armor DR pierce, Push/Shift (ft), or Statuses onto the upgraded Combat Art.
+                } @else {
+                  Attach only the mechanical modifiers this node uses.
+                }
               </p>
             </div>
 
             <button
               type="button"
               (click)="addRuleHookRow()"
-              [disabled]="hookRows().length >= ruleHookDefinitions.length"
+              [disabled]="hookRows().length >= activeRuleHookPool().length && uiNodeKind() !== 'combat_art_upgrade'"
               class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-bold text-[var(--mot-accent-text)] transition-colors hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
             >
               + Add Rule Hook
@@ -266,8 +758,12 @@
             <div
               class="rounded-lg border border-dashed border-[var(--mot-border)] bg-[var(--mot-surface)] px-4 py-4 text-center text-xs text-[var(--mot-muted)]"
             >
-              No custom stat or on-hit modifiers attached yet. Click
-              <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to attach automatic bonuses.
+              @if (uiNodeKind() === 'combat_art_upgrade') {
+                No extra damage or tactical hooks attached yet. Click <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to add flat damage, Push/Shift (ft), or Combat Statuses.
+              } @else {
+                No custom stat or on-hit modifiers attached yet. Click
+                <strong class="text-[var(--mot-text)]">+ Add Rule Hook</strong> to attach automatic bonuses.
+              }
             </div>
           } @else {
             <div class="space-y-2.5">
@@ -282,16 +778,22 @@
                       (ngModelChange)="updateRowKey(idx, $event)"
                       class="mot-input px-3 py-1.5 text-xs font-bold"
                     >
-                      <optgroup label="Sheet Stat Bonuses (Passive Math)">
-                        @for (def of sheetStatHookDefs; track def.key) {
-                          <option [value]="def.key">{{ def.label }}</option>
+                      @if (uiNodeKind() === 'combat_art_upgrade') {
+                        @for (def of artUpgradeHookDefs; track def.key) {
+                          <option [value]="def.key">{{ getUpgradeHookLabel(def) }}</option>
                         }
-                      </optgroup>
-                      <optgroup label="Combat Art Effects (On-Hit / Tactical)">
-                        @for (def of combatEffectHookDefs; track def.key) {
-                          <option [value]="def.key">{{ def.label }}</option>
-                        }
-                      </optgroup>
+                      } @else {
+                        <optgroup label="Sheet Stat Bonuses (Passive Math)">
+                          @for (def of sheetStatHookDefs; track def.key) {
+                            <option [value]="def.key">{{ def.label }}</option>
+                          }
+                        </optgroup>
+                        <optgroup label="Combat Art Effects (On-Hit / Tactical)">
+                          @for (def of combatEffectHookDefs; track def.key) {
+                            <option [value]="def.key">{{ def.label }}</option>
+                          }
+                        </optgroup>
+                      }
                     </select>
                   </div>
 
@@ -312,6 +814,7 @@
                       <input
                         type="number"
                         [name]="'hookNum_' + idx"
+                        [step]="getHookDef(row.key)?.step ?? 1"
                         [ngModel]="row.numValue"
                         (ngModelChange)="updateRowNum(idx, $event)"
                         class="mot-input px-3 py-1.5 font-mono-num text-xs font-bold"
@@ -357,7 +860,7 @@
           </button>
           <button
             type="submit"
-            [disabled]="compendiumStore.isLoading()"
+            [disabled]="compendiumStore.isLoading() || !isUpgradeConfigValid()"
             class="btn-copper inline-flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
           >
             @if (compendiumStore.isLoading()) {

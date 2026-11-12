@@ -1,5 +1,4 @@
 import { Component, HostListener, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import {
   Router,
   RouterLink,
@@ -7,7 +6,6 @@ import {
   RouterOutlet,
 } from '@angular/router';
 import { AuthStore } from './core/auth/auth.store';
-import { NotificationStore } from './core/notifications/notification.store';
 import { ThemeStore } from './core/theme/theme.store';
 import { KeywordTooltipOverlayComponent } from './shared/keyword-text/keyword-tooltip-overlay.component';
 import { KeywordTooltipService } from './shared/keyword-text/keyword-tooltip.service';
@@ -20,7 +18,6 @@ import { ToastViewportComponent } from './shared/notifications/toast-viewport.co
     RouterOutlet,
     RouterLink,
     RouterLinkActive,
-    DatePipe,
     ToastViewportComponent,
     KeywordTooltipOverlayComponent,
   ],
@@ -30,7 +27,6 @@ import { ToastViewportComponent } from './shared/notifications/toast-viewport.co
 export class App {
   readonly authStore = inject(AuthStore);
   readonly themeStore = inject(ThemeStore);
-  readonly notificationStore = inject(NotificationStore);
   private readonly keywordTooltip = inject(KeywordTooltipService);
   private readonly router = inject(Router);
 
@@ -38,14 +34,7 @@ export class App {
 
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
-    this.notificationStore.closeDrawer();
     this.userMenuOpen.update((open) => !open);
-  }
-
-  toggleNotifications(event: MouseEvent): void {
-    event.stopPropagation();
-    this.userMenuOpen.set(false);
-    this.notificationStore.toggleDrawer();
   }
 
   closeUserMenu(): void {
@@ -71,7 +60,6 @@ export class App {
     if (this.userMenuOpen()) {
       this.userMenuOpen.set(false);
     }
-    this.notificationStore.closeDrawer();
   }
 
   @HostListener('document:keydown.escape')
@@ -79,7 +67,6 @@ export class App {
     if (this.userMenuOpen()) {
       this.userMenuOpen.set(false);
     }
-    this.notificationStore.closeDrawer();
     this.keywordTooltip.hideImmediately();
   }
 }

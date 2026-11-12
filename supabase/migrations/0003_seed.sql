@@ -62,7 +62,7 @@ values
     1,
     4,
     'Quick-Draw',
-    'Can be thrown (4 tiles) without Aim; deals double damage vs targets at 0 SP.',
+    'Can be thrown (20 ft) without Aim; deals double damage vs targets at 0 SP.',
     '{"zero_sp_damage_multiplier": 2, "free_throw_range": 4}'::jsonb,
     true,
     true
@@ -112,8 +112,8 @@ values
     4,
     2,
     null,
-    'Reach 2 Tiles',
-    'Attack from 2 tiles away; prevents enemy flanking unless adjacent.',
+    'Reach 10 ft',
+    'Attack from 10 ft away; prevents enemy flanking unless adjacent.',
     '{"reach_tiles": 2, "prevent_flank_unless_adjacent": true}'::jsonb,
     true,
     true
@@ -144,7 +144,7 @@ values
   ('Piercing', 'Defense Triangle Tag', 'Needle-point thrust that bypasses shields and ignores [Raise Shield] ([Shield Block]). The defender must declare [Parry] or [Dodge].', true),
   ('Sweeping', 'Defense Triangle Tag', 'Wide horizontal arc that covers adjacent escape lanes and cannot be Dodged. The defender must declare [Parry] or rely on [Raise Shield] ([Shield Block]).', true),
   ('Parry', 'Active Defense', 'Costs 1 AP Reaction before the attack roll (2d10 + Technique + Parry). Beats the attack to negate all damage; a Buckler enables Martial Parry to deal Flawless Counter (2 + Parry Mod [SP] damage) on +5 or more.', true),
-  ('Dodge', 'Active Defense', 'Costs 1 AP Reaction before the attack roll (2d10 + Agility + Dodge) and shifts you 1 Tile. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent. Disabled by Heavy Armor or a Heavy/Tower Shield.', true),
+  ('Dodge', 'Active Defense', 'Costs 1 AP Reaction before the attack roll (2d10 + Agility + Dodge) and shifts you 5 ft. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent. Disabled by Heavy Armor or a Heavy/Tower Shield.', true),
   ('Raise Shield', 'Active Defense', '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn.', true),
   ('Shield Block', 'Active Defense', 'Active while [Raise Shield] / [Guard] (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, Weapon [Guard] Base 2; no roll required, remaining damage goes to [SP]).', true),
   ('Two-Handed', 'Core Mechanic', 'Requires both hands to wield. You cannot use an off-hand Shield while a Two-Handed weapon is active (any equipped shield is stowed).', true),

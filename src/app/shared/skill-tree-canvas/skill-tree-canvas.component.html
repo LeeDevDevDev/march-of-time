@@ -2,20 +2,18 @@
   class="flex flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-[#EBF5F3] lg:h-[75vh] lg:min-h-[680px] lg:flex-row"
 >
   <div
+    #canvasViewport
     class="mot-canvas-grid relative h-[580px] flex-1 select-none overflow-hidden border-b border-[#243B37] bg-[#0D1615] text-[#EBF5F3] lg:h-full lg:border-b-0 lg:border-r"
-    [class.cursor-grab]="!isDragging()"
-    [class.cursor-grabbing]="isDragging()"
+    [class.cursor-grab]="!isPanning() && !connectingFromNodeId()"
+    [class.cursor-grabbing]="isPanning()"
+    [class.cursor-crosshair]="!!connectingFromNodeId()"
     (pointerdown)="onCanvasPointerDown($event)"
-    (pointermove)="onCanvasPointerMove($event)"
-    (pointerup)="onCanvasPointerUp()"
-    (pointercancel)="onCanvasPointerUp()"
-    (mouseleave)="onCanvasPointerUp()"
     (wheel)="onCanvasWheel($event)"
   >
     <div
-      class="pointer-events-none absolute left-4 top-4 z-20 flex flex-col gap-1 rounded-xl border border-[#243B37] bg-[#122220] px-3.5 py-2"
+      class="pointer-events-none absolute left-4 top-4 z-20 flex flex-col gap-1 rounded-xl border border-[#243B37] bg-[#122220]/95 px-3.5 py-2"
     >
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="font-display text-sm font-bold text-white">
           {{ tree.name }}
         </span>
@@ -24,10 +22,17 @@
         >
           {{ treeNodes().length }} {{ treeNodes().length === 1 ? 'Node' : 'Nodes' }}
         </span>
+        @if (routeCurves().length > 0) {
+          <span
+            class="rounded bg-[#0D1615] px-2 py-0.5 font-mono-num text-xs font-bold text-[#8AB0AB] tabular-nums"
+          >
+            {{ routeCurves().length }} {{ routeCurves().length === 1 ? 'Route' : 'Routes' }}
+          </span>
+        }
       </div>
       <span class="text-xs text-[#8AB0AB]">
         @if (mode === 'admin') {
-          Click + on any node to branch · Drag node onto another to re-wire · Scroll to zoom
+          Drag nodes to arrange · Drag bottom point ● to connect routes · Click + to branch
         } @else {
           Drag background to pan · Scroll to zoom · Click any node icon to inspect
         }
@@ -35,7 +40,7 @@
     </div>
 
     <div
-      class="absolute right-4 top-4 z-20 flex items-center gap-1 rounded-xl border border-[#243B37] bg-[#122220] p-1"
+      class="absolute right-4 top-4 z-20 flex flex-wrap items-center gap-1 rounded-xl border border-[#243B37] bg-[#122220]/95 p-1"
       (pointerdown)="$event.stopPropagation()"
     >
       <button
@@ -57,47 +62,89 @@
       >
         +
       </button>
+
+      @if (mode === 'admin' && positionedNodes().length > 1) {
+        <button
+          type="button"
+          (click)="autoArrangeGraph()"
+          class="ml-1 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-[#38B29A]"
+          title="Snap all nodes into clean balanced layers"
+        >
+          Auto-Arrange
+        </button>
+      }
+
+      @if (mode === 'admin' && positionedNodes().length > 0) {
+        <button
+          type="button"
+          (click)="addRootNode.emit()"
+          class="rounded-lg border border-[#C4491A]/80 bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#FF8C5A] hover:bg-[#C4491A] hover:text-white"
+          title="Create a new Starting Node"
+        >
+          + Starting Node
+        </button>
+      }
+
       <button
         type="button"
         (click)="resetCamera()"
-        class="ml-1 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+        class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
       >
         Recenter
       </button>
     </div>
 
-    @if (mode === 'admin' && draggedNode() && canDropDraggedOn(null)) {
+    @if (mode === 'admin' && liveConnectionPreview(); as preview) {
       <div
-        class="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-xl border-2 border-dashed px-5 py-2.5 font-mono-num text-xs font-bold transition-all"
-        [class.border-[#38B29A]]="dragOverTargetId() === '__ROOT__'"
-        [class.bg-[#1D5B4E]]="dragOverTargetId() === '__ROOT__'"
-        [class.text-white]="dragOverTargetId() === '__ROOT__'"
-        [class.border-[#C4491A]]="dragOverTargetId() !== '__ROOT__'"
-        [class.bg-[#122220]]="dragOverTargetId() !== '__ROOT__'"
-        [class.text-[#FF8C5A]]="dragOverTargetId() !== '__ROOT__'"
-        (pointerdown)="$event.stopPropagation()"
-        (dragover)="onRootZoneDragOver($event)"
-        (dragleave)="onRootZoneDragLeave()"
-        (drop)="onRootZoneDrop($event)"
+        class="pointer-events-none absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-xl border px-4 py-2 font-mono-num text-xs font-bold shadow-lg transition-colors"
+        [class.border-[#38B29A]]="preview.isValidTarget"
+        [class.bg-[#11312B]]="preview.isValidTarget"
+        [class.text-white]="preview.isValidTarget"
+        [class.border-[#F26464]]="preview.isCycleBlocked"
+        [class.bg-[#311416]]="preview.isCycleBlocked"
+        [class.text-[#FCA5A5]]="preview.isCycleBlocked"
+        [class.border-[#C4491A]]="!preview.isValidTarget && !preview.isCycleBlocked"
+        [class.bg-[#122220]]="!preview.isValidTarget && !preview.isCycleBlocked"
+        [class.text-[#FF8C5A]]="!preview.isValidTarget && !preview.isCycleBlocked"
       >
-        Drop here to make "{{ draggedNode()!.name }}" a Tier 1 Root Node
+        @if (preview.targetName && preview.isValidTarget) {
+          Release to connect route into "{{ preview.targetName }}"
+        } @else if (preview.targetName && preview.isCycleBlocked) {
+          Cannot connect into "{{ preview.targetName }}" (would create a loop)
+        } @else if (preview.targetName) {
+          Route to "{{ preview.targetName }}" is already connected
+        } @else {
+          Drag onto any node to connect a route · Press Esc to cancel
+        }
       </div>
     }
 
     <div
-      class="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-[#243B37] bg-[#122220] px-3.5 py-2 text-xs text-[#8AB0AB]"
+      class="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-[#243B37] bg-[#122220]/95 px-3.5 py-2 text-xs text-[#8AB0AB]"
     >
       <span class="flex items-center gap-1.5">
         <span class="h-3 w-3 rounded bg-[#C4491A]"></span>
         <strong class="text-white">Combat Art</strong>
       </span>
       <span class="flex items-center gap-1.5">
+        <span class="h-3 w-3 rounded border border-[#F59E0B] bg-[#0D1615]"></span>
+        <strong class="text-white">Art Upgrade</strong>
+      </span>
+      <span class="flex items-center gap-1.5">
         <span class="h-3 w-3 rounded-full border border-[#38B29A] bg-[#0D1615]"></span>
         <strong class="text-white">Passive</strong>
       </span>
+      @if (mode === 'admin') {
+        <span class="flex items-center gap-1.5 border-l border-[#243B37] pl-3">
+          <span class="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[#FF8C5A] bg-[#0D1615]">
+            <span class="h-1.5 w-1.5 rounded-full bg-[#FF8C5A]"></span>
+          </span>
+          <span>Drag to Wire</span>
+        </span>
+      }
     </div>
 
-    @if (branches().length === 0) {
+    @if (positionedNodes().length === 0) {
       <div class="flex h-full items-center justify-center p-6">
         <div
           class="max-w-md rounded-2xl border border-dashed border-[#243B37] bg-[#122220]/95 p-6 text-center"
@@ -107,7 +154,7 @@
             Start Building {{ tree.name }}
           </h3>
           <p class="mt-1 text-xs text-[#8AB0AB]">
-            Create your first Tier 1 root node, then press <strong class="text-white">+</strong> on any node to branch deeper or add more Tier 1 roots alongside it.
+            Create a starting node, then press <strong class="text-white">+</strong> below any node to branch or drag from its route point <strong class="text-[#FF8C5A]">●</strong> to connect into other nodes.
           </p>
           @if (mode === 'admin') {
             <div class="mt-4 flex flex-wrap items-center justify-center gap-2.5">
@@ -116,7 +163,7 @@
                 (click)="addRootNode.emit()"
                 class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
               >
-                + Create Tier 1 Node
+                + Create Starting Node
               </button>
               @if (hasAttachableAbilities()) {
                 <button
@@ -133,213 +180,314 @@
       </div>
     } @else {
       <div
-        class="flex h-full w-full items-start justify-center pt-28 transition-transform duration-75 ease-out"
+        class="pointer-events-none absolute left-0 top-0 h-0 w-0"
         [style.transform]="
           'translate3d(' + panX() + 'px, ' + panY() + 'px, 0) scale(' + zoom() + ')'
         "
-        style="transform-origin: center top;"
+        style="transform-origin: 0 0;"
       >
-        <div class="flex items-start gap-14">
-          @for (rootBranch of branches(); track rootBranch.node.id) {
-            <ng-container
-              *ngTemplateOutlet="medallionBranchTpl; context: { $implicit: rootBranch }"
-            ></ng-container>
-          }
-
-          @if (mode === 'admin') {
-            <div
-              class="flex w-36 flex-col items-center pt-0.5"
-              (pointerdown)="$event.stopPropagation()"
-            >
-              <button
-                type="button"
-                (click)="addRootNode.emit()"
-                class="group flex flex-col items-center text-center focus:outline-none"
-                title="Create another Tier 1 root node"
-              >
-                <div
-                  class="relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-[#243B37] bg-[#122220]/75 text-[#8AB0AB] transition-all group-hover:scale-105 group-hover:border-[#C4491A] group-hover:bg-[#122220] group-hover:text-[#FF8C5A]"
-                >
-                  <span
-                    class="absolute -left-2 -top-2 rounded border border-[#243B37] bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#8AB0AB] tabular-nums"
-                  >
-                    T1
-                  </span>
-                  <svg
-                    class="h-6 w-6"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </div>
-                <span
-                  class="mt-2.5 font-display text-xs font-bold text-[#8AB0AB] transition-colors group-hover:text-[#FF8C5A]"
-                >
-                  + Add Tier 1
-                </span>
-              </button>
-            </div>
-          }
-        </div>
-      </div>
-    }
-
-    <ng-template #medallionBranchTpl let-branch>
-      <div class="flex min-w-[10rem] flex-col items-center">
-        <div
-          class="relative flex w-40 flex-col items-center"
-          (pointerdown)="$event.stopPropagation()"
-          [attr.draggable]="mode === 'admin' ? 'true' : null"
-          (dragstart)="onNodeDragStart($event, branch.node)"
-          (dragover)="onNodeDragOver($event, branch.node)"
-          (dragleave)="onNodeDragLeave($event, branch.node)"
-          (drop)="onNodeDropOnTarget($event, branch.node)"
-          (dragend)="onNodeDragEnd()"
+        <svg
+          class="pointer-events-none absolute left-0 top-0 overflow-visible"
+          width="1"
+          height="1"
         >
+          <defs>
+            <marker
+              [attr.id]="markerPrefix + '-default'"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#C4491A" />
+            </marker>
+            <marker
+              [attr.id]="markerPrefix + '-active'"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#FF8C5A" />
+            </marker>
+            <marker
+              [attr.id]="markerPrefix + '-muted'"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#284540" />
+            </marker>
+            <marker
+              [attr.id]="markerPrefix + '-preview'"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#38B29A" />
+            </marker>
+            <marker
+              [attr.id]="markerPrefix + '-blocked'"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#F26464" />
+            </marker>
+          </defs>
+
+          @for (route of routeCurves(); track route.id) {
+            <path
+              [attr.d]="route.path"
+              fill="none"
+              [attr.stroke]="routeStrokeColor(route)"
+              [attr.stroke-width]="route.isHighlighted ? 3 : 2.25"
+              stroke-linecap="round"
+              [attr.marker-end]="routeMarkerUrl(route)"
+            />
+            @if (mode === 'admin') {
+              <path
+                [attr.d]="route.path"
+                fill="none"
+                stroke="transparent"
+                stroke-width="16"
+                class="pointer-events-auto cursor-pointer"
+                (pointerdown)="$event.stopPropagation()"
+                (mouseenter)="hoveredRouteId.set(route.id)"
+                (mouseleave)="hoveredRouteId.set(null)"
+                (click)="onRouteLineClick($event, route)"
+              />
+            }
+          }
+
+          @if (liveConnectionPreview(); as preview) {
+            <path
+              [attr.d]="preview.path"
+              fill="none"
+              [attr.stroke]="
+                preview.isCycleBlocked
+                  ? '#F26464'
+                  : preview.isValidTarget
+                    ? '#38B29A'
+                    : '#FF8C5A'
+              "
+              stroke-width="2.75"
+              stroke-dasharray="6 5"
+              stroke-linecap="round"
+              [attr.marker-end]="
+                preview.isCycleBlocked
+                  ? 'url(#' + markerPrefix + '-blocked)'
+                  : 'url(#' + markerPrefix + '-preview)'
+              "
+            />
+          }
+        </svg>
+
+        @for (route of routeCurves(); track route.id) {
           @if (
             mode === 'admin' &&
-            selectedNode()?.id === branch.node.id &&
-            siblingContext(branch.node).count > 1
+            !connectingFromNodeId() &&
+            (hoveredRouteId() === route.id || selectedRouteId() === route.id)
           ) {
             <button
               type="button"
-              [disabled]="!siblingContext(branch.node).canMoveLeft"
-              (click)="moveSibling($event, branch.node, 'left')"
-              class="absolute left-2 top-5 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-[#243B37] bg-[#0D1615] font-mono-num text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-[#FF8C5A] disabled:opacity-30"
-              title="Move Left"
+              class="pointer-events-auto absolute z-30 flex h-6 w-6 items-center justify-center rounded-full border border-[#F26464] bg-[#122220] font-mono-num text-xs font-bold leading-none text-[#F26464] shadow-md transition-transform hover:scale-110 hover:bg-[#F26464] hover:text-white"
+              [style.left.px]="route.midX"
+              [style.top.px]="route.midY"
+              style="transform: translate(-50%, -50%);"
+              (pointerdown)="$event.stopPropagation()"
+              (mouseenter)="hoveredRouteId.set(route.id)"
+              (mouseleave)="hoveredRouteId.set(null)"
+              (click)="onDisconnectRoute($event, route.sourceId, route.targetId)"
+              [title]="'Disconnect route: ' + route.sourceName + ' → ' + route.targetName"
+              [attr.aria-label]="'Disconnect route from ' + route.sourceName + ' to ' + route.targetName"
             >
-              ←
-            </button>
-            <button
-              type="button"
-              [disabled]="!siblingContext(branch.node).canMoveRight"
-              (click)="moveSibling($event, branch.node, 'right')"
-              class="absolute right-2 top-5 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-[#243B37] bg-[#0D1615] font-mono-num text-xs font-bold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-[#FF8C5A] disabled:opacity-30"
-              title="Move Right"
-            >
-              →
+              ×
             </button>
           }
-
-          <button
-            type="button"
-            (click)="onNodeClick($event, branch.node)"
-            class="group relative flex w-40 flex-col items-center text-center focus:outline-none"
-          >
-            <div
-              class="relative flex items-center justify-center transition-all duration-150"
-              [class]="getMedallionClasses(branch.node)"
-              [style.border-color]="getNodeVisuals(branch.node).color"
-            >
-              <span
-                class="absolute -left-2 -top-2 rounded border border-[#243B37] bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#8AB0AB] tabular-nums"
-              >
-                T{{ branch.node.tier }}
-              </span>
-
-              @if (mode === 'character' && isUnlocked(branch.node.id)) {
-                <span
-                  class="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#C4491A] text-[10px] font-bold text-white"
-                >
-                  ✓
-                </span>
-              } @else if (branch.node.node_type === 'combat_art') {
-                <span
-                  class="absolute -right-2.5 -top-2 rounded border bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold tabular-nums"
-                  [style.border-color]="getNodeVisuals(branch.node).color"
-                  [style.color]="getNodeVisuals(branch.node).color"
-                >
-                  {{ branch.node.ap_cost ?? 1 }}AP
-                </span>
-              }
-
-              <app-compendium-icon
-                [icon]="getNodeVisuals(branch.node).icon"
-                [color]="
-                  selectedNode()?.id === branch.node.id
-                    ? '#FFFFFF'
-                    : getNodeVisuals(branch.node).color
-                "
-                [tintCustom]="getNodeVisuals(branch.node).tintCustom"
-                sizeClass="h-8 w-8"
-              />
-            </div>
-
-            <span
-              class="mt-2.5 line-clamp-2 px-1 font-display text-xs font-bold leading-snug transition-colors"
-              [style.color]="
-                selectedNode()?.id === branch.node.id
-                  ? getNodeVisuals(branch.node).color
-                  : '#FFFFFF'
-              "
-            >
-              {{ branch.node.name }}
-            </span>
-          </button>
-        </div>
-
-        @if (mode === 'admin') {
-          <div
-            class="h-3.5 w-0.5"
-            [class.bg-[#C4491A]]="branch.children.length > 0"
-            [class.bg-[#243B37]]="branch.children.length === 0"
-          ></div>
-          <button
-            type="button"
-            (pointerdown)="$event.stopPropagation()"
-            (click)="onAddChildFromNode($event, branch.node)"
-            class="z-10 flex h-6 w-6 items-center justify-center rounded-full border border-[#C4491A]/80 bg-[#122220] font-mono-num text-sm font-bold leading-none text-[#FF8C5A] transition-all hover:scale-110 hover:border-[#FF8C5A] hover:bg-[#C4491A] hover:text-white"
-            [title]="'Add Tier ' + (branch.node.tier + 1) + ' node under ' + branch.node.name"
-            [attr.aria-label]="'Add child node under ' + branch.node.name"
-          >
-            +
-          </button>
-          @if (branch.children.length > 0) {
-            <div class="h-5 w-0.5 bg-[#C4491A]"></div>
-          }
-        } @else if (branch.children.length > 0) {
-          <div
-            class="h-10 w-0.5 transition-colors"
-            [class.bg-[#C4491A]]="isUnlocked(branch.node.id)"
-            [class.bg-[#243B37]]="!isUnlocked(branch.node.id)"
-          ></div>
         }
 
-        @if (branch.children.length === 1) {
-          <ng-container
-            *ngTemplateOutlet="medallionBranchTpl; context: { $implicit: branch.children[0] }"
-          ></ng-container>
-        } @else if (branch.children.length > 1) {
-          <div class="relative flex items-start gap-10 pt-5">
-            <div
-              class="absolute left-1/2 top-0 h-0.5 -translate-x-1/2"
-              [class.bg-[#C4491A]]="mode === 'admin' || isUnlocked(branch.node.id)"
-              [class.bg-[#243B37]]="mode === 'character' && !isUnlocked(branch.node.id)"
-              style="width: calc(100% - 10rem);"
-            ></div>
+        @for (item of positionedNodes(); track item.node.id) {
+          <div
+            class="pointer-events-auto absolute flex w-40 flex-col items-center"
+            [class.z-20]="
+              selectedNode()?.id === item.node.id ||
+              movingNodeId() === item.node.id ||
+              connectingFromNodeId() === item.node.id
+            "
+            [class.z-10]="
+              selectedNode()?.id !== item.node.id &&
+              movingNodeId() !== item.node.id &&
+              connectingFromNodeId() !== item.node.id
+            "
+            [style.left.px]="item.x"
+            [style.top.px]="item.y"
+            style="transform: translateX(-50%);"
+          >
+            @if (
+              connectTargetState(item.node.id) === 'valid' ||
+              connectTargetState(item.node.id) === 'hovered-valid'
+            ) {
+              <span
+                class="pointer-events-none absolute -top-2 left-1/2 z-20 h-3 w-3 -translate-x-1/2 rounded-full border-2 border-[#38B29A] bg-[#0D1615] transition-transform"
+                [class.scale-125]="connectTargetState(item.node.id) === 'hovered-valid'"
+                [class.bg-[#38B29A]]="connectTargetState(item.node.id) === 'hovered-valid'"
+              ></span>
+            } @else if (item.incomingCount > 0) {
+              <span
+                class="pointer-events-none absolute -top-1.5 left-1/2 z-20 h-2 w-2 -translate-x-1/2 rounded-full border border-[#C4491A] bg-[#0D1615]"
+              ></span>
+            }
 
-            @for (childBranch of branch.children; track childBranch.node.id) {
-              <div class="relative flex flex-col items-center">
-                <div
-                  class="-mt-5 h-5 w-0.5"
-                  [class.bg-[#C4491A]]="mode === 'admin' || isUnlocked(branch.node.id)"
-                  [class.bg-[#243B37]]="mode === 'character' && !isUnlocked(branch.node.id)"
-                ></div>
-                <ng-container
-                  *ngTemplateOutlet="medallionBranchTpl; context: { $implicit: childBranch }"
-                ></ng-container>
+            <div
+              (pointerdown)="onNodePointerDown($event, item)"
+              class="group flex w-40 flex-col items-center text-center focus:outline-none"
+              [class.cursor-grab]="mode === 'admin' && movingNodeId() !== item.node.id"
+              [class.cursor-grabbing]="mode === 'admin' && movingNodeId() === item.node.id"
+              [class.cursor-pointer]="mode !== 'admin'"
+            >
+              <div
+                class="relative flex items-center justify-center transition-all duration-150"
+                [class]="getMedallionClasses(item.node)"
+                [style.border-color]="getNodeVisuals(item.node).color"
+              >
+                @if (item.isStartingNode) {
+                  <span
+                    class="absolute -left-3 -top-2 rounded border border-[#243B37] bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[9px] font-bold tracking-wider text-[#8AB0AB]"
+                  >
+                    START
+                  </span>
+                } @else if (item.incomingCount >= 2) {
+                  <span
+                    class="absolute -left-2.5 -top-2 rounded border px-1.5 py-0.5 font-mono-num text-[9px] font-bold tracking-wider"
+                    [class.border-[#38B29A]]="item.unlockMode === 'all'"
+                    [class.bg-[#0D1615]]="true"
+                    [class.text-[#38B29A]]="item.unlockMode === 'all'"
+                    [class.border-[#243B37]]="item.unlockMode !== 'all'"
+                    [class.text-[#FF8C5A]]="item.unlockMode !== 'all'"
+                    [title]="
+                      item.unlockMode === 'all'
+                        ? 'Requires ALL incoming routes unlocked'
+                        : 'Unlocks via ANY connected incoming route'
+                    "
+                  >
+                    {{ item.unlockMode === 'all' ? 'ALL' : 'ANY' }}
+                  </span>
+                }
+
+                @if (mode === 'character' && isUnlocked(item.node.id)) {
+                  <span
+                    class="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#C4491A] text-[10px] font-bold text-white"
+                  >
+                    ✓
+                  </span>
+                } @else if (item.node.node_type === 'combat_art') {
+                  <span
+                    class="absolute -right-2.5 -top-2 rounded border bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[10px] font-bold tabular-nums"
+                    [style.border-color]="getNodeVisuals(item.node).color"
+                    [style.color]="getNodeVisuals(item.node).color"
+                  >
+                    {{ item.node.ap_cost ?? 1 }}AP
+                  </span>
+                } @else if (isCombatArtUpgradeNode(item.node)) {
+                  <span
+                    class="absolute -right-2.5 -top-2 rounded border border-[#F59E0B] bg-[#0D1615] px-1.5 py-0.5 font-mono-num text-[9px] font-bold tracking-wider text-[#FBBF24]"
+                  >
+                    UPG
+                  </span>
+                }
+
+                <app-compendium-icon
+                  [icon]="getNodeVisuals(item.node).icon"
+                  [color]="
+                    selectedNode()?.id === item.node.id
+                      ? '#FFFFFF'
+                      : getNodeVisuals(item.node).color
+                  "
+                  [tintCustom]="getNodeVisuals(item.node).tintCustom"
+                  sizeClass="h-8 w-8"
+                />
+              </div>
+
+              <div class="mt-2 flex h-9 w-40 items-start justify-center px-1">
+                <span
+                  class="line-clamp-2 font-display text-xs font-bold leading-4 transition-colors"
+                  [style.color]="
+                    selectedNode()?.id === item.node.id
+                      ? getNodeVisuals(item.node).color
+                      : '#FFFFFF'
+                  "
+                >
+                  {{ item.node.name }}
+                </span>
+              </div>
+            </div>
+
+            @if (mode === 'admin') {
+              <svg
+                class="pointer-events-none h-3 w-3 text-[#C4491A]"
+                viewBox="0 0 12 12"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6 0v9.5M2.75 6.75L6 10l3.25-3.25"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+
+              <div class="relative flex h-5 w-full items-center justify-center">
+                <button
+                  type="button"
+                  (pointerdown)="onRoutePointPointerDown($event, item.node)"
+                  class="flex h-5 w-5 cursor-crosshair items-center justify-center rounded-full border-2 bg-[#0D1615] transition-all hover:scale-125"
+                  [class.border-[#38B29A]]="connectingFromNodeId() === item.node.id"
+                  [class.ring-4]="connectingFromNodeId() === item.node.id"
+                  [class.ring-[#38B29A]/35]="connectingFromNodeId() === item.node.id"
+                  [class.border-[#FF8C5A]]="connectingFromNodeId() !== item.node.id"
+                  [title]="'Drag from this point to connect ' + item.node.name + ' into another node'"
+                  [attr.aria-label]="'Drag route point from ' + item.node.name"
+                >
+                  <span
+                    class="h-2 w-2 rounded-full transition-colors"
+                    [class.bg-[#38B29A]]="connectingFromNodeId() === item.node.id"
+                    [class.bg-[#FF8C5A]]="connectingFromNodeId() !== item.node.id"
+                  ></span>
+                </button>
+
+                <button
+                  type="button"
+                  (pointerdown)="$event.stopPropagation()"
+                  (click)="onAddChildFromNode($event, item.node)"
+                  style="left: calc(50% + 16px);"
+                  class="absolute top-0 flex h-5 w-5 items-center justify-center rounded-full border border-[#C4491A]/85 bg-[#122220] font-mono-num text-xs font-bold leading-none text-[#FF8C5A] transition-all hover:scale-110 hover:border-[#FF8C5A] hover:bg-[#C4491A] hover:text-white"
+                  [title]="'Create a new node connected from ' + item.node.name"
+                  [attr.aria-label]="'Create a new node connected from ' + item.node.name"
+                >
+                  +
+                </button>
               </div>
             }
           </div>
         }
       </div>
-    </ng-template>
+    }
   </div>
 
   <aside
@@ -351,8 +499,8 @@
           <div class="flex items-start gap-3">
             <div
               class="flex h-12 w-12 shrink-0 items-center justify-center border-2 bg-[#0D1615]"
-              [class.rounded-xl]="node.node_type === 'combat_art'"
-              [class.rounded-full]="node.node_type !== 'combat_art'"
+              [class.rounded-xl]="node.node_type === 'combat_art' || isCombatArtUpgradeNode(node)"
+              [class.rounded-full]="node.node_type !== 'combat_art' && !isCombatArtUpgradeNode(node)"
               [style.border-color]="getNodeVisuals(node).color"
             >
               <app-compendium-icon
@@ -369,10 +517,16 @@
                   class="rounded bg-[#0D1615] px-2 py-0.5 font-bold"
                   [style.color]="getNodeVisuals(node).color"
                 >
-                  Tier {{ node.tier }}
+                  {{ selectedNodeIncoming().length === 0 ? 'Starting Node' : 'Connected Node' }}
                 </span>
                 <span class="text-[#8AB0AB]">
-                  {{ node.node_type === 'combat_art' ? 'Combat Art' : 'Passive Upgrade' }}
+                  {{
+                    node.node_type === 'combat_art'
+                      ? 'Combat Art'
+                      : isCombatArtUpgradeNode(node)
+                        ? 'Combat Art Upgrade'
+                        : 'Passive Upgrade'
+                  }}
                 </span>
                 @if (node.is_active === false) {
                   <span class="badge-warn rounded border px-2 py-0.5 font-mono-num text-xs font-bold">
@@ -385,13 +539,24 @@
                 {{ node.name }}
               </h2>
 
-              @if (parentNodeName(node.parent_node_id); as reqName) {
+              @if (selectedNodeIncoming().length === 0) {
                 <p class="mt-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
-                  Prerequisite: <strong class="text-white">{{ reqName }}</strong>
+                  Entry Point · No Prerequisite
+                </p>
+              } @else if (selectedNodeIncoming().length === 1) {
+                <p class="mt-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
+                  Route from: <strong class="text-white">{{ selectedNodeIncoming()[0].name }}</strong>
                 </p>
               } @else {
                 <p class="mt-0.5 font-mono-num text-xs font-semibold text-[#8AB0AB]">
-                  Root Node · No Prerequisite
+                  {{
+                    node.rule_hooks?.__unlock_mode === 'all'
+                      ? 'Requires ALL of:'
+                      : 'Unlocks from ANY of:'
+                  }}
+                  <strong class="text-white">
+                    {{ selectedNodeIncoming().length }} Routes
+                  </strong>
                 </p>
               }
             </div>
@@ -431,6 +596,93 @@
               >
                 {{ node.combat_tag }} · {{ getCombatTagCounterLabel(node.combat_tag) }}
               </button>
+            }
+
+            @if (selectedNodeWeaponReqLabel(); as wepReqLabel) {
+              <span
+                class="badge-warn rounded-lg border px-3 py-1 font-bold"
+              >
+                {{ wepReqLabel }}
+              </span>
+            }
+          </div>
+
+          @if (selectedNodePinnedUpgrades().length > 0) {
+            <div class="rounded-xl border border-[#F59E0B]/40 bg-[#0D1615] p-3 space-y-1.5">
+              <div class="font-mono-num text-[11px] font-bold text-[#FBBF24]">
+                Upgrade Nodes in {{ tree.name }}
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                @for (upg of selectedNodePinnedUpgrades(); track upg.id) {
+                  <button
+                    type="button"
+                    (click)="selectNodeById(upg.id)"
+                    class="inline-flex items-center gap-1 rounded-lg border border-[#F59E0B]/50 bg-[#122220] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#FBBF24] hover:text-white"
+                  >
+                    <span class="text-[#FBBF24]">✦</span>
+                    <span>{{ upg.name }}</span>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        }
+
+        @if (isCombatArtUpgradeNode(node)) {
+          <div class="rounded-xl border border-[#F59E0B]/45 bg-[#0D1615] p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-mono-num text-xs font-bold text-[#FBBF24]">
+                Combat Art Upgrade Target
+              </span>
+              <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                {{
+                  node.rule_hooks.__art_upgrade?.target_mode === 'specific_arts'
+                    ? 'Pinned Art(s)'
+                    : 'Player Choice'
+                }}
+              </span>
+            </div>
+
+            @if (node.rule_hooks.__art_upgrade?.target_mode === 'specific_arts') {
+              @if (selectedNodeUpgradeTargets().length > 0) {
+                <div class="flex flex-wrap gap-1.5">
+                  @for (targetArt of selectedNodeUpgradeTargets(); track targetArt.id) {
+                    <button
+                      type="button"
+                      (click)="selectNodeById(targetArt.id)"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-[#C4491A]/70 bg-[#122220] px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:border-[#FF8C5A] hover:text-[#FF8C5A]"
+                    >
+                      <span>✦</span>
+                      <span>{{ targetArt.name }}</span>
+                    </button>
+                  }
+                </div>
+              } @else {
+                <p class="text-xs text-[#8AB0AB]">
+                  No pinned Combat Art currently assigned in {{ tree.name }}.
+                </p>
+              }
+            } @else {
+              <p class="text-xs text-[#EBF5F3]">
+                Player chooses any <strong class="text-white">1 unlocked Combat Art</strong> in <strong class="text-[#FBBF24]">{{ tree.name }}</strong> to receive this upgrade on their Character Sheet.
+              </p>
+            }
+
+            @if ((node.rule_hooks.__art_upgrade?.add_combat_tags ?? []).length > 0) {
+              <div class="flex flex-wrap gap-1.5 border-t border-[#243B37] pt-2">
+                @for (tag of node.rule_hooks.__art_upgrade?.add_combat_tags ?? []; track tag) {
+                  <button
+                    type="button"
+                    (mouseenter)="showKeywordTooltipByTerm(tag, $event.currentTarget)"
+                    (mouseleave)="hideKeywordTooltip($event.currentTarget)"
+                    (focus)="showKeywordTooltipByTerm(tag, $event.currentTarget)"
+                    (blur)="hideKeywordTooltip($event.currentTarget)"
+                    [class]="'cursor-help rounded-lg border px-2.5 py-0.5 font-mono-num text-xs font-bold transition-opacity hover:opacity-90 ' + getCombatTagBadgeClass(tag)"
+                  >
+                    + {{ tag }} · {{ getCombatTagCounterLabel(tag) }}
+                  </button>
+                }
+              </div>
             }
           </div>
         }
@@ -476,90 +728,235 @@
           }
         </div>
 
+        @if (mode === 'character' && selectedNodeIncoming().length > 0) {
+          <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3.5 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-[#8AB0AB]">Prerequisite Routes</span>
+              @if (selectedNodeIncoming().length >= 2) {
+                <span class="font-mono-num font-bold text-[#FF8C5A]">
+                  {{ node.rule_hooks?.__unlock_mode === 'all' ? 'All Required' : 'Any 1 Required' }}
+                </span>
+              }
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              @for (reqNode of selectedNodeIncoming(); track reqNode.id) {
+                <button
+                  type="button"
+                  (click)="selectNodeById(reqNode.id)"
+                  class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors"
+                  [class.border-[#38B29A]]="isUnlocked(reqNode.id)"
+                  [class.bg-[#11312B]]="isUnlocked(reqNode.id)"
+                  [class.text-white]="isUnlocked(reqNode.id)"
+                  [class.border-[#243B37]]="!isUnlocked(reqNode.id)"
+                  [class.bg-[#122220]]="!isUnlocked(reqNode.id)"
+                  [class.text-[#8AB0AB]]="!isUnlocked(reqNode.id)"
+                >
+                  <span>{{ isUnlocked(reqNode.id) ? '✓' : '○' }}</span>
+                  <span>{{ reqNode.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+
         @if (mode === 'admin') {
-          <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3.5 space-y-3">
+          <div class="rounded-xl border border-[#243B37] bg-[#0D1615] p-3.5 space-y-3.5">
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-bold text-white">
-                Arrange &amp; Transfer
+                Routes &amp; Connections
               </span>
-              @if (siblingContext(node).count > 1) {
-                <div class="flex items-center gap-1 font-mono-num text-xs tabular-nums">
-                  <button
-                    type="button"
-                    [disabled]="!siblingContext(node).canMoveLeft"
-                    (click)="moveSibling($event, node, 'left')"
-                    class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 font-bold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-35"
-                  >
-                    ← Left
-                  </button>
-                  <span class="px-1 text-[#8AB0AB]">
-                    {{ siblingContext(node).index + 1 }}/{{ siblingContext(node).count }}
+              <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                Click wire × or manage below
+              </span>
+            </div>
+
+            <div class="space-y-2">
+              <label class="block text-[11px] font-semibold text-[#8AB0AB]">
+                Incoming Routes (Prerequisites)
+              </label>
+
+              @if (selectedNodeIncoming().length === 0) {
+                <div class="rounded-lg border border-dashed border-[#243B37] bg-[#122220]/70 px-2.5 py-1.5 text-xs text-[#8AB0AB]">
+                  None — acts as a Starting Node in {{ tree.name }}
+                </div>
+              } @else {
+                <div class="flex flex-wrap gap-1.5">
+                  @for (inc of selectedNodeIncoming(); track inc.id) {
+                    <span
+                      class="inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#122220] pl-2.5 pr-1 py-1 text-xs font-semibold text-[#EBF5F3]"
+                    >
+                      <button
+                        type="button"
+                        (click)="selectNodeById(inc.id)"
+                        class="hover:text-[#FF8C5A]"
+                      >
+                        {{ inc.name }}
+                      </button>
+                      <button
+                        type="button"
+                        (click)="onDisconnectRoute($event, inc.id, node.id)"
+                        class="flex h-4 w-4 items-center justify-center rounded text-[#8AB0AB] hover:bg-[#F26464]/20 hover:text-[#F26464]"
+                        [title]="'Disconnect ' + inc.name"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  }
+                </div>
+              }
+
+              @if (selectedNodeIncoming().length >= 2) {
+                <div class="rounded-lg border border-[#243B37] bg-[#122220] p-2 space-y-1.5">
+                  <span class="block text-[11px] font-semibold text-[#8AB0AB]">
+                    Multi-Route Unlock Rule
                   </span>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      (click)="onSetUnlockMode(node, 'any')"
+                      class="rounded-md border px-2 py-1 font-mono-num text-[11px] font-bold transition-colors"
+                      [class.border-[#C4491A]]="node.rule_hooks?.__unlock_mode !== 'all'"
+                      [class.bg-[#C4491A]]="node.rule_hooks?.__unlock_mode !== 'all'"
+                      [class.text-white]="node.rule_hooks?.__unlock_mode !== 'all'"
+                      [class.border-[#243B37]]="node.rule_hooks?.__unlock_mode === 'all'"
+                      [class.bg-[#0D1615]]="node.rule_hooks?.__unlock_mode === 'all'"
+                      [class.text-[#8AB0AB]]="node.rule_hooks?.__unlock_mode === 'all'"
+                    >
+                      Any Route (OR)
+                    </button>
+                    <button
+                      type="button"
+                      (click)="onSetUnlockMode(node, 'all')"
+                      class="rounded-md border px-2 py-1 font-mono-num text-[11px] font-bold transition-colors"
+                      [class.border-[#38B29A]]="node.rule_hooks?.__unlock_mode === 'all'"
+                      [class.bg-[#1D5B4E]]="node.rule_hooks?.__unlock_mode === 'all'"
+                      [class.text-white]="node.rule_hooks?.__unlock_mode === 'all'"
+                      [class.border-[#243B37]]="node.rule_hooks?.__unlock_mode !== 'all'"
+                      [class.bg-[#0D1615]]="node.rule_hooks?.__unlock_mode !== 'all'"
+                      [class.text-[#8AB0AB]]="node.rule_hooks?.__unlock_mode !== 'all'"
+                    >
+                      All Routes (AND)
+                    </button>
+                  </div>
+                </div>
+              }
+
+              @if (availableIncomingCandidates().length > 0) {
+                <div class="flex items-center gap-1.5">
+                  <select
+                    [ngModel]="inspectorAddParentId()"
+                    (ngModelChange)="inspectorAddParentId.set($event)"
+                    class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+                  >
+                    <option value="">+ Add prerequisite route from...</option>
+                    @for (cand of availableIncomingCandidates(); track cand.id) {
+                      <option [value]="cand.id">{{ cand.name }}</option>
+                    }
+                  </select>
                   <button
                     type="button"
-                    [disabled]="!siblingContext(node).canMoveRight"
-                    (click)="moveSibling($event, node, 'right')"
-                    class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 font-bold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-35"
+                    [disabled]="!inspectorAddParentId()"
+                    (click)="onInspectorAddIncoming(node)"
+                    class="shrink-0 rounded-lg border border-[#C4491A] bg-[#122220] px-2.5 py-1.5 text-xs font-bold text-[#FF8C5A] hover:bg-[#C4491A] hover:text-white disabled:opacity-35"
                   >
-                    Right →
+                    Add
                   </button>
                 </div>
               }
             </div>
 
-            <div>
+            <div class="border-t border-[#243B37] pt-3 space-y-2">
               <label class="block text-[11px] font-semibold text-[#8AB0AB]">
-                Connected Parent in {{ tree.name }}
+                Outgoing Routes (Unlocks Next)
               </label>
-              <select
-                [ngModel]="effectiveParentId(node)"
-                (ngModelChange)="onChangeParentInInspector(node, $event)"
-                class="mt-1 w-full rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
-              >
-                <option value="">None (Tier 1 Root Node)</option>
-                @for (parentOpt of availableInspectorParents(node); track parentOpt.id) {
-                  <option [value]="parentOpt.id">
-                    Tier {{ parentOpt.tier }} — {{ parentOpt.name }} (places at Tier {{ parentOpt.tier + 1 }})
-                  </option>
-                }
-              </select>
-            </div>
 
-            @if (otherSkillTrees().length > 0) {
-              <div>
-                <label class="block text-[11px] font-semibold text-[#8AB0AB]">
-                  Move Node to Another Skill Tree
-                </label>
-                <div class="mt-1 flex items-center gap-1.5">
+              @if (selectedNodeOutgoing().length > 0) {
+                <div class="flex flex-wrap gap-1.5">
+                  @for (outNode of selectedNodeOutgoing(); track outNode.id) {
+                    <span
+                      class="inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#122220] pl-2.5 pr-1 py-1 text-xs font-semibold text-[#EBF5F3]"
+                    >
+                      <button
+                        type="button"
+                        (click)="selectNodeById(outNode.id)"
+                        class="hover:text-[#FF8C5A]"
+                      >
+                        {{ outNode.name }}
+                      </button>
+                      <button
+                        type="button"
+                        (click)="onDisconnectRoute($event, node.id, outNode.id)"
+                        class="flex h-4 w-4 items-center justify-center rounded text-[#8AB0AB] hover:bg-[#F26464]/20 hover:text-[#F26464]"
+                        [title]="'Disconnect route to ' + outNode.name"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  }
+                </div>
+              }
+
+              @if (availableOutgoingCandidates().length > 0) {
+                <div class="flex items-center gap-1.5">
                   <select
-                    [ngModel]="targetMoveTreeId()"
-                    (ngModelChange)="targetMoveTreeId.set($event)"
+                    [ngModel]="inspectorAddChildId()"
+                    (ngModelChange)="inspectorAddChildId.set($event)"
                     class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
                   >
-                    <option value="">Choose target tree...</option>
-                    @for (otherTree of otherSkillTrees(); track otherTree.id) {
-                      <option [value]="otherTree.id">{{ otherTree.name }}</option>
+                    <option value="">+ Connect route into...</option>
+                    @for (cand of availableOutgoingCandidates(); track cand.id) {
+                      <option [value]="cand.id">{{ cand.name }}</option>
                     }
                   </select>
                   <button
                     type="button"
-                    [disabled]="!targetMoveTreeId()"
-                    (click)="onMoveToAnotherTree(node)"
-                    class="shrink-0 rounded-lg border border-[#C4491A] bg-[#122220] px-3 py-1.5 text-xs font-bold text-[#FF8C5A] transition-colors hover:bg-[#C4491A] hover:text-white disabled:opacity-35"
+                    [disabled]="!inspectorAddChildId()"
+                    (click)="onInspectorAddOutgoing(node)"
+                    class="shrink-0 rounded-lg border border-[#C4491A] bg-[#122220] px-2.5 py-1.5 text-xs font-bold text-[#FF8C5A] hover:bg-[#C4491A] hover:text-white disabled:opacity-35"
                   >
-                    Move
+                    Wire
                   </button>
                 </div>
-              </div>
-            }
+              }
+            </div>
 
-            <button
-              type="button"
-              (click)="onRemoveFromTree(node)"
-              class="w-full rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-semibold text-[#FBBF24] transition-colors hover:border-[#FBBF24]"
-            >
-              Remove from Tree (Keep in Standalone Pool)
-            </button>
+            <div class="border-t border-[#243B37] pt-3 space-y-2.5">
+              @if (otherSkillTrees().length > 0) {
+                <div>
+                  <label class="block text-[11px] font-semibold text-[#8AB0AB]">
+                    Move Node to Another Skill Tree
+                  </label>
+                  <div class="mt-1 flex items-center gap-1.5">
+                    <select
+                      [ngModel]="targetMoveTreeId()"
+                      (ngModelChange)="targetMoveTreeId.set($event)"
+                      class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+                    >
+                      <option value="">Choose target tree...</option>
+                      @for (otherTree of otherSkillTrees(); track otherTree.id) {
+                        <option [value]="otherTree.id">{{ otherTree.name }}</option>
+                      }
+                    </select>
+                    <button
+                      type="button"
+                      [disabled]="!targetMoveTreeId()"
+                      (click)="onMoveToAnotherTree(node)"
+                      class="shrink-0 rounded-lg border border-[#C4491A] bg-[#122220] px-3 py-1.5 text-xs font-bold text-[#FF8C5A] transition-colors hover:bg-[#C4491A] hover:text-white disabled:opacity-35"
+                    >
+                      Move
+                    </button>
+                  </div>
+                </div>
+              }
+
+              <button
+                type="button"
+                (click)="onRemoveFromTree(node)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs font-semibold text-[#FBBF24] transition-colors hover:border-[#FBBF24]"
+              >
+                Remove from Tree (Keep in Standalone Pool)
+              </button>
+            </div>
           </div>
         }
       </div>
@@ -573,14 +970,14 @@
                 (click)="branchChildNode.emit(node)"
                 class="btn-copper flex-1 rounded-xl px-3 py-2.5 text-xs font-semibold"
               >
-                + Add Tier {{ node.tier + 1 }} Child
+                + Branch New Node
               </button>
               @if (hasAttachableAbilities()) {
                 <button
                   type="button"
                   (click)="attachExistingNode.emit(node)"
                   class="rounded-xl border border-[#243B37] bg-[#0D1615] px-3 py-2.5 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
-                  title="Attach an existing Standalone or other-tree ability under this node"
+                  title="Connect an existing Standalone or other-tree ability from this node"
                 >
                   + Existing
                 </button>
@@ -606,9 +1003,15 @@
           </div>
         } @else {
           <div class="space-y-2">
-            @if (!isParentUnlocked(node) && parentNodeName(node.parent_node_id); as reqName) {
+            @if (!isUnlocked(node.id) && !isPrerequisiteSatisfied(node)) {
               <p class="text-center font-mono-num text-xs font-semibold text-[#FF8C5A]">
-                Unlock "{{ reqName }}" first to reach this node.
+                @if (selectedNodeIncoming().length === 1) {
+                  Unlock "{{ selectedNodeIncoming()[0].name }}" first to reach this node.
+                } @else if (node.rule_hooks?.__unlock_mode === 'all') {
+                  Unlock all connected prerequisite routes first to reach this node.
+                } @else {
+                  Unlock at least one connected prerequisite route first to reach this node.
+                }
               </p>
             }
             <button
@@ -632,7 +1035,7 @@
           Select a Skill Node
         </p>
         <p class="mt-1 text-xs text-[#8AB0AB]">
-          Click any icon on the Skill Tree canvas to inspect its description, keywords, and rules.
+          Click any icon on the Skill Tree canvas to inspect its description, keywords, and routes.
         </p>
       </div>
     }

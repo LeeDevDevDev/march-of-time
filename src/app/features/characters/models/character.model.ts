@@ -1,38 +1,68 @@
 import {
+  ActiveCombatTag,
   AttributeName,
+  CombatArtUpgradeSpec,
+  CombatArtWeaponRequirement,
   CombatSkillName,
   CombatStatusEffect,
   CombatTag,
   PerkNodeModel,
+  PerkNodeUiKind,
   PerkRuleHooks,
   SkillTreeModel,
+  WeaponHandednessOption,
   WeaponModel,
   WeaponPropertyTag,
+  WeaponRequirementEvaluation,
+  evaluateWeaponRequirement,
   formatRuleHookBadges,
+  formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
+  getNodeUiKind,
   getWeaponPropertyTags,
+  hasWeaponRequirement,
+  isCombatArtUpgradeNode,
   isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
+  normalizeWeaponRequirement,
 } from '../../../core/compendium/compendium.model';
 
 export {
+  type ActiveCombatTag,
   type AttributeName,
+  type CombatArtUpgradeSpec,
+  type CombatArtWeaponRequirement,
   type CombatSkillName,
   type CombatStatusEffect,
   type CombatTag,
   type PerkNodeModel,
+  type PerkNodeUiKind,
   type PerkRuleHooks,
   type SkillTreeModel,
+  type WeaponHandednessOption,
   type WeaponModel,
   type WeaponPropertyTag,
+  type WeaponRequirementEvaluation,
+  evaluateWeaponRequirement,
   formatRuleHookBadges,
+  formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
+  getNodeUiKind,
   getWeaponPropertyTags,
+  hasWeaponRequirement,
+  isCombatArtUpgradeNode,
   isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
+  normalizeWeaponRequirement,
 };
+
+export const UPGRADE_SLOT_PREFIX = '__upgrade_slot:';
+
+export function getUpgradeSlotKey(upgradeNodeId: string): string {
+  return `${UPGRADE_SLOT_PREFIX}${upgradeNodeId}`;
+}
 
 export type FieldSkillName =
   | 'Athletics'
@@ -88,7 +118,7 @@ export const COMBAT_SKILL_LIST: {
     name: 'Dodge',
     govHint: 'Agility',
     summary:
-      'Evades attacks & shifts 1 tile (2d10 + Agility + Dodge); disabled by Heavy Armor or Tower Shield.',
+      'Evades attacks & shifts 5 ft (2d10 + Agility + Dodge); disabled by Heavy Armor or Tower Shield.',
   },
   {
     name: 'Block',
@@ -250,8 +280,34 @@ export interface CharacterModel {
   current_hp: number;
   current_sp: number;
   current_ap: number;
-  active_cooldowns: Record<string, number>;
+  active_cooldowns: Record<string, number | string>;
   created_at?: string;
+}
+
+export interface ResolvedCombatArt {
+  baseNode: PerkNodeModel;
+  apCost: number;
+  baseApCost: number;
+  cooldownRounds: number;
+  baseCooldownRounds: number;
+  combatTags: ActiveCombatTag[];
+  disallowedDefenses: ('Parry' | 'Dodge' | 'Block')[];
+  bonusAttackMod: number;
+  bonusFlatDamage: number;
+  effectBadges: string[];
+  appliedUpgrades: PerkNodeModel[];
+  weaponRequirement: CombatArtWeaponRequirement | null;
+  weaponRequirementLabel: string | null;
+  meetsWeaponRequirement: boolean;
+  weaponRequirementUnmetReason: string | null;
+  alternateSlotSatisfiesWeaponReq: boolean;
+  alternateSlotWeaponName: string | null;
+}
+
+export interface PlayerChoiceArtUpgradeSlot {
+  upgradeNode: PerkNodeModel;
+  eligibleArts: PerkNodeModel[];
+  selectedArtId: string | null;
 }
 
 export interface DerivedCharacterStats {
@@ -291,6 +347,9 @@ export interface DerivedCharacterStats {
   blockMod: number;
   flawlessParryCounterSp: number;
   unlockedPerks: PerkNodeModel[];
+  resolvedCombatArts: ResolvedCombatArt[];
+  playerChoiceUpgradeSlots: PlayerChoiceArtUpgradeSlot[];
+  displayPassivePerks: PerkNodeModel[];
   fieldSkillTotals: Record<
     FieldSkillName,
     { total: number; govAttr: AttributeName; govVal: number; rank: number }
@@ -310,7 +369,9 @@ export function computeDerivedStats(
     | 'weapon_slot_2_id'
     | 'active_weapon_slot'
     | 'unlocked_perk_ids'
-  >,
+  > & {
+    active_cooldowns?: Record<string, number | string>;
+  },
   weapons: WeaponModel[],
   perkNodes: PerkNodeModel[]
 ): DerivedCharacterStats {
@@ -338,22 +399,215 @@ export function computeDerivedStats(
   let perkBonusBlockMod = 0;
 
   for (const perk of unlockedPerks) {
+    if (isCombatArtUpgradeNode(perk)) continue;
     const h = perk.rule_hooks ?? {};
     perkBonusHp += Number(h.bonus_max_hp ?? 0);
     perkBonusSp += Number(h.bonus_max_sp ?? 0);
     perkBonusStanceRecovery += Number(h.bonus_stance_recovery ?? 0);
     perkBonusArmorDr += Number(h.bonus_armor_dr ?? 0);
     perkBonusMoveTiles += Number(h.bonus_move_tiles ?? 0);
-    perkBonusAttackMod += Number(h.bonus_attack_mod ?? 0);
-    perkBonusFlatDmg += Number(h.bonus_flat_damage ?? 0);
+    if (perk.node_type === 'passive_upgrade') {
+      perkBonusAttackMod += Number(h.bonus_attack_mod ?? 0);
+      perkBonusFlatDmg += Number(h.bonus_flat_damage ?? 0);
+    }
     perkBonusParryMod += Number(h.bonus_parry_mod ?? 0);
     perkBonusDodgeMod += Number(h.bonus_dodge_mod ?? 0);
     perkBonusBlockMod += Number(h.bonus_block_mod ?? 0);
   }
 
+  const unlockedCombatArts = unlockedPerks.filter((p) => p.node_type === 'combat_art');
+  const unlockedUpgradeNodes = unlockedPerks.filter((p) => isCombatArtUpgradeNode(p));
+
+  const upgradesByArtId = new Map<string, PerkNodeModel[]>();
+  const consumedUpgradeIds = new Set<string>();
+  const playerChoiceUpgradeSlots: PlayerChoiceArtUpgradeSlot[] = [];
+
+  const attachUpgradeToArt = (artId: string, upg: PerkNodeModel) => {
+    const existing = upgradesByArtId.get(artId) ?? [];
+    if (!existing.some((u) => u.id === upg.id)) {
+      existing.push(upg);
+      upgradesByArtId.set(artId, existing);
+    }
+    consumedUpgradeIds.add(upg.id);
+  };
+
+  for (const upg of unlockedUpgradeNodes) {
+    const spec = upg.rule_hooks?.__art_upgrade;
+    if (!spec) continue;
+
+    if (spec.target_mode === 'specific_arts') {
+      const targetIds = spec.target_art_ids ?? [];
+      for (const art of unlockedCombatArts) {
+        if (targetIds.includes(art.id)) {
+          attachUpgradeToArt(art.id, upg);
+        }
+      }
+      continue;
+    }
+
+    const eligibleArts = isStandalonePerkNode(upg)
+      ? unlockedCombatArts
+      : unlockedCombatArts.filter((art) => art.tree_id === upg.tree_id);
+
+    const rawSaved = char.active_cooldowns?.[getUpgradeSlotKey(upg.id)];
+    const savedId = typeof rawSaved === 'string' ? rawSaved : null;
+    const validSaved =
+      savedId && eligibleArts.some((art) => art.id === savedId) ? savedId : null;
+    const selectedArtId = validSaved ?? eligibleArts[0]?.id ?? null;
+
+    playerChoiceUpgradeSlots.push({
+      upgradeNode: upg,
+      eligibleArts,
+      selectedArtId,
+    });
+
+    if (selectedArtId) {
+      attachUpgradeToArt(selectedArtId, upg);
+    }
+  }
+
   const weaponSlot1 = weapons.find((w) => w.id === char.weapon_slot_1_id) ?? null;
   const weaponSlot2 = weapons.find((w) => w.id === char.weapon_slot_2_id) ?? null;
   const activeWeapon = char.active_weapon_slot === 1 ? weaponSlot1 : weaponSlot2;
+  const alternateWeapon = char.active_weapon_slot === 1 ? weaponSlot2 : weaponSlot1;
+
+  const resolvedCombatArts: ResolvedCombatArt[] = unlockedCombatArts.map((baseNode) => {
+    const appliedUpgrades = upgradesByArtId.get(baseNode.id) ?? [];
+    const baseApCost = baseNode.ap_cost ?? 1;
+    const baseCooldownRounds = baseNode.cooldown_rounds ?? 0;
+
+    let apDelta = 0;
+    let cdDelta = 0;
+
+    const tagSet = new Set<ActiveCombatTag>();
+    if (baseNode.combat_tag && baseNode.combat_tag !== 'None') {
+      tagSet.add(baseNode.combat_tag);
+    }
+
+    const hooks = baseNode.rule_hooks ?? {};
+    let bonusAttackMod = Number(hooks.bonus_attack_mod ?? 0);
+    let bonusFlatDamage = Number(hooks.bonus_flat_damage ?? 0);
+    let bonusSpDamage = Number(hooks.bonus_sp_damage ?? 0);
+    let ignoreArmorDr = Number(hooks.ignore_armor_dr ?? 0);
+    let pushTiles = Number(hooks.push_tiles ?? 0);
+    let selfShiftTiles = Number(hooks.self_shift_tiles ?? 0);
+
+    const statuses = new Set<Exclude<CombatStatusEffect, 'None'>>();
+    if (hooks.inflict_status && hooks.inflict_status !== 'None') {
+      statuses.add(hooks.inflict_status);
+    }
+
+    for (const upg of appliedUpgrades) {
+      const s = upg.rule_hooks?.__art_upgrade;
+      if (!s) continue;
+      apDelta += Number(s.ap_cost_delta ?? 0);
+      cdDelta += Number(s.cooldown_delta ?? 0);
+      for (const tag of s.add_combat_tags ?? []) {
+        tagSet.add(tag);
+      }
+      bonusAttackMod += Number(s.bonus_attack_mod ?? 0);
+      bonusFlatDamage += Number(s.bonus_flat_damage ?? 0);
+      bonusSpDamage += Number(s.bonus_sp_damage ?? 0);
+      ignoreArmorDr += Number(s.ignore_armor_dr ?? 0);
+      pushTiles += Number(s.push_tiles ?? 0);
+      selfShiftTiles += Number(s.self_shift_tiles ?? 0);
+      for (const st of s.inflict_statuses ?? []) {
+        if (st) {
+          statuses.add(st);
+        }
+      }
+    }
+
+    const combatTags = Array.from(tagSet);
+    const disallowSet = new Set<'Parry' | 'Dodge' | 'Block'>(
+      hooks.disallow_defense ?? []
+    );
+    if (combatTags.includes('Crushing')) disallowSet.add('Parry');
+    if (combatTags.includes('Sweeping')) disallowSet.add('Dodge');
+    if (combatTags.includes('Piercing')) disallowSet.add('Block');
+
+    const canonicalOrder: ('Parry' | 'Dodge' | 'Block')[] = ['Parry', 'Dodge', 'Block'];
+    const disallowedDefenses = canonicalOrder.filter((d) => disallowSet.has(d));
+
+    const apCost = Math.max(0, baseApCost + apDelta);
+    const cooldownRounds = Math.max(0, baseCooldownRounds + cdDelta);
+
+    const effectBadges: string[] = [];
+    if (disallowedDefenses.length > 0) {
+      effectBadges.push(`No ${disallowedDefenses.join('/')}`);
+    }
+    if (bonusAttackMod !== 0) {
+      effectBadges.push(
+        `${bonusAttackMod > 0 ? '+' : ''}${bonusAttackMod} Attack Roll`
+      );
+    }
+    if (bonusFlatDamage !== 0) {
+      effectBadges.push(
+        `${bonusFlatDamage > 0 ? '+' : ''}${bonusFlatDamage} Flat DMG`
+      );
+    }
+    if (bonusSpDamage !== 0) {
+      effectBadges.push(
+        `${bonusSpDamage > 0 ? '+' : ''}${bonusSpDamage} SP DMG`
+      );
+    }
+    if (ignoreArmorDr > 0) {
+      effectBadges.push(`Pierces ${ignoreArmorDr} Armor DR`);
+    }
+    if (pushTiles > 0) {
+      effectBadges.push(`Push ${Math.round(pushTiles * 5)} ft`);
+    }
+    if (selfShiftTiles > 0) {
+      effectBadges.push(`Shift ${Math.round(selfShiftTiles * 5)} ft`);
+    }
+    for (const st of statuses) {
+      effectBadges.push(`Inflicts ${st}`);
+    }
+
+    const weaponReq = normalizeWeaponRequirement(hooks.__weapon_req) ?? null;
+    const reqEval = evaluateWeaponRequirement(
+      weaponReq,
+      activeWeapon,
+      char.equipped_shield,
+      weapons
+    );
+    const altEval =
+      !reqEval.satisfied && weaponReq && alternateWeapon
+        ? evaluateWeaponRequirement(
+            weaponReq,
+            alternateWeapon,
+            char.equipped_shield,
+            weapons
+          )
+        : null;
+    const alternateSlotSatisfiesWeaponReq = Boolean(altEval?.satisfied);
+
+    return {
+      baseNode,
+      apCost,
+      baseApCost,
+      cooldownRounds,
+      baseCooldownRounds,
+      combatTags,
+      disallowedDefenses,
+      bonusAttackMod,
+      bonusFlatDamage,
+      effectBadges,
+      appliedUpgrades,
+      weaponRequirement: weaponReq,
+      weaponRequirementLabel: reqEval.label,
+      meetsWeaponRequirement: reqEval.satisfied,
+      weaponRequirementUnmetReason: reqEval.unmetReason,
+      alternateSlotSatisfiesWeaponReq,
+      alternateSlotWeaponName: alternateSlotSatisfiesWeaponReq
+        ? (alternateWeapon?.name ?? null)
+        : null,
+    };
+  });
+
+  const displayPassivePerks = unlockedPerks.filter(
+    (p) => p.node_type !== 'combat_art' && !consumedUpgradeIds.has(p.id)
+  );
 
   const activeWeaponIsTwoHanded = isWeaponTwoHanded(activeWeapon);
   const activeWeaponIsHeavy = isWeaponHeavy(activeWeapon);
@@ -393,11 +647,13 @@ export function computeDerivedStats(
 
   const usesRaiseShield = blockSourceType !== 'none';
 
-  const moveTiles = Math.max(
-    1,
-    4 - armorSpec.speedPenaltyTiles - shieldSpec.speedPenaltyTiles + perkBonusMoveTiles
+  const moveFeet = Math.max(
+    5,
+    Math.round(
+      (4 - armorSpec.speedPenaltyTiles - shieldSpec.speedPenaltyTiles + perkBonusMoveTiles) * 5
+    )
   );
-  const moveFeet = moveTiles * 5;
+  const moveTiles = Math.max(1, Math.round(moveFeet / 5));
 
   const govAttrVal = activeWeapon ? (char.attributes[activeWeapon.gov_attribute] ?? 0) : brawn;
   const govSkillVal = activeWeapon ? (char.combat_skills[activeWeapon.gov_skill] ?? strike) : strike;
@@ -492,6 +748,9 @@ export function computeDerivedStats(
     blockMod,
     flawlessParryCounterSp,
     unlockedPerks,
+    resolvedCombatArts,
+    playerChoiceUpgradeSlots,
+    displayPassivePerks,
     fieldSkillTotals,
   };
 }

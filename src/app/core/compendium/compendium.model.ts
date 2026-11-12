@@ -69,7 +69,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Dodge',
     category: 'Active Defense',
     summary:
-      'Costs 1 AP Reaction before the attack roll (2d10 + Agility + Dodge) and shifts you 1 Tile. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent. Disabled by Heavy Armor or a Heavy/Tower Shield.',
+      'Costs 1 AP Reaction before the attack roll (2d10 + Agility + Dodge) and shifts you 5 ft. Winning by +5 or more triggers a Flawless Dodge, refunding the 1 AP spent. Disabled by Heavy Armor or a Heavy/Tower Shield.',
   },
   {
     id: 'kw-raise-shield',
@@ -267,6 +267,58 @@ export function resolveChainedKeywords(
   return chained;
 }
 
+export type PerkNodeUiKind =
+  | 'combat_art'
+  | 'combat_art_upgrade'
+  | 'passive_upgrade';
+
+export type CombatArtUpgradeTargetMode = 'specific_arts' | 'player_choice_tree';
+
+export type ActiveCombatTag = Exclude<CombatTag, 'None'>;
+
+export interface CombatArtUpgradeSpec {
+  target_mode: CombatArtUpgradeTargetMode;
+  target_art_ids?: string[];
+  add_combat_tags?: ActiveCombatTag[];
+  ap_cost_delta?: number;
+  cooldown_delta?: number;
+  bonus_attack_mod?: number;
+  bonus_flat_damage?: number;
+  bonus_sp_damage?: number;
+  ignore_armor_dr?: number;
+  push_tiles?: number;
+  self_shift_tiles?: number;
+  inflict_statuses?: Exclude<CombatStatusEffect, 'None'>[];
+}
+
+export const WEAPON_CATEGORY_OPTIONS = [
+  'Light',
+  'Martial',
+  'Heavy',
+  'Ranged',
+] as const;
+
+export type WeaponCategoryOption = (typeof WEAPON_CATEGORY_OPTIONS)[number];
+
+export type WeaponHandednessOption = 'one_handed' | 'two_handed';
+
+export interface CombatArtWeaponRequirement {
+  categories?: string[];
+  handedness?: WeaponHandednessOption;
+  requires_guard_weapon?: boolean;
+  requires_thrown?: boolean;
+  requires_shield?: boolean;
+  weapon_ids?: string[];
+  weapon_names?: string[];
+}
+
+export interface WeaponRequirementEvaluation {
+  hasRequirement: boolean;
+  satisfied: boolean;
+  label: string | null;
+  unmetReason: string | null;
+}
+
 export interface PerkRuleHooks {
   bonus_max_hp?: number;
   bonus_max_sp?: number;
@@ -286,6 +338,8 @@ export interface PerkRuleHooks {
   self_shift_tiles?: number;
   inflict_status?: CombatStatusEffect;
 
+  __art_upgrade?: CombatArtUpgradeSpec;
+  __weapon_req?: CombatArtWeaponRequirement;
   __icon?: string;
   __icon_color?: string;
   __icon_tint_custom?: boolean;
@@ -293,11 +347,19 @@ export interface PerkRuleHooks {
   __is_standalone?: boolean;
   __sort_order?: number;
   __tier?: number;
+  __parent_ids?: string[];
+  __unlock_mode?: PerkUnlockMode;
+  __canvas_x?: number;
+  __canvas_y?: number;
 }
+
+export type PerkUnlockMode = 'any' | 'all';
 
 export type EditableRuleHookKey = Exclude<
   keyof PerkRuleHooks,
   | 'disallow_defense'
+  | '__art_upgrade'
+  | '__weapon_req'
   | '__icon'
   | '__icon_color'
   | '__icon_tint_custom'
@@ -305,6 +367,10 @@ export type EditableRuleHookKey = Exclude<
   | '__is_standalone'
   | '__sort_order'
   | '__tier'
+  | '__parent_ids'
+  | '__unlock_mode'
+  | '__canvas_x'
+  | '__canvas_y'
 >;
 
 export interface RuleHookDefinition {
@@ -313,6 +379,8 @@ export interface RuleHookDefinition {
   category: 'Sheet Stat Bonus' | 'Combat Art Effect';
   valueType: 'number' | 'status';
   defaultValue: number | CombatStatusEffect;
+  unitScale?: number;
+  step?: number;
 }
 
 export interface RuleHookRow {
@@ -338,17 +406,21 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   },
   {
     key: 'push_tiles',
-    label: 'Push Target (Tiles)',
+    label: 'Push Target (ft)',
     category: 'Combat Art Effect',
     valueType: 'number',
-    defaultValue: 1,
+    defaultValue: 5,
+    unitScale: 5,
+    step: 5,
   },
   {
     key: 'self_shift_tiles',
-    label: 'Shift Self Before/After Strike (Tiles)',
+    label: 'Shift Self Before/After Strike (ft)',
     category: 'Combat Art Effect',
     valueType: 'number',
-    defaultValue: 1,
+    defaultValue: 5,
+    unitScale: 5,
+    step: 5,
   },
   {
     key: 'inflict_status',
@@ -387,10 +459,12 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   },
   {
     key: 'bonus_move_tiles',
-    label: 'Bonus Movement (Tiles per 1 AP)',
+    label: 'Bonus Movement (ft per 1 AP)',
     category: 'Sheet Stat Bonus',
     valueType: 'number',
-    defaultValue: 1,
+    defaultValue: 5,
+    unitScale: 5,
+    step: 5,
   },
   {
     key: 'bonus_attack_mod',
@@ -839,7 +913,12 @@ export function resolveNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisua
     defaultIcon = 'crimson-drop';
   }
 
-  const defaultColor = node.node_type === 'combat_art' ? '#FF8C5A' : '#38B29A';
+  const defaultColor =
+    node.node_type === 'combat_art'
+      ? '#FF8C5A'
+      : isCombatArtUpgradeNode(node)
+        ? '#F59E0B'
+        : '#38B29A';
 
   const icon =
     node.icon?.trim() ||
@@ -919,7 +998,7 @@ export function formatWeaponHookBadges(weapon: WeaponModel | null | undefined): 
   const hooks = weapon.rule_hooks ?? {};
 
   if (weapon.thrown_range_tiles && weapon.thrown_range_tiles > 0) {
-    badges.push(`Thrown (${weapon.thrown_range_tiles} Tiles)`);
+    badges.push(`Thrown (${Math.round(weapon.thrown_range_tiles * 5)} ft)`);
   }
   const parryBonus = Number(hooks['parry_roll_bonus'] ?? 0);
   if (parryBonus > 0) {
@@ -946,6 +1025,83 @@ export interface SkillTreeBranchNode {
   children: SkillTreeBranchNode[];
 }
 
+export interface SkillGraphPoint {
+  x: number;
+  y: number;
+}
+
+export interface SkillGraphRouteEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+}
+
+export const SKILL_CANVAS_GRID_SIZE = 20;
+export const SKILL_CANVAS_COL_GAP = 220;
+export const SKILL_CANVAS_ROW_GAP = 200;
+
+export function snapToCanvasGrid(value: number): number {
+  return Math.round(value / SKILL_CANVAS_GRID_SIZE) * SKILL_CANVAS_GRID_SIZE;
+}
+
+export function getNodeUnlockMode(node: PerkNodeModel): PerkUnlockMode {
+  return node.rule_hooks?.__unlock_mode === 'all' ? 'all' : 'any';
+}
+
+export function getNodeParentIds(
+  node: PerkNodeModel,
+  validTreeNodes?: PerkNodeModel[]
+): string[] {
+  if (isStandalonePerkNode(node)) return [];
+
+  const rawList: string[] = [];
+  const hookParents = node.rule_hooks?.__parent_ids;
+  if (Array.isArray(hookParents)) {
+    for (const id of hookParents) {
+      if (typeof id === 'string' && id.trim().length > 0) {
+        rawList.push(id.trim());
+      }
+    }
+  } else if (
+    typeof node.parent_node_id === 'string' &&
+    node.parent_node_id.trim().length > 0
+  ) {
+    rawList.push(node.parent_node_id.trim());
+  }
+
+  if (
+    hookParents === undefined &&
+    typeof node.parent_node_id === 'string' &&
+    node.parent_node_id.trim().length > 0 &&
+    !rawList.includes(node.parent_node_id.trim())
+  ) {
+    rawList.unshift(node.parent_node_id.trim());
+  }
+
+  let validIds: Set<string> | null = null;
+  if (validTreeNodes) {
+    validIds = new Set(
+      validTreeNodes
+        .filter(
+          (candidate) =>
+            candidate.tree_id === node.tree_id &&
+            isCompendiumItemActive(candidate)
+        )
+        .map((candidate) => candidate.id)
+    );
+  }
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const id of rawList) {
+    if (id === node.id || seen.has(id)) continue;
+    if (validIds && !validIds.has(id)) continue;
+    seen.add(id);
+    deduped.push(id);
+  }
+  return deduped;
+}
+
 export function getPerkNodeSortOrder(node: PerkNodeModel): number {
   const raw = node.rule_hooks?.__sort_order;
   return typeof raw === 'number' && Number.isFinite(raw)
@@ -970,10 +1126,12 @@ export function getDescendantNodeIds(
   const childrenByParent = new Map<string, string[]>();
 
   for (const n of allNodes) {
-    if (!n.parent_node_id) continue;
-    const list = childrenByParent.get(n.parent_node_id) ?? [];
-    list.push(n.id);
-    childrenByParent.set(n.parent_node_id, list);
+    const parents = getNodeParentIds(n, allNodes);
+    for (const pid of parents) {
+      const list = childrenByParent.get(pid) ?? [];
+      list.push(n.id);
+      childrenByParent.set(pid, list);
+    }
   }
 
   const stack = [...(childrenByParent.get(rootNodeId) ?? [])];
@@ -988,33 +1146,130 @@ export function getDescendantNodeIds(
   return descendants;
 }
 
-export function computePerkNodeTier(
-  treeId: string | null | undefined,
-  parentNodeId: string | null | undefined,
-  allNodes: PerkNodeModel[]
-): number {
-  if (!treeId || !parentNodeId) return 1;
+export function canConnectPerkRoute(
+  sourceId: string,
+  targetId: string,
+  treeNodes: PerkNodeModel[]
+): { allowed: boolean; reason?: 'self' | 'duplicate' | 'cycle' } {
+  if (!sourceId || !targetId || sourceId === targetId) {
+    return { allowed: false, reason: 'self' };
+  }
+  const source = treeNodes.find((n) => n.id === sourceId);
+  const target = treeNodes.find((n) => n.id === targetId);
+  if (!source || !target || source.tree_id !== target.tree_id) {
+    return { allowed: false, reason: 'self' };
+  }
+  const existingParents = getNodeParentIds(target, treeNodes);
+  if (existingParents.includes(sourceId)) {
+    return { allowed: false, reason: 'duplicate' };
+  }
+  const targetDescendants = getDescendantNodeIds(targetId, treeNodes);
+  if (targetDescendants.has(sourceId)) {
+    return { allowed: false, reason: 'cycle' };
+  }
+  return { allowed: true };
+}
 
-  const treeById = new Map<string, PerkNodeModel>();
+export function isPerkNodeReachableForUnlock(
+  node: PerkNodeModel,
+  unlockedIds: Iterable<string>,
+  treeNodes: PerkNodeModel[]
+): boolean {
+  const parents = getNodeParentIds(node, treeNodes);
+  if (parents.length === 0) return true;
+  const unlockedSet =
+    unlockedIds instanceof Set ? unlockedIds : new Set(unlockedIds);
+  if (getNodeUnlockMode(node) === 'all') {
+    return parents.every((pid) => unlockedSet.has(pid));
+  }
+  return parents.some((pid) => unlockedSet.has(pid));
+}
+
+export function pruneUnreachableUnlockedPerks(
+  unlockedIds: string[],
+  allNodes: PerkNodeModel[]
+): string[] {
+  const candidateSet = new Set(unlockedIds);
+  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  const activeByTree = new Map<string, PerkNodeModel[]>();
+
   for (const n of allNodes) {
-    if (n.tree_id === treeId) {
-      treeById.set(n.id, n);
+    if (!n.tree_id || !isCompendiumItemActive(n)) continue;
+    const list = activeByTree.get(n.tree_id) ?? [];
+    list.push(n);
+    activeByTree.set(n.tree_id, list);
+  }
+
+  const reachable = new Set<string>();
+
+  for (const id of candidateSet) {
+    const node = nodeById.get(id);
+    if (!node || isStandalonePerkNode(node) || !isCompendiumItemActive(node)) {
+      reachable.add(id);
     }
   }
 
-  let depth = 1;
-  let cursorId: string | null | undefined = parentNodeId;
-  const visited = new Set<string>();
-
-  while (cursorId && !visited.has(cursorId)) {
-    const parent = treeById.get(cursorId);
-    if (!parent) break;
-    visited.add(cursorId);
-    depth += 1;
-    cursorId = parent.parent_node_id;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const id of candidateSet) {
+      if (reachable.has(id)) continue;
+      const node = nodeById.get(id);
+      if (!node || !node.tree_id) continue;
+      const treeNodes = activeByTree.get(node.tree_id) ?? [];
+      if (isPerkNodeReachableForUnlock(node, reachable, treeNodes)) {
+        reachable.add(id);
+        changed = true;
+      }
+    }
   }
 
-  return depth;
+  return unlockedIds.filter((id) => reachable.has(id));
+}
+
+export function computePerkNodeTier(
+  treeId: string | null | undefined,
+  parentNodeIdOrIds: string | string[] | null | undefined,
+  allNodes: PerkNodeModel[]
+): number {
+  if (!treeId || !parentNodeIdOrIds) return 1;
+  const parentIds = Array.isArray(parentNodeIdOrIds)
+    ? parentNodeIdOrIds.filter(Boolean)
+    : [parentNodeIdOrIds];
+  if (parentIds.length === 0) return 1;
+
+  const treeNodes = allNodes.filter(
+    (n) => n.tree_id === treeId && isCompendiumItemActive(n)
+  );
+  const treeById = new Map<string, PerkNodeModel>(
+    treeNodes.map((n) => [n.id, n])
+  );
+  const memo = new Map<string, number>();
+
+  const depthOf = (id: string, visiting: Set<string>): number => {
+    if (memo.has(id)) return memo.get(id)!;
+    const node = treeById.get(id);
+    if (!node || visiting.has(id)) return 0;
+
+    const nextVisiting = new Set(visiting);
+    nextVisiting.add(id);
+
+    const parents = getNodeParentIds(node, treeNodes);
+    let maxParentDepth = 0;
+    for (const pid of parents) {
+      maxParentDepth = Math.max(maxParentDepth, depthOf(pid, nextVisiting));
+    }
+    const result = 1 + maxParentDepth;
+    memo.set(id, result);
+    return result;
+  };
+
+  let maxDepth = 0;
+  for (const pid of parentIds) {
+    maxDepth = Math.max(maxDepth, depthOf(pid, new Set<string>()));
+  }
+
+  return Math.max(1, 1 + maxDepth);
 }
 
 export function normalizePerkNodesTiers(allNodes: PerkNodeModel[]): PerkNodeModel[] {
@@ -1022,33 +1277,196 @@ export function normalizePerkNodesTiers(allNodes: PerkNodeModel[]): PerkNodeMode
     if (isStandalonePerkNode(node)) {
       return node.tier === 1 ? node : { ...node, tier: 1 };
     }
-    const computedTier = computePerkNodeTier(
-      node.tree_id,
-      node.parent_node_id,
-      allNodes
-    );
-    return node.tier === computedTier ? node : { ...node, tier: computedTier };
+    const parents = getNodeParentIds(node, allNodes);
+    const computedTier = computePerkNodeTier(node.tree_id, parents, allNodes);
+    const primaryParent = parents[0] ?? null;
+    if (
+      node.tier === computedTier &&
+      (node.parent_node_id ?? null) === primaryParent
+    ) {
+      return node;
+    }
+    return {
+      ...node,
+      tier: computedTier,
+      parent_node_id: primaryParent,
+    };
   });
 }
 
-/**
- * Builds a hierarchical forest of root nodes and their recursive child branches
- * for rendering a connected visual Skill Tree.
- */
+export function hasSavedCanvasPosition(node: PerkNodeModel): boolean {
+  const x = node.rule_hooks?.__canvas_x;
+  const y = node.rule_hooks?.__canvas_y;
+  return (
+    typeof x === 'number' &&
+    Number.isFinite(x) &&
+    typeof y === 'number' &&
+    Number.isFinite(y)
+  );
+}
+
+export function computeAutoGraphPositions(
+  treeNodes: PerkNodeModel[]
+): Map<string, SkillGraphPoint> {
+  const normalized = normalizePerkNodesTiers(treeNodes);
+  const byLayer = new Map<number, PerkNodeModel[]>();
+  let maxLayer = 1;
+
+  for (const node of normalized) {
+    const layer = Math.max(1, node.tier || 1);
+    maxLayer = Math.max(maxLayer, layer);
+    const list = byLayer.get(layer) ?? [];
+    list.push(node);
+    byLayer.set(layer, list);
+  }
+
+  const positions = new Map<string, SkillGraphPoint>();
+
+  for (let layer = 1; layer <= maxLayer; layer++) {
+    const row = byLayer.get(layer);
+    if (!row || row.length === 0) continue;
+
+    row.sort((a, b) => {
+      const aParents = getNodeParentIds(a, normalized)
+        .map((pid) => positions.get(pid)?.x)
+        .filter((val): val is number => val !== undefined);
+      const bParents = getNodeParentIds(b, normalized)
+        .map((pid) => positions.get(pid)?.x)
+        .filter((val): val is number => val !== undefined);
+
+      if (aParents.length > 0 && bParents.length > 0) {
+        const avgA = aParents.reduce((s, v) => s + v, 0) / aParents.length;
+        const avgB = bParents.reduce((s, v) => s + v, 0) / bParents.length;
+        if (Math.abs(avgA - avgB) > 1) {
+          return avgA - avgB;
+        }
+      }
+      return compareSiblingPerkNodes(a, b);
+    });
+
+    const y = (layer - 1) * SKILL_CANVAS_ROW_GAP;
+    const count = row.length;
+    row.forEach((node, idx) => {
+      const x = snapToCanvasGrid((idx - (count - 1) / 2) * SKILL_CANVAS_COL_GAP);
+      positions.set(node.id, { x, y });
+    });
+  }
+
+  return positions;
+}
+
+export function resolveSkillGraphLayout(
+  treeNodes: PerkNodeModel[]
+): Map<string, SkillGraphPoint> {
+  const autoMap = computeAutoGraphPositions(treeNodes);
+  const resolved = new Map<string, SkillGraphPoint>();
+  const occupied: SkillGraphPoint[] = [];
+
+  for (const node of treeNodes) {
+    if (hasSavedCanvasPosition(node)) {
+      const pt = {
+        x: snapToCanvasGrid(node.rule_hooks.__canvas_x!),
+        y: snapToCanvasGrid(node.rule_hooks.__canvas_y!),
+      };
+      resolved.set(node.id, pt);
+      occupied.push(pt);
+    }
+  }
+
+  for (const node of treeNodes) {
+    if (resolved.has(node.id)) continue;
+    const fallback = autoMap.get(node.id) ?? { x: 0, y: 0 };
+    let candidateX = fallback.x;
+    const candidateY = fallback.y;
+    let step = 1;
+    while (
+      occupied.some(
+        (p) =>
+          Math.abs(p.x - candidateX) < 120 && Math.abs(p.y - candidateY) < 120
+      )
+    ) {
+      const offset = Math.ceil(step / 2) * SKILL_CANVAS_COL_GAP;
+      candidateX =
+        fallback.x + (step % 2 === 1 ? offset : -offset);
+      step++;
+    }
+    const finalPt = { x: snapToCanvasGrid(candidateX), y: snapToCanvasGrid(candidateY) };
+    resolved.set(node.id, finalPt);
+    occupied.push(finalPt);
+  }
+
+  return resolved;
+}
+
+export function suggestNewNodeCanvasPosition(
+  treeNodes: PerkNodeModel[],
+  parentNodeId: string | null
+): SkillGraphPoint {
+  if (treeNodes.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const layout = resolveSkillGraphLayout(treeNodes);
+  const allPoints = Array.from(layout.values());
+  const isOccupied = (x: number, y: number) =>
+    allPoints.some((p) => Math.abs(p.x - x) < 130 && Math.abs(p.y - y) < 120);
+
+  if (!parentNodeId || !layout.has(parentNodeId)) {
+    const startingPoints = treeNodes
+      .filter((n) => getNodeParentIds(n, treeNodes).length === 0)
+      .map((n) => layout.get(n.id))
+      .filter((p): p is SkillGraphPoint => p !== undefined);
+
+    if (startingPoints.length === 0) {
+      const minY = Math.min(...allPoints.map((p) => p.y));
+      const maxX = Math.max(...allPoints.map((p) => p.x));
+      return {
+        x: snapToCanvasGrid(maxX + SKILL_CANVAS_COL_GAP),
+        y: snapToCanvasGrid(minY),
+      };
+    }
+
+    const baseY = snapToCanvasGrid(
+      Math.min(...startingPoints.map((p) => p.y))
+    );
+    let candidateX = snapToCanvasGrid(
+      Math.max(...startingPoints.map((p) => p.x)) + SKILL_CANVAS_COL_GAP
+    );
+    while (isOccupied(candidateX, baseY)) {
+      candidateX += SKILL_CANVAS_COL_GAP;
+    }
+    return { x: candidateX, y: baseY };
+  }
+
+  const parentPt = layout.get(parentNodeId)!;
+  const targetY = snapToCanvasGrid(parentPt.y + SKILL_CANVAS_ROW_GAP);
+  let candidateX = snapToCanvasGrid(parentPt.x);
+  let step = 1;
+  while (isOccupied(candidateX, targetY)) {
+    const offset = Math.ceil(step / 2) * SKILL_CANVAS_COL_GAP;
+    candidateX = snapToCanvasGrid(
+      parentPt.x + (step % 2 === 1 ? offset : -offset)
+    );
+    step++;
+  }
+  return { x: candidateX, y: targetY };
+}
+
 export function buildSkillTreeHierarchy(
   treeId: string,
   allNodes: PerkNodeModel[]
 ): SkillTreeBranchNode[] {
   const treeNodes = allNodes.filter((n) => n.tree_id === treeId);
-  const nodeIds = new Set(treeNodes.map((n) => n.id));
   const childrenMap = new Map<string, PerkNodeModel[]>();
   const roots: PerkNodeModel[] = [];
 
   for (const n of treeNodes) {
-    if (n.parent_node_id && nodeIds.has(n.parent_node_id)) {
-      const list = childrenMap.get(n.parent_node_id) ?? [];
+    const parents = getNodeParentIds(n, treeNodes);
+    const primaryParent = parents[0] ?? null;
+    if (primaryParent) {
+      const list = childrenMap.get(primaryParent) ?? [];
       list.push(n);
-      childrenMap.set(n.parent_node_id, list);
+      childrenMap.set(primaryParent, list);
     } else {
       roots.push(n);
     }
@@ -1122,9 +1540,10 @@ export function hooksObjectToRows(hooks: PerkRuleHooks | undefined | null): Rule
     } else {
       const num = Number(rawVal);
       if (num !== 0) {
+        const scale = def.unitScale ?? 1;
         rows.push({
           key: def.key,
-          numValue: num,
+          numValue: Math.round(num * scale),
           statusValue: 'Sundered',
         });
       }
@@ -1165,7 +1584,8 @@ export function rowsToHooksObject(
     } else {
       const num = Number(row.numValue);
       if (!Number.isNaN(num) && num !== 0) {
-        (result as Record<string, number>)[def.key] = num;
+        const scale = def.unitScale ?? 1;
+        (result as Record<string, number>)[def.key] = num / scale;
       }
     }
   }
@@ -1173,12 +1593,197 @@ export function rowsToHooksObject(
   return result;
 }
 
+export function isCombatArtUpgradeNode(
+  node: Pick<PerkNodeModel, 'node_type' | 'rule_hooks'> | null | undefined
+): boolean {
+  return Boolean(
+    node &&
+      node.node_type === 'passive_upgrade' &&
+      node.rule_hooks?.__art_upgrade
+  );
+}
+
+export function getNodeUiKind(
+  node: Pick<PerkNodeModel, 'node_type' | 'rule_hooks'> | null | undefined
+): PerkNodeUiKind {
+  if (!node) return 'combat_art';
+  if (node.node_type === 'combat_art') return 'combat_art';
+  if (isCombatArtUpgradeNode(node)) return 'combat_art_upgrade';
+  return 'passive_upgrade';
+}
+
+export const ART_UPGRADE_HOOK_KEYS: EditableRuleHookKey[] = [
+  'bonus_flat_damage',
+  'bonus_attack_mod',
+  'bonus_sp_damage',
+  'ignore_armor_dr',
+  'push_tiles',
+  'self_shift_tiles',
+  'inflict_status',
+];
+
+export function artUpgradeToHookRows(
+  spec: CombatArtUpgradeSpec | undefined | null
+): RuleHookRow[] {
+  if (!spec) return [];
+  const rows: RuleHookRow[] = [];
+
+  const numericMap: [EditableRuleHookKey, number | undefined][] = [
+    ['bonus_flat_damage', spec.bonus_flat_damage],
+    ['bonus_attack_mod', spec.bonus_attack_mod],
+    ['bonus_sp_damage', spec.bonus_sp_damage],
+    ['ignore_armor_dr', spec.ignore_armor_dr],
+    ['push_tiles', spec.push_tiles],
+    ['self_shift_tiles', spec.self_shift_tiles],
+  ];
+
+  for (const [key, rawVal] of numericMap) {
+    if (rawVal === undefined || rawVal === null) continue;
+    const num = Number(rawVal);
+    if (!Number.isNaN(num) && num !== 0) {
+      const def = RULE_HOOK_DEFINITIONS.find((d) => d.key === key);
+      const scale = def?.unitScale ?? 1;
+      rows.push({
+        key,
+        numValue: Math.round(num * scale),
+        statusValue: 'Sundered',
+      });
+    }
+  }
+
+  for (const st of spec.inflict_statuses ?? []) {
+    if (st) {
+      rows.push({
+        key: 'inflict_status',
+        numValue: 1,
+        statusValue: st,
+      });
+    }
+  }
+
+  return rows;
+}
+
+export function compileArtUpgradeSpec(input: {
+  targetMode: CombatArtUpgradeTargetMode;
+  targetArtIds: string[];
+  addCombatTags: ActiveCombatTag[];
+  apCostDelta: number;
+  cooldownDelta: number;
+  hookRows: RuleHookRow[];
+}): CombatArtUpgradeSpec {
+  const uniqueTags = Array.from(new Set(input.addCombatTags));
+  const uniqueTargetIds = Array.from(new Set(input.targetArtIds.filter(Boolean)));
+  const spec: CombatArtUpgradeSpec = {
+    target_mode: input.targetMode,
+  };
+
+  if (input.targetMode === 'specific_arts' && uniqueTargetIds.length > 0) {
+    spec.target_art_ids = uniqueTargetIds;
+  }
+  if (uniqueTags.length > 0) {
+    spec.add_combat_tags = uniqueTags;
+  }
+  const apDelta = Number(input.apCostDelta) || 0;
+  if (apDelta !== 0) {
+    spec.ap_cost_delta = apDelta;
+  }
+  const cdDelta = Number(input.cooldownDelta) || 0;
+  if (cdDelta !== 0) {
+    spec.cooldown_delta = cdDelta;
+  }
+
+  const statuses: Exclude<CombatStatusEffect, 'None'>[] = [];
+  for (const row of input.hookRows) {
+    const def = RULE_HOOK_DEFINITIONS.find((d) => d.key === row.key);
+    if (!def) continue;
+    if (def.valueType === 'status') {
+      if (row.statusValue && row.statusValue !== 'None' && !statuses.includes(row.statusValue)) {
+        statuses.push(row.statusValue);
+      }
+      continue;
+    }
+    const num = Number(row.numValue);
+    if (Number.isNaN(num) || num === 0) continue;
+    const scaled = num / (def.unitScale ?? 1);
+    if (row.key === 'bonus_flat_damage') {
+      spec.bonus_flat_damage = (spec.bonus_flat_damage ?? 0) + scaled;
+    } else if (row.key === 'bonus_attack_mod') {
+      spec.bonus_attack_mod = (spec.bonus_attack_mod ?? 0) + scaled;
+    } else if (row.key === 'bonus_sp_damage') {
+      spec.bonus_sp_damage = (spec.bonus_sp_damage ?? 0) + scaled;
+    } else if (row.key === 'ignore_armor_dr') {
+      spec.ignore_armor_dr = (spec.ignore_armor_dr ?? 0) + scaled;
+    } else if (row.key === 'push_tiles') {
+      spec.push_tiles = (spec.push_tiles ?? 0) + scaled;
+    } else if (row.key === 'self_shift_tiles') {
+      spec.self_shift_tiles = (spec.self_shift_tiles ?? 0) + scaled;
+    }
+  }
+
+  if (statuses.length > 0) {
+    spec.inflict_statuses = statuses;
+  }
+
+  return spec;
+}
+
+export function formatArtUpgradeBadges(
+  spec: CombatArtUpgradeSpec | undefined | null
+): string[] {
+  if (!spec) return [];
+  const badges: string[] = [];
+
+  for (const tag of spec.add_combat_tags ?? []) {
+    badges.push(`Grants ${tag} (${getCombatTagCounterLabel(tag)})`);
+  }
+  if (spec.ap_cost_delta) {
+    badges.push(
+      `${spec.ap_cost_delta > 0 ? '+' : ''}${spec.ap_cost_delta} AP Cost`
+    );
+  }
+  if (spec.cooldown_delta) {
+    badges.push(
+      `${spec.cooldown_delta > 0 ? '+' : ''}${spec.cooldown_delta} Rnd Cooldown`
+    );
+  }
+  if (spec.bonus_attack_mod) {
+    badges.push(
+      `${spec.bonus_attack_mod > 0 ? '+' : ''}${spec.bonus_attack_mod} Art Attack Roll`
+    );
+  }
+  if (spec.bonus_flat_damage) {
+    badges.push(
+      `${spec.bonus_flat_damage > 0 ? '+' : ''}${spec.bonus_flat_damage} Art Flat DMG`
+    );
+  }
+  if (spec.bonus_sp_damage) {
+    badges.push(`+${spec.bonus_sp_damage} SP DMG`);
+  }
+  if (spec.ignore_armor_dr) {
+    badges.push(`Pierces ${spec.ignore_armor_dr} Armor DR`);
+  }
+  if (spec.push_tiles) {
+    badges.push(`Push ${Math.round(spec.push_tiles * 5)} ft`);
+  }
+  if (spec.self_shift_tiles) {
+    badges.push(`Shift ${Math.round(spec.self_shift_tiles * 5)} ft`);
+  }
+  for (const st of spec.inflict_statuses ?? []) {
+    if (st) {
+      badges.push(`Inflicts ${st}`);
+    }
+  }
+
+  return badges;
+}
+
 /**
  * Formats human-readable mechanical badges from a PerkNode's structured `rule_hooks`.
  */
 export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): string[] {
   if (!hooks) return [];
-  const badges: string[] = [];
+  const badges: string[] = [...formatArtUpgradeBadges(hooks.__art_upgrade)];
 
   if (hooks.disallow_defense?.length) {
     badges.push(`No ${hooks.disallow_defense.join('/')}`);
@@ -1190,10 +1795,10 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
     badges.push(`Pierces ${hooks.ignore_armor_dr} Armor DR`);
   }
   if (hooks.push_tiles) {
-    badges.push(`Push ${hooks.push_tiles} ${hooks.push_tiles === 1 ? 'Tile' : 'Tiles'}`);
+    badges.push(`Push ${Math.round(hooks.push_tiles * 5)} ft`);
   }
   if (hooks.self_shift_tiles) {
-    badges.push(`Shift ${hooks.self_shift_tiles} ${hooks.self_shift_tiles === 1 ? 'Tile' : 'Tiles'}`);
+    badges.push(`Shift ${Math.round(hooks.self_shift_tiles * 5)} ft`);
   }
   if (hooks.inflict_status && hooks.inflict_status !== 'None') {
     badges.push(`Inflicts ${hooks.inflict_status}`);
@@ -1211,7 +1816,8 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
     badges.push(`+${hooks.bonus_armor_dr} Armor DR`);
   }
   if (hooks.bonus_move_tiles) {
-    badges.push(`+${hooks.bonus_move_tiles} Move Tile`);
+    const moveDeltaFeet = Math.round(hooks.bonus_move_tiles * 5);
+    badges.push(`${moveDeltaFeet > 0 ? '+' : ''}${moveDeltaFeet} ft Move`);
   }
   if (hooks.bonus_attack_mod) {
     badges.push(`+${hooks.bonus_attack_mod} Attack Roll`);
@@ -1230,4 +1836,217 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
   }
 
   return badges;
+}
+
+function formatOrList(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} or ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, or ${items[items.length - 1]}`;
+}
+
+export function normalizeWeaponRequirement(
+  req: CombatArtWeaponRequirement | undefined | null
+): CombatArtWeaponRequirement | undefined {
+  if (!req) return undefined;
+
+  const categories = Array.from(
+    new Set((req.categories ?? []).map((c) => c.trim()).filter(Boolean))
+  );
+  const handedness =
+    req.handedness === 'one_handed' || req.handedness === 'two_handed'
+      ? req.handedness
+      : undefined;
+  const requiresGuard = Boolean(req.requires_guard_weapon);
+  const requiresThrown = Boolean(req.requires_thrown);
+  const requiresShield = Boolean(req.requires_shield);
+  const weaponIds = Array.from(
+    new Set((req.weapon_ids ?? []).map((id) => id.trim()).filter(Boolean))
+  );
+  const weaponNames = Array.from(
+    new Set((req.weapon_names ?? []).map((n) => n.trim()).filter(Boolean))
+  );
+
+  if (
+    categories.length === 0 &&
+    !handedness &&
+    !requiresGuard &&
+    !requiresThrown &&
+    !requiresShield &&
+    weaponIds.length === 0
+  ) {
+    return undefined;
+  }
+
+  const normalized: CombatArtWeaponRequirement = {};
+  if (categories.length > 0) normalized.categories = categories;
+  if (handedness) normalized.handedness = handedness;
+  if (requiresGuard) normalized.requires_guard_weapon = true;
+  if (requiresThrown) normalized.requires_thrown = true;
+  if (requiresShield) normalized.requires_shield = true;
+  if (weaponIds.length > 0) {
+    normalized.weapon_ids = weaponIds;
+    if (weaponNames.length > 0) {
+      normalized.weapon_names = weaponNames;
+    }
+  }
+
+  return normalized;
+}
+
+export function hasWeaponRequirement(
+  req: CombatArtWeaponRequirement | undefined | null
+): boolean {
+  return Boolean(normalizeWeaponRequirement(req));
+}
+
+export function formatWeaponRequirementLabel(
+  req: CombatArtWeaponRequirement | undefined | null,
+  weapons?: Pick<WeaponModel, 'id' | 'name'>[]
+): string | null {
+  const norm = normalizeWeaponRequirement(req);
+  if (!norm) return null;
+
+  let specificPart = '';
+  if (norm.weapon_ids?.length) {
+    let resolvedNames: string[] = [];
+    if (weapons?.length) {
+      const byId = new Map(weapons.map((w) => [w.id, w.name]));
+      resolvedNames = norm.weapon_ids
+        .map((id) => byId.get(id))
+        .filter((n): n is string => Boolean(n));
+    }
+    if (resolvedNames.length === 0 && norm.weapon_names?.length) {
+      resolvedNames = norm.weapon_names;
+    }
+    specificPart =
+      resolvedNames.length > 0
+        ? formatOrList(resolvedNames)
+        : 'Specific Weapon';
+  }
+
+  const modifiers: string[] = [];
+  if (norm.handedness === 'one_handed') modifiers.push('One-Handed');
+  if (norm.handedness === 'two_handed') modifiers.push('Two-Handed');
+  if (norm.requires_guard_weapon) modifiers.push('Guard');
+  if (norm.requires_thrown) modifiers.push('Thrown');
+  if (norm.categories?.length) {
+    modifiers.push(formatOrList(norm.categories));
+  }
+
+  let weaponPart = '';
+  if (specificPart && modifiers.length > 0) {
+    weaponPart = `${modifiers.join(' ')} Weapon (${specificPart})`;
+  } else if (specificPart) {
+    weaponPart = specificPart;
+  } else if (modifiers.length > 0) {
+    weaponPart = `${modifiers.join(' ')} Weapon`;
+  }
+
+  if (weaponPart && norm.requires_shield) {
+    return `Requires ${weaponPart} + Equipped Shield`;
+  }
+  if (weaponPart) {
+    return `Requires ${weaponPart}`;
+  }
+  if (norm.requires_shield) {
+    return 'Requires Equipped Shield';
+  }
+  return null;
+}
+
+export function evaluateWeaponRequirement(
+  req: CombatArtWeaponRequirement | undefined | null,
+  activeWeapon: WeaponModel | null | undefined,
+  equippedShield: string | null | undefined = 'None',
+  weapons?: Pick<WeaponModel, 'id' | 'name'>[]
+): WeaponRequirementEvaluation {
+  const norm = normalizeWeaponRequirement(req);
+  if (!norm) {
+    return {
+      hasRequirement: false,
+      satisfied: true,
+      label: null,
+      unmetReason: null,
+    };
+  }
+
+  const label = formatWeaponRequirementLabel(norm, weapons);
+  const needsWeapon = Boolean(
+    norm.categories?.length ||
+      norm.handedness ||
+      norm.requires_guard_weapon ||
+      norm.requires_thrown ||
+      norm.weapon_ids?.length
+  );
+
+  let weaponOk = true;
+  if (needsWeapon) {
+    if (!activeWeapon) {
+      weaponOk = false;
+    } else {
+      if (norm.weapon_ids?.length && !norm.weapon_ids.includes(activeWeapon.id)) {
+        weaponOk = false;
+      }
+      if (
+        norm.categories?.length &&
+        !norm.categories.some(
+          (c) => c.toLowerCase() === (activeWeapon.category ?? '').toLowerCase()
+        )
+      ) {
+        weaponOk = false;
+      }
+      if (norm.handedness === 'one_handed' && isWeaponTwoHanded(activeWeapon)) {
+        weaponOk = false;
+      }
+      if (norm.handedness === 'two_handed' && !isWeaponTwoHanded(activeWeapon)) {
+        weaponOk = false;
+      }
+      if (norm.requires_guard_weapon && !isWeaponHeavy(activeWeapon)) {
+        weaponOk = false;
+      }
+      if (
+        norm.requires_thrown &&
+        !(Number(activeWeapon.thrown_range_tiles ?? 0) > 0)
+      ) {
+        weaponOk = false;
+      }
+    }
+  }
+
+  let shieldOk = true;
+  let shieldReason = '';
+  if (norm.requires_shield) {
+    const hasShield = Boolean(equippedShield && equippedShield !== 'None');
+    const stowed = isWeaponTwoHanded(activeWeapon);
+    if (!hasShield) {
+      shieldOk = false;
+      shieldReason = 'No Shield equipped';
+    } else if (stowed) {
+      shieldOk = false;
+      shieldReason = `Shield stowed while wielding ${activeWeapon?.name ?? 'Two-Handed weapon'}`;
+    }
+  }
+
+  const satisfied = weaponOk && shieldOk;
+  let unmetReason: string | null = null;
+
+  if (!satisfied) {
+    if (!weaponOk && !activeWeapon) {
+      unmetReason = `${label} (Currently Unarmed)`;
+    } else if (!shieldOk && shieldReason) {
+      unmetReason = `${label} (${shieldReason})`;
+    } else if (activeWeapon) {
+      unmetReason = `${label} (Active: ${activeWeapon.name} · ${activeWeapon.category})`;
+    } else {
+      unmetReason = label;
+    }
+  }
+
+  return {
+    hasRequirement: true,
+    satisfied,
+    label,
+    unmetReason,
+  };
 }

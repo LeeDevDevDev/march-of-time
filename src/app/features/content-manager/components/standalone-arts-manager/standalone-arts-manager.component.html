@@ -139,6 +139,19 @@
                           {{ node.combat_tag }}
                         </span>
                       }
+                      @if (getNodeWeaponReqLabel(node); as wepReqLabel) {
+                        <span
+                          class="badge-warn inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
+                        >
+                          {{ wepReqLabel }}
+                        </span>
+                      }
+                    } @else if (isCombatArtUpgradeNode(node)) {
+                      <span
+                        class="inline-flex items-center rounded-full border border-[#F59E0B]/50 bg-[#F59E0B]/15 px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#F59E0B]"
+                      >
+                        Art Upgrade
+                      </span>
                     } @else {
                       <span
                         class="badge-jade inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono-num text-xs font-bold"
@@ -310,6 +323,16 @@
                 placement="top"
                 tone="dark"
               />
+
+              @if (getNodeWeaponReqLabel(selNode); as selWepReq) {
+                <div class="pt-1">
+                  <span
+                    class="badge-warn inline-flex items-center rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold"
+                  >
+                    {{ selWepReq }}
+                  </span>
+                </div>
+              }
 
               @if (getNodeHookBadges(selNode).length > 0) {
                 <div class="flex flex-wrap gap-1.5 pt-2">

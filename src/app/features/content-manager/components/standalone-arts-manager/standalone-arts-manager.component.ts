@@ -5,8 +5,10 @@ import {
   PerkNodeModel,
   ResolvedCompendiumVisuals,
   formatRuleHookBadges,
+  formatWeaponRequirementLabel,
   getCombatTagBadgeClass,
   getCombatTagCounterLabel,
+  isCombatArtUpgradeNode,
   resolveNodeVisuals,
 } from '../../../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../../../core/compendium/compendium.store';
@@ -25,6 +27,7 @@ export class StandaloneArtsManagerComponent {
   readonly characterStore = inject(CharacterStore);
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
   readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
+  readonly isCombatArtUpgradeNode = isCombatArtUpgradeNode;
 
   readonly createStandaloneNode = output<void>();
   readonly editStandaloneNode = output<PerkNodeModel>();
@@ -57,6 +60,7 @@ export class StandaloneArtsManagerComponent {
   readonly standaloneFilterOptions: { id: string; label: string }[] = [
     { id: 'All', label: 'All Standalone' },
     { id: 'combat_art', label: 'Combat Arts' },
+    { id: 'combat_art_upgrade', label: 'Art Upgrades' },
     { id: 'passive_upgrade', label: 'Passives' },
     { id: 'Crushing', label: 'Crushing' },
     { id: 'Sweeping', label: 'Sweeping' },
@@ -72,9 +76,12 @@ export class StandaloneArtsManagerComponent {
         if (filter === 'combat_art' && node.node_type !== 'combat_art') {
           return false;
         }
+        if (filter === 'combat_art_upgrade' && !isCombatArtUpgradeNode(node)) {
+          return false;
+        }
         if (
           filter === 'passive_upgrade' &&
-          node.node_type !== 'passive_upgrade'
+          (node.node_type !== 'passive_upgrade' || isCombatArtUpgradeNode(node))
         ) {
           return false;
         }
@@ -116,6 +123,14 @@ export class StandaloneArtsManagerComponent {
 
   getNodeHookBadges(node: PerkNodeModel): string[] {
     return formatRuleHookBadges(node.rule_hooks);
+  }
+
+  getNodeWeaponReqLabel(node: PerkNodeModel): string | null {
+    if (node.node_type !== 'combat_art') return null;
+    return formatWeaponRequirementLabel(
+      node.rule_hooks?.__weapon_req,
+      this.compendiumStore.weapons()
+    );
   }
 
   async toggleGrantToCharacter(characterId: string, node: PerkNodeModel): Promise<void> {

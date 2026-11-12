@@ -150,11 +150,12 @@
                 </div>
 
                 <div class="flex items-center gap-1.5 font-mono-num text-xs font-bold tabular-nums">
-                  @if (getMaxTierForTree(tree.id) > 0) {
+                  @if (countRoutesForTree(tree.id) > 0) {
                     <span
                       class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1 text-[var(--mot-muted)]"
                     >
-                      Depth T{{ getMaxTierForTree(tree.id) }}
+                      {{ countRoutesForTree(tree.id) }}
+                      {{ countRoutesForTree(tree.id) === 1 ? 'Route' : 'Routes' }}
                     </span>
                   }
                   <span
@@ -179,6 +180,13 @@
                 >
                   {{ countNodeType(tree.id, 'combat_art') }} Combat Arts
                 </span>
+                @if (countArtUpgrades(tree.id) > 0) {
+                  <span
+                    class="rounded-md border border-[#F59E0B]/40 bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[#F59E0B] tabular-nums"
+                  >
+                    {{ countArtUpgrades(tree.id) }} Art Upgrades
+                  </span>
+                }
                 <span
                   class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 font-semibold text-[var(--mot-sp-text)] tabular-nums"
                 >
@@ -292,7 +300,7 @@
           (click)="createRootNode.emit(tree.id)"
           class="btn-copper rounded-lg px-4 py-2 text-xs font-semibold"
         >
-          + Add Tier 1 Node
+          + Add Starting Node
         </button>
       </div>
     </div>
@@ -329,7 +337,7 @@
           </h2>
           @if (!editingTreeId()) {
             <p class="text-xs text-[#8AB0AB]">
-              Opens immediately onto the interactive canvas so you can start placing Tier 1 nodes.
+              Opens immediately onto the interactive canvas so you can start placing and connecting nodes.
             </p>
           }
         </div>
@@ -453,10 +461,10 @@
             (ngModelChange)="attachParentId.set($event)"
             class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
           >
-            <option value="">Tier 1 — Root Node (No Prerequisite)</option>
+            <option value="">Starting Node (No Prerequisite)</option>
             @for (existingNode of activeTreeNodes(); track existingNode.id) {
               <option [value]="existingNode.id">
-                Tier {{ existingNode.tier + 1 }} — Child under "{{ existingNode.name }}"
+                Connect route from "{{ existingNode.name }}"
               </option>
             }
           </select>
@@ -516,8 +524,8 @@
                 <div class="flex min-w-0 items-center gap-3">
                   <div
                     class="flex h-10 w-10 shrink-0 items-center justify-center border-2 bg-[#122220]"
-                    [class.rounded-xl]="cand.node_type === 'combat_art'"
-                    [class.rounded-full]="cand.node_type !== 'combat_art'"
+                    [class.rounded-xl]="cand.node_type === 'combat_art' || isCombatArtUpgradeNode(cand)"
+                    [class.rounded-full]="cand.node_type !== 'combat_art' && !isCombatArtUpgradeNode(cand)"
                     [style.border-color]="getNodeVisuals(cand).color"
                   >
                     <app-compendium-icon
@@ -536,7 +544,13 @@
                       <span
                         class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-bold text-[var(--mot-muted)]"
                       >
-                        {{ cand.node_type === 'combat_art' ? 'Combat Art' : 'Passive' }}
+                        {{
+                          cand.node_type === 'combat_art'
+                            ? 'Combat Art'
+                            : isCombatArtUpgradeNode(cand)
+                              ? 'Art Upgrade'
+                              : 'Passive'
+                        }}
                       </span>
                       @if (cand.node_type === 'combat_art' && cand.combat_tag && cand.combat_tag !== 'None') {
                         <span

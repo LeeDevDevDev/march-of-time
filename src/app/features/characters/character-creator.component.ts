@@ -5,6 +5,7 @@ import {
   ResolvedCompendiumVisuals,
   formatWeaponHookBadges,
   getTreeArchetypeIcon,
+  pruneUnreachableUnlockedPerks,
   resolveTreeVisuals,
   resolveWeaponVisuals,
 } from '../../core/compendium/compendium.model';
@@ -310,19 +311,11 @@ export class CharacterCreatorComponent {
     const perkId = node.id;
     this.unlockedPerkIds.update((ids) => {
       if (ids.includes(perkId)) {
-        const allNodes = this.characterStore.perkNodes();
-        const toRemove = new Set<string>([perkId]);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const p of allNodes) {
-            if (p.parent_node_id && toRemove.has(p.parent_node_id) && !toRemove.has(p.id)) {
-              toRemove.add(p.id);
-              changed = true;
-            }
-          }
-        }
-        return ids.filter((id) => !toRemove.has(id));
+        const remaining = ids.filter((id) => id !== perkId);
+        return pruneUnreachableUnlockedPerks(
+          remaining,
+          this.characterStore.perkNodes()
+        );
       }
       return [...ids, perkId];
     });

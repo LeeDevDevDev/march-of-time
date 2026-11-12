@@ -14,12 +14,12 @@ export interface AppNotification {
   message?: string;
   createdAt: string;
   read: boolean;
-  dismissedToast: boolean;
   action?: NotificationAction;
 }
 
 interface NotificationState {
-  items: AppNotification[];
+  toasts: AppNotification[];
+  inbox: AppNotification[];
   drawerOpen: boolean;
 }
 
@@ -28,18 +28,15 @@ export class NotificationStore {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   readonly #state = signal<NotificationState>({
-    items: [],
+    toasts: [],
+    inbox: [],
     drawerOpen: false,
   });
 
-  readonly history = computed(() => this.#state().items);
-  readonly activeToasts = computed(() =>
-    this.#state()
-      .items.filter((item) => !item.dismissedToast)
-      .slice(0, 4)
-  );
+  readonly activeToasts = computed(() => this.#state().toasts.slice(0, 4));
+  readonly history = computed(() => this.#state().inbox);
   readonly unreadCount = computed(
-    () => this.#state().items.filter((item) => !item.read).length
+    () => this.#state().inbox.filter((item) => !item.read).length
   );
   readonly drawerOpen = computed(() => this.#state().drawerOpen);
 
@@ -49,6 +46,7 @@ export class NotificationStore {
     message?: string;
     durationMs?: number;
     action?: NotificationAction;
+    persistInInbox?: boolean;
   }): string {
     const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const entry: AppNotification = {
@@ -58,13 +56,15 @@ export class NotificationStore {
       message: input.message,
       createdAt: new Date().toISOString(),
       read: false,
-      dismissedToast: false,
       action: input.action,
     };
 
     this.#state.update((s) => ({
       ...s,
-      items: [entry, ...s.items].slice(0, 30),
+      toasts: [entry, ...s.toasts].slice(0, 8),
+      inbox: input.persistInInbox
+        ? [entry, ...s.inbox].slice(0, 30)
+        : s.inbox,
     }));
 
     const duration = input.durationMs ?? (input.action ? 6500 : 4200);
@@ -75,6 +75,38 @@ export class NotificationStore {
       this.timers.set(id, timer);
     }
 
+    return id;
+  }
+
+  pushInboxNotification(input: {
+    tone?: NotificationTone;
+    title: string;
+    message?: string;
+    action?: NotificationAction;
+    alsoToast?: boolean;
+  }): string {
+    if (input.alsoToast !== false) {
+      return this.notify({
+        ...input,
+        persistInInbox: true,
+      });
+    }
+
+    const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const entry: AppNotification = {
+      id,
+      tone: input.tone ?? 'info',
+      title: input.title,
+      message: input.message,
+      createdAt: new Date().toISOString(),
+      read: false,
+      action: input.action,
+    };
+
+    this.#state.update((s) => ({
+      ...s,
+      inbox: [entry, ...s.inbox].slice(0, 30),
+    }));
     return id;
   }
 
@@ -107,21 +139,23 @@ export class NotificationStore {
     }
     this.#state.update((s) => ({
       ...s,
-      items: s.items.map((item) =>
-        item.id === id ? { ...item, dismissedToast: true } : item
-      ),
+      toasts: s.toasts.filter((item) => item.id !== id),
     }));
   }
 
   triggerAction(item: AppNotification): void {
     if (!item.action) return;
     const cb = item.action.callback;
+    const timer = this.timers.get(item.id);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(item.id);
+    }
     this.#state.update((s) => ({
       ...s,
-      items: s.items.map((n) =>
-        n.id === item.id
-          ? { ...n, read: true, dismissedToast: true, action: undefined }
-          : n
+      toasts: s.toasts.filter((t) => t.id !== item.id),
+      inbox: s.inbox.map((n) =>
+        n.id === item.id ? { ...n, read: true, action: undefined } : n
       ),
     }));
     void cb();
@@ -132,7 +166,7 @@ export class NotificationStore {
     this.#state.update((s) => ({
       ...s,
       drawerOpen: nextOpen,
-      items: nextOpen ? s.items.map((n) => ({ ...n, read: true })) : s.items,
+      inbox: nextOpen ? s.inbox.map((n) => ({ ...n, read: true })) : s.inbox,
     }));
   }
 
@@ -145,18 +179,14 @@ export class NotificationStore {
   markAllRead(): void {
     this.#state.update((s) => ({
       ...s,
-      items: s.items.map((n) => ({ ...n, read: true })),
+      inbox: s.inbox.map((n) => ({ ...n, read: true })),
     }));
   }
 
   clearHistory(): void {
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-    }
-    this.timers.clear();
     this.#state.update((s) => ({
       ...s,
-      items: [],
+      inbox: [],
     }));
   }
 }
