@@ -75,6 +75,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'collections',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/collections/collections-manager.component').then(
+        (m) => m.CollectionsManagerComponent
+      ),
+  },
+  {
     path: 'content-manager',
     canActivate: [authGuard, adminGuard],
     loadComponent: () =>
@@ -117,6 +125,13 @@ export const routes: Routes = [
       },
       {
         path: 'keywords',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'collections',
         loadComponent: () =>
           import('./features/content-manager/content-manager.component').then(
             (m) => m.ContentManagerRouteSlotComponent

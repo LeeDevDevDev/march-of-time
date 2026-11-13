@@ -1,5 +1,6 @@
 import {
   HexCoord,
+  VttGridMode,
   VttLightSource,
   VttPoint,
   VttTokenModel,
@@ -9,6 +10,7 @@ import {
   HexGridGeometry,
   doesWallBlockVision,
   feetToWorldPixels,
+  getTokenWorldCenter,
   hexKey,
   hexToWorldCenter,
   segmentsIntersect,
@@ -164,7 +166,8 @@ export function buildLightPolygons(
   mapLights: VttLightSource[],
   tokens: VttTokenModel[],
   walls: VttWallSegment[],
-  geom: HexGridGeometry
+  geom: HexGridGeometry,
+  gridMode: VttGridMode = 'square'
 ): ComputedLightPolygon[] {
   const results: ComputedLightPolygon[] = [];
 
@@ -189,7 +192,7 @@ export function buildLightPolygons(
     if (tok.is_hidden) continue;
     const dimFeet = Math.max(tok.light_dim_feet ?? 0, tok.light_bright_feet ?? 0);
     if (dimFeet <= 0) continue;
-    const origin = hexToWorldCenter({ col: tok.x, row: tok.y }, geom);
+    const origin = getTokenWorldCenter(tok, geom, gridMode);
     const brightPx = feetToWorldPixels(tok.light_bright_feet ?? 0, geom.gridSizePx);
     const dimPx = feetToWorldPixels(dimFeet, geom.gridSizePx);
     results.push({
@@ -210,10 +213,11 @@ export function buildObserverVisions(
   walls: VttWallSegment[],
   geom: HexGridGeometry,
   globalIllumination: boolean,
-  maxWorldDiagPx: number
+  maxWorldDiagPx: number,
+  gridMode: VttGridMode = 'square'
 ): ComputedObserverVision[] {
   return observers.map((tok) => {
-    const origin = hexToWorldCenter({ col: tok.x, row: tok.y }, geom);
+    const origin = getTokenWorldCenter(tok, geom, gridMode);
     const visionFeet = Math.max(
       5,
       tok.vision_feet ?? 60,
@@ -253,17 +257,39 @@ export function isWorldPointVisibleToObservers(
   if (observers.length === 0) return false;
 
   for (const obs of observers) {
-    if (!hasLineOfSight(obs.origin, target, walls)) {
-      continue;
-    }
-
     if (globalIllumination) {
-      return true;
+      if (hasLineOfSight(obs.origin, target, walls)) {
+        return true;
+      }
+      continue;
     }
 
     const dx = target.x - obs.origin.x;
     const dy = target.y - obs.origin.y;
-    if (dx * dx + dy * dy <= obs.personalVisionPx * obs.personalVisionPx) {
+    const inPersonalRange =
+      dx * dx + dy * dy <= obs.personalVisionPx * obs.personalVisionPx;
+
+    let inAnyLightRange = false;
+    if (!inPersonalRange) {
+      for (const light of lights) {
+        const ldx = target.x - light.origin.x;
+        const ldy = target.y - light.origin.y;
+        if (ldx * ldx + ldy * ldy <= light.dimRadiusPx * light.dimRadiusPx) {
+          inAnyLightRange = true;
+          break;
+        }
+      }
+    }
+
+    if (!inPersonalRange && !inAnyLightRange) {
+      continue;
+    }
+
+    if (!hasLineOfSight(obs.origin, target, walls)) {
+      continue;
+    }
+
+    if (inPersonalRange) {
       return true;
     }
 

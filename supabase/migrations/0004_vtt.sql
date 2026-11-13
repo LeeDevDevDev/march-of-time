@@ -5,7 +5,7 @@ alter table public.vtt_encounters
   add column if not exists grid_size_px int not null default 64,
   add column if not exists grid_offset_x int not null default 0,
   add column if not exists grid_offset_y int not null default 0,
-  add column if not exists grid_opacity numeric(3,2) not null default 0.35,
+  add column if not exists grid_opacity numeric(3,2) not null default 0.20,
   add column if not exists fog_enabled boolean not null default true,
   add column if not exists global_illumination boolean not null default false,
   add column if not exists darkness_level numeric(3,2) not null default 0.85,

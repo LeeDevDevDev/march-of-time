@@ -3,6 +3,9 @@
   (wheel)="onWheel($event)"
   (pointerdown)="onViewportPointerDown($event)"
   (contextmenu)="onContextMenu($event)"
+  (dragover)="onViewportDragOver($event)"
+  (dragleave)="onViewportDragLeave($event)"
+  (drop)="onViewportDrop($event)"
   class="relative h-full w-full overflow-hidden select-none bg-[#060B0A]"
   [class.cursor-grabbing]="isPanning()"
   [class.cursor-grab]="!isPanning() && (spacePressed() || vttStore.activeTool() === 'pan')"
@@ -16,6 +19,33 @@
   "
 >
   <canvas #battleCanvas class="block h-full w-full"></canvas>
+
+  @if (!vttStore.activeScene()) {
+    <div
+      (pointerdown)="$event.stopPropagation()"
+      class="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 p-6 text-center text-[#EBF5F3]"
+    >
+      <div class="rounded-2xl border border-[#243B37] bg-[#0D1615]/95 p-6 shadow-2xl max-w-sm space-y-3">
+        <div class="font-display text-base font-bold text-white">No Scene Loaded</div>
+        <p class="text-xs leading-relaxed text-[#8AB0AB]">
+          @if (vttStore.isGm()) {
+            Create a blank scene from the Scenes directory to begin building your battlemap.
+          } @else {
+            Waiting for the Game Master to activate a scene for the party.
+          }
+        </p>
+        @if (vttStore.isGm()) {
+          <button
+            type="button"
+            (click)="requestCreateMap.emit()"
+            class="btn-copper rounded-lg px-4 py-2 text-xs font-bold"
+          >
+            + Create Blank Scene
+          </button>
+        }
+      </div>
+    </div>
+  }
 
   <div
     class="pointer-events-none absolute left-0 top-0 origin-top-left"
@@ -112,6 +142,7 @@
     @for (item of renderableTokens(); track item.token.id) {
       <div
         (pointerdown)="onTokenPointerDown($event, item)"
+        (contextmenu)="onTokenContextMenu($event, item)"
         [style.left.px]="item.center.x"
         [style.top.px]="item.center.y"
         class="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 select-none group"
@@ -248,6 +279,67 @@
       </div>
     }
   </div>
+
+  @if (tokenContextMenu(); as tMenu) {
+    @if (contextMenuToken(); as menuToken) {
+      <div
+        (pointerdown)="$event.stopPropagation()"
+        (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+        [style.left.px]="tMenu.screenX"
+        [style.top.px]="tMenu.screenY"
+        class="mot-float absolute z-40 w-48 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+      >
+        <div class="flex items-center justify-between gap-1.5 border-b border-[#243B37] px-2.5 py-1.5">
+          <span class="truncate font-display text-[11px] font-bold text-white">
+            {{ menuToken.name }}
+          </span>
+          <span
+            class="shrink-0 rounded px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase"
+            [class.bg-[#2B1D0E]]="menuToken.is_hidden"
+            [class.text-[#FDE68A]]="menuToken.is_hidden"
+            [class.bg-[#102B26]]="!menuToken.is_hidden"
+            [class.text-[#5EEAD4]]="!menuToken.is_hidden"
+          >
+            {{ menuToken.is_hidden ? 'Invisible' : 'Visible' }}
+          </span>
+        </div>
+
+        <div class="mt-1 space-y-0.5">
+          <button
+            type="button"
+            (click)="toggleTokenHiddenFromMenu(menuToken)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <svg class="h-3.5 w-3.5 text-[#FBBF24]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              @if (menuToken.is_hidden) {
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              } @else {
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              }
+            </svg>
+            <span>{{ menuToken.is_hidden ? 'Reveal to Players' : 'Make Invisible (Hide)' }}</span>
+          </button>
+
+          <div class="my-0.5 border-t border-[#243B37]"></div>
+
+          <button
+            type="button"
+            (click)="removeTokenFromMenu(menuToken.id)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDA4AF] hover:bg-[#3B1822] hover:text-white"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            <span>Remove Token</span>
+          </button>
+        </div>
+      </div>
+    }
+  }
 
   @if (lightContextMenu(); as menu) {
     @if (contextMenuLight(); as menuLight) {
@@ -427,13 +519,48 @@
     </div>
   }
 
+  @if (chainedTokenMove(); as chain) {
+    <div
+      (pointerdown)="$event.stopPropagation()"
+      class="mot-float absolute left-1/2 top-3 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border border-[#38B29A] bg-[#0D1615]/95 px-3 py-1.5 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+    >
+      <span class="font-display font-bold text-[#5EEAD4]">
+        Chained Move ({{ chain.tokenName }})
+      </span>
+      <span class="rounded bg-[#142220] px-2 py-0.5 font-mono-num font-bold text-white">
+        {{ chain.totalFeet }} ft · {{ chain.legs.length }} {{ chain.legs.length === 1 ? 'leg' : 'legs' }}
+      </span>
+      <span class="hidden lg:inline text-[11px] text-[#8AB0AB]">
+        Hold Left-Drag to chain · Release Ctrl to commit · Right-Click to cancel
+      </span>
+      <button
+        type="button"
+        (click)="commitActiveChainedMove()"
+        class="rounded-md border border-[#38B29A]/60 bg-[#112A26] px-2 py-0.5 text-[11px] font-bold text-[#5EEAD4] hover:bg-[#193C36]"
+      >
+        Commit
+      </button>
+      <button
+        type="button"
+        (click)="cancelActiveMovementOrDraft()"
+        class="rounded-md border border-[#6E293B] bg-[#3B1822] px-2 py-0.5 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+      >
+        Cancel
+      </button>
+    </div>
+  }
+
   <div
     (pointerdown)="$event.stopPropagation()"
     class="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615]/92 px-2.5 py-1.5 text-xs text-[#EBF5F3] shadow-lg backdrop-blur-xs"
   >
-    @if (hoveredHex(); as h) {
+    @if (isGridless()) {
+      <span class="hidden sm:inline-block border-r border-[#243B37] pr-2 font-mono-num text-[11px] text-[#5EEAD4]">
+        Gridless
+      </span>
+    } @else if (hoveredHex(); as h) {
       <span class="hidden sm:inline-block border-r border-[#243B37] pr-2 font-mono-num text-[11px] text-[#8AB0AB]">
-        Hex ({{ h.col }}, {{ h.row }})
+        Tile ({{ h.col }}, {{ h.row }})
       </span>
     }
 

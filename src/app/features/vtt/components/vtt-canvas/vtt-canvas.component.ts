@@ -7,6 +7,7 @@ import {
   computed,
   effect,
   inject,
+  output,
   signal,
   viewChild,
 } from '@angular/core';
@@ -15,15 +16,18 @@ import { CompendiumIconComponent } from '../../../../shared/compendium-icon/comp
 import {
   HexPathResult,
   clampHexToBounds,
+  clampWorldPointToBounds,
   feetToWorldPixels,
   findHexPath,
   getHexDistanceFeet,
   getHexPolygonPoints,
   getHexRadius,
-  getHexWorldBounds,
+  getTokenDistanceFeet,
+  getTokenWorldCenter,
   hexKey,
   hexToWorldCenter,
   isHexInBounds,
+  isWorldSegmentBlockedByWalls,
   parseHexKey,
   worldPixelsToFeet,
   worldPointToHex,
@@ -36,9 +40,12 @@ import {
   isWorldPointVisibleToObservers,
 } from '../../engine/visibility.engine';
 import {
+  DEFAULT_VTT_BG_COLOR,
   HexCoord,
+  VttGridMode,
   VttLightSource,
   VttPoint,
+  VttRosterDragPayload,
   VttTokenModel,
   VttWallSegment,
 } from '../../models/vtt.model';
@@ -46,11 +53,52 @@ import { VttStore } from '../../store/vtt.store';
 
 interface DragTokenState {
   tokenId: string;
+  gridMode: VttGridMode;
+  freeUnsnap: boolean;
   startHex: HexCoord;
   currentHex: HexCoord;
+  startWorld: VttPoint;
+  currentWorld: VttPoint;
+  pointerDownWorld: VttPoint;
   hasMoved: boolean;
   shiftOverride: boolean;
   pathResult: HexPathResult;
+  gridlessBlocked: boolean;
+  gridlessFeet: number;
+}
+
+export interface ChainedMoveLeg {
+  fromHex: HexCoord;
+  toHex: HexCoord;
+  fromWorld: VttPoint;
+  toWorld: VttPoint;
+  hexPath: HexCoord[];
+  feet: number;
+  cumulativeFeet: number;
+  shiftOverride: boolean;
+  freeUnsnap: boolean;
+}
+
+export interface ChainedTokenMoveState {
+  tokenId: string;
+  tokenName: string;
+  gridMode: VttGridMode;
+  originHex: HexCoord;
+  originWorld: VttPoint;
+  currentHex: HexCoord;
+  currentWorld: VttPoint;
+  legs: ChainedMoveLeg[];
+  totalFeet: number;
+  anyShiftOverride: boolean;
+  lastUnsnapped: boolean;
+}
+
+interface RosterDropPreviewState {
+  worldPt: VttPoint;
+  hex: HexCoord;
+  unsnapped: boolean;
+  name: string;
+  color: string;
 }
 
 interface DragLightState {
@@ -70,6 +118,12 @@ interface LightPlacementDraft {
 
 export interface LightContextMenuState {
   lightId: string;
+  screenX: number;
+  screenY: number;
+}
+
+export interface TokenContextMenuState {
+  tokenId: string;
   screenX: number;
   screenY: number;
 }
@@ -124,6 +178,8 @@ export class VttCanvasComponent implements AfterViewInit {
   readonly vttStore = inject(VttStore);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly requestCreateMap = output<void>();
+
   readonly lightColorSwatches = [
     '#FF9B42',
     '#FEF08A',
@@ -143,16 +199,24 @@ export class VttCanvasComponent implements AfterViewInit {
   readonly panY = signal(48);
   readonly zoom = signal(1);
   readonly spacePressed = signal(false);
+  readonly ctrlPressed = signal(false);
+  readonly shiftPressed = signal(false);
   readonly isPanning = signal(false);
 
   readonly hoveredHex = signal<HexCoord | null>(null);
+  readonly lastPointerWorld = signal<VttPoint | null>(null);
+  readonly rosterDropPreview = signal<RosterDropPreviewState | null>(null);
   readonly dragTokenState = signal<DragTokenState | null>(null);
+  readonly chainedTokenMove = signal<ChainedTokenMoveState | null>(null);
   readonly dragLightState = signal<DragLightState | null>(null);
   readonly lightPlacementDraft = signal<LightPlacementDraft | null>(null);
   readonly lightContextMenu = signal<LightContextMenuState | null>(null);
+  readonly tokenContextMenu = signal<TokenContextMenuState | null>(null);
   readonly editingLightDraft = signal<EditingLightDraft | null>(null);
   readonly rulerStart = signal<HexCoord | null>(null);
   readonly rulerCurrent = signal<HexCoord | null>(null);
+  readonly rulerWorldStart = signal<VttPoint | null>(null);
+  readonly rulerWorldCurrent = signal<VttPoint | null>(null);
   readonly wallDraftStart = signal<VttPoint | null>(null);
   readonly wallDraftCurrent = signal<VttPoint | null>(null);
 
@@ -162,18 +226,30 @@ export class VttCanvasComponent implements AfterViewInit {
   private loadedMapUrl: string | null = null;
   private lastFittedSceneId: string | null = null;
   private offscreenFogCanvas: HTMLCanvasElement | null = null;
-  private panPointerStart: { x: number; y: number; origPanX: number; origPanY: number } | null =
-    null;
+  private panPointerStart: {
+    x: number;
+    y: number;
+    origPanX: number;
+    origPanY: number;
+  } | null = null;
   private pingAnimFrame: number | null = null;
+  private suppressContextMenuUntil = 0;
+  private suppressRightPanUntilPointerUp = false;
+  private readonly isMacPlatform =
+    typeof navigator !== 'undefined' &&
+    /mac|ipod|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
 
   readonly zoomPercent = computed(() => Math.round(this.zoom() * 100));
 
+  readonly isGridless = computed(
+    () => this.vttStore.activeScene()?.grid_mode === 'gridless'
+  );
+
   readonly worldBounds = computed(() => {
-    const hb = getHexWorldBounds(this.vttStore.gridGeometry());
-    const nat = this.mapNaturalSize();
+    const layout = this.vttStore.sceneLayout();
     return {
-      width: Math.max(hb.width, nat?.width ?? 0),
-      height: Math.max(hb.height, nat?.height ?? 0),
+      width: layout.totalWidth,
+      height: layout.totalHeight,
     };
   });
 
@@ -228,6 +304,14 @@ export class VttCanvasComponent implements AfterViewInit {
     );
   });
 
+  readonly contextMenuToken = computed<VttTokenModel | null>(() => {
+    const menu = this.tokenContextMenu();
+    if (!menu) return null;
+    return (
+      this.vttStore.sceneTokens().find((t) => t.id === menu.tokenId) ?? null
+    );
+  });
+
   readonly lightPolygons = computed<ComputedLightPolygon[]>(() => {
     const sc = this.vttStore.activeScene();
     if (!sc) return [];
@@ -235,7 +319,8 @@ export class VttCanvasComponent implements AfterViewInit {
       this.effectiveSceneLights(),
       this.vttStore.sceneTokens(),
       sc.walls,
-      this.vttStore.gridGeometry()
+      this.vttStore.gridGeometry(),
+      sc.grid_mode
     );
   });
 
@@ -249,7 +334,8 @@ export class VttCanvasComponent implements AfterViewInit {
       sc.walls,
       this.vttStore.gridGeometry(),
       sc.global_illumination,
-      maxDiag
+      maxDiag,
+      sc.grid_mode
     );
   });
 
@@ -270,7 +356,10 @@ export class VttCanvasComponent implements AfterViewInit {
     const b = this.wallDraftCurrent();
     if (!a || !b) return 0;
     const distPx = Math.hypot(b.x - a.x, b.y - a.y);
-    return Math.max(5, worldPixelsToFeet(distPx, this.vttStore.gridGeometry().gridSizePx));
+    return Math.max(
+      5,
+      worldPixelsToFeet(distPx, this.vttStore.gridGeometry().gridSizePx)
+    );
   });
 
   readonly renderableTokens = computed<RenderableVttToken[]>(() => {
@@ -283,10 +372,13 @@ export class VttCanvasComponent implements AfterViewInit {
     const visions = this.observerVisions();
     const lights = this.lightPolygons();
     const drag = this.dragTokenState();
+    const chain = this.chainedTokenMove();
     const selId = this.vttStore.selectedTokenId();
     const pendingTarget = this.vttStore.pendingTargetAction();
     const attackerTok = pendingTarget
-      ? this.vttStore.sceneTokens().find((t) => t.id === pendingTarget.attackerTokenId) ?? null
+      ? this.vttStore
+          .sceneTokens()
+          .find((t) => t.id === pendingTarget.attackerTokenId) ?? null
       : null;
 
     const results: RenderableVttToken[] = [];
@@ -294,20 +386,21 @@ export class VttCanvasComponent implements AfterViewInit {
     for (const tok of this.vttStore.sceneTokens()) {
       const controllable = this.vttStore.canControlToken(tok);
 
-      if (tok.is_hidden && restrictVision && !controllable) {
+      if (tok.is_hidden && restrictVision) {
         continue;
       }
+
+      const restingCenter = getTokenWorldCenter(tok, geom, sc.grid_mode);
 
       if (
         restrictVision &&
         sc.fog_enabled &&
         !sc.explored_fog?.revealed_all &&
         tok.faction !== 'ally' &&
-        !controllable
+        (!controllable || preview)
       ) {
-        const tokCenter = hexToWorldCenter({ col: tok.x, row: tok.y }, geom);
         const seen = isWorldPointVisibleToObservers(
-          tokCenter,
+          restingCenter,
           visions,
           lights,
           sc.walls,
@@ -318,23 +411,35 @@ export class VttCanvasComponent implements AfterViewInit {
         }
       }
 
-      const displayCoord =
-        drag && drag.tokenId === tok.id
-          ? drag.currentHex
-          : { col: tok.x, row: tok.y };
-      const center = hexToWorldCenter(displayCoord, geom);
+      let center = restingCenter;
+      if (drag && drag.tokenId === tok.id) {
+        center = drag.freeUnsnap
+          ? drag.currentWorld
+          : hexToWorldCenter(drag.currentHex, geom);
+      } else if (chain && chain.tokenId === tok.id) {
+        center = chain.lastUnsnapped
+          ? chain.currentWorld
+          : hexToWorldCenter(chain.currentHex, geom);
+      }
+
       const radiusPx = Math.max(
         18,
-        getHexRadius(geom.gridSizePx) * 0.72 * Math.min(2, Math.max(1, tok.size || 1))
+        getHexRadius(geom.gridSizePx) *
+          0.82 *
+          Math.min(2, Math.max(1, tok.size || 1))
       );
 
       let distFromAttacker: number | null = null;
       let inReach = false;
-      const isTargetable = Boolean(pendingTarget && attackerTok && attackerTok.id !== tok.id);
+      const isTargetable = Boolean(
+        pendingTarget && attackerTok && attackerTok.id !== tok.id
+      );
       if (isTargetable && attackerTok && pendingTarget) {
-        distFromAttacker = getHexDistanceFeet(
-          { col: attackerTok.x, row: attackerTok.y },
-          { col: tok.x, row: tok.y }
+        distFromAttacker = getTokenDistanceFeet(
+          attackerTok,
+          tok,
+          geom,
+          sc.grid_mode
         );
         inReach = distFromAttacker <= pendingTarget.reachFeet;
       }
@@ -346,7 +451,10 @@ export class VttCanvasComponent implements AfterViewInit {
         token: tok,
         center,
         radiusPx,
-        hpPct: Math.max(0, Math.min(100, (tok.current_hp / Math.max(1, tok.max_hp)) * 100)),
+        hpPct: Math.max(
+          0,
+          Math.min(100, (tok.current_hp / Math.max(1, tok.max_hp)) * 100)
+        ),
         spPct:
           tok.max_sp > 0
             ? Math.max(0, Math.min(100, (tok.current_sp / tok.max_sp) * 100))
@@ -441,42 +549,70 @@ export class VttCanvasComponent implements AfterViewInit {
         if (!url) {
           this.mapImage.set(null);
           this.mapNaturalSize.set(null);
+          this.vttStore.activeSceneNaturalSize.set(null);
         } else {
           const img = new Image();
           img.onload = () => {
             if (this.loadedMapUrl === url) {
+              const nat = {
+                width: img.naturalWidth || 1600,
+                height: img.naturalHeight || 1100,
+              };
               this.mapImage.set(img);
-              this.mapNaturalSize.set({
-                width: img.naturalWidth || 1200,
-                height: img.naturalHeight || 800,
-              });
+              this.mapNaturalSize.set(nat);
+              this.vttStore.activeSceneNaturalSize.set(nat);
+
+              const currentSc = this.vttStore.activeScene();
+              if (
+                currentSc &&
+                (!currentSc.scene_width || !currentSc.scene_height)
+              ) {
+                queueMicrotask(() => this.fitMapToViewport());
+              }
             }
           };
           img.onerror = () => {
             if (this.loadedMapUrl === url) {
               this.mapImage.set(null);
               this.mapNaturalSize.set(null);
+              this.vttStore.activeSceneNaturalSize.set(null);
             }
           };
           img.src = url;
         }
       }
 
-      if (sc && sc.id !== this.lastFittedSceneId && this.viewportWidth() > 100) {
+      if (!sc) {
+        this.lastFittedSceneId = null;
+        this.dragTokenState.set(null);
+        this.chainedTokenMove.set(null);
+      } else if (
+        sc.id !== this.lastFittedSceneId &&
+        this.viewportWidth() > 100
+      ) {
         this.lastFittedSceneId = sc.id;
+        this.tokenContextMenu.set(null);
+        this.dragTokenState.set(null);
+        this.chainedTokenMove.set(null);
         queueMicrotask(() => this.fitMapToViewport());
       }
     });
 
     effect(() => {
-      if (this.vttStore.activeTool() !== 'light') {
+      const tool = this.vttStore.activeTool();
+      if (tool !== 'light') {
         this.lightContextMenu.set(null);
         this.editingLightDraft.set(null);
+      }
+      if (tool !== 'select') {
+        this.dragTokenState.set(null);
+        this.chainedTokenMove.set(null);
       }
     });
 
     effect(() => {
       this.vttStore.activeScene();
+      this.vttStore.sceneLayout();
       this.vttStore.sceneTokens();
       this.vttStore.gridGeometry();
       this.vttStore.previewPlayerVision();
@@ -492,11 +628,17 @@ export class VttCanvasComponent implements AfterViewInit {
       this.panX();
       this.panY();
       this.zoom();
+      this.ctrlPressed();
+      this.shiftPressed();
       this.hoveredHex();
+      this.rosterDropPreview();
       this.dragTokenState();
+      this.chainedTokenMove();
       this.lightPlacementDraft();
       this.editingLightDraft();
       this.activeRulerPath();
+      this.rulerWorldStart();
+      this.rulerWorldCurrent();
       this.wallDraftStart();
       this.wallDraftCurrent();
       this.mapImage();
@@ -553,15 +695,25 @@ export class VttCanvasComponent implements AfterViewInit {
   fitMapToViewport(): void {
     const vw = this.viewportWidth();
     const vh = this.viewportHeight();
-    const wb = this.worldBounds();
-    if (vw <= 40 || vh <= 40 || wb.width <= 0 || wb.height <= 0) return;
+    const layout = this.vttStore.sceneLayout();
+    if (
+      vw <= 40 ||
+      vh <= 40 ||
+      layout.innerWidth <= 0 ||
+      layout.innerHeight <= 0
+    ) {
+      return;
+    }
 
-    const pad = 64;
-    const scaleX = (vw - pad * 2) / wb.width;
-    const scaleY = (vh - pad * 2) / wb.height;
-    const nextZoom = Math.max(0.3, Math.min(1.35, Math.min(scaleX, scaleY)));
-    const nextPanX = Math.round((vw - wb.width * nextZoom) / 2);
-    const nextPanY = Math.round((vh - wb.height * nextZoom) / 2);
+    const pad = 76;
+    const scaleX = Math.max(80, vw - pad * 2) / layout.innerWidth;
+    const scaleY = Math.max(80, vh - pad * 2) / layout.innerHeight;
+    const nextZoom = Math.max(0.12, Math.min(1.35, Math.min(scaleX, scaleY)));
+
+    const sceneCenterX = layout.sceneX + layout.innerWidth / 2;
+    const sceneCenterY = layout.sceneY + layout.innerHeight / 2;
+    const nextPanX = Math.round(vw / 2 - sceneCenterX * nextZoom);
+    const nextPanY = Math.round(vh / 2 - sceneCenterY * nextZoom);
 
     this.zoom.set(Number(nextZoom.toFixed(3)));
     this.panX.set(nextPanX);
@@ -574,9 +726,13 @@ export class VttCanvasComponent implements AfterViewInit {
     this.applyZoomAroundScreenPoint(vw / 2, vh / 2, this.zoom() + delta);
   }
 
-  private applyZoomAroundScreenPoint(sx: number, sy: number, rawNextZoom: number): void {
+  private applyZoomAroundScreenPoint(
+    sx: number,
+    sy: number,
+    rawNextZoom: number
+  ): void {
     const prevZoom = this.zoom();
-    const nextZoom = Math.max(0.28, Math.min(2.4, rawNextZoom));
+    const nextZoom = Math.max(0.12, Math.min(2.4, rawNextZoom));
     if (Math.abs(nextZoom - prevZoom) < 0.001) return;
 
     const wx = (sx - this.panX()) / prevZoom;
@@ -598,7 +754,8 @@ export class VttCanvasComponent implements AfterViewInit {
 
   private snapWallVertex(pt: VttPoint, bypassSnap: boolean): VttPoint {
     if (bypassSnap) return pt;
-    const walls = this.vttStore.activeScene()?.walls ?? [];
+    const sc = this.vttStore.activeScene();
+    const walls = sc?.walls ?? [];
     const threshold = 14 / this.zoom();
     let best: VttPoint | null = null;
     let bestDist = threshold;
@@ -615,7 +772,20 @@ export class VttCanvasComponent implements AfterViewInit {
         best = { x: w.x2, y: w.y2 };
       }
     }
-    return best ?? pt;
+    if (best) return best;
+
+    if (sc && sc.grid_mode !== 'gridless') {
+      const geom = this.vttStore.gridGeometry();
+      const step = Math.max(20, geom.gridSizePx);
+      const gx =
+        geom.offsetX + Math.round((pt.x - geom.offsetX) / step) * step;
+      const gy =
+        geom.offsetY + Math.round((pt.y - geom.offsetY) / step) * step;
+      if (Math.hypot(pt.x - gx, pt.y - gy) <= 10 / this.zoom()) {
+        return { x: Math.round(gx), y: Math.round(gy) };
+      }
+    }
+    return pt;
   }
 
   onWheel(event: WheelEvent): void {
@@ -627,13 +797,321 @@ export class VttCanvasComponent implements AfterViewInit {
     this.applyZoomAroundScreenPoint(sx, sy, this.zoom() * factor);
   }
 
+  private isPhysicalRightClick(event: MouseEvent): boolean {
+    if (event.button !== 2) return false;
+    if (this.isMacPlatform && event.ctrlKey && (event.buttons & 2) === 0) {
+      return false;
+    }
+    return true;
+  }
+
+  private isPrimaryPointerDown(event: PointerEvent): boolean {
+    if (event.button === 0) return true;
+    if (
+      this.isMacPlatform &&
+      event.button === 2 &&
+      event.ctrlKey &&
+      (event.buttons & 2) === 0
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  hasActiveChainedOrDragMove(): boolean {
+    return this.dragTokenState() !== null || this.chainedTokenMove() !== null;
+  }
+
+  cancelActiveMovementOrDraft(): boolean {
+    const hadActive =
+      this.dragTokenState() !== null ||
+      this.chainedTokenMove() !== null ||
+      this.rulerStart() !== null ||
+      this.rulerWorldStart() !== null ||
+      this.wallDraftStart() !== null ||
+      this.lightPlacementDraft() !== null ||
+      this.dragLightState() !== null;
+
+    if (!hadActive) return false;
+
+    this.dragTokenState.set(null);
+    this.chainedTokenMove.set(null);
+    this.rulerStart.set(null);
+    this.rulerCurrent.set(null);
+    this.rulerWorldStart.set(null);
+    this.rulerWorldCurrent.set(null);
+    this.wallDraftStart.set(null);
+    this.wallDraftCurrent.set(null);
+    this.lightPlacementDraft.set(null);
+    this.dragLightState.set(null);
+    return true;
+  }
+
+  commitActiveChainedMove(): void {
+    const chain = this.chainedTokenMove();
+    this.chainedTokenMove.set(null);
+    this.dragTokenState.set(null);
+    if (!chain || chain.legs.length === 0) return;
+    this.commitChainedTokenMoveState(chain);
+  }
+
+  private commitChainedTokenMoveState(chain: ChainedTokenMoveState): void {
+    if (chain.legs.length === 0) return;
+    if (chain.lastUnsnapped) {
+      const intermediateWorldPts = chain.legs
+        .slice(0, -1)
+        .map((leg) => leg.toWorld);
+      void this.vttStore.moveTokenToWorldPoint(
+        chain.tokenId,
+        chain.currentWorld,
+        chain.totalFeet,
+        chain.anyShiftOverride,
+        this.worldBounds(),
+        intermediateWorldPts
+      );
+      return;
+    }
+
+    const traversed: HexCoord[] = [];
+    for (const leg of chain.legs) {
+      const steps =
+        leg.hexPath.length > 1 ? leg.hexPath.slice(1) : [leg.toHex];
+      for (const h of steps) {
+        traversed.push(h);
+      }
+    }
+    const intermediateHexes =
+      traversed.length > 1 ? traversed.slice(0, -1) : undefined;
+
+    void this.vttStore.moveTokenToHex(
+      chain.tokenId,
+      chain.currentHex.col,
+      chain.currentHex.row,
+      chain.totalFeet,
+      chain.anyShiftOverride,
+      intermediateHexes
+    );
+  }
+
+  private recomputeDragTokenForPointer(
+    dragTok: DragTokenState,
+    worldPt: VttPoint,
+    shiftHeld: boolean
+  ): DragTokenState {
+    const sc = this.vttStore.activeScene();
+    const geom = this.vttStore.gridGeometry();
+    const shiftOverride = shiftHeld && this.vttStore.isGm();
+    const freeUnsnap = dragTok.gridMode === 'gridless' || shiftHeld;
+
+    if (freeUnsnap) {
+      const clampedWorld = clampWorldPointToBounds(
+        worldPt,
+        this.worldBounds(),
+        20
+      );
+      const clampedHex = clampHexToBounds(
+        worldPointToHex(clampedWorld, geom),
+        geom.gridWidth,
+        geom.gridHeight
+      );
+      const distPx = Math.hypot(
+        clampedWorld.x - dragTok.startWorld.x,
+        clampedWorld.y - dragTok.startWorld.y
+      );
+      const pointerDist = Math.hypot(
+        worldPt.x - dragTok.pointerDownWorld.x,
+        worldPt.y - dragTok.pointerDownWorld.y
+      );
+      const moved =
+        dragTok.hasMoved ||
+        distPx > 4 / this.zoom() ||
+        pointerDist > 4 / this.zoom();
+      const feet = worldPixelsToFeet(distPx, geom.gridSizePx);
+      const blocked =
+        !shiftOverride &&
+        isWorldSegmentBlockedByWalls(
+          dragTok.startWorld,
+          clampedWorld,
+          sc?.walls ?? []
+        );
+
+      return {
+        ...dragTok,
+        freeUnsnap: true,
+        currentHex: clampedHex,
+        currentWorld: clampedWorld,
+        hasMoved: moved,
+        shiftOverride,
+        gridlessBlocked: blocked,
+        gridlessFeet: feet,
+      };
+    }
+
+    const rawHex = worldPointToHex(worldPt, geom);
+    const clamped = clampHexToBounds(rawHex, geom.gridWidth, geom.gridHeight);
+    const startTileCenter = hexToWorldCenter(dragTok.startHex, geom);
+    const startedOffCenter =
+      Math.hypot(
+        dragTok.startWorld.x - startTileCenter.x,
+        dragTok.startWorld.y - startTileCenter.y
+      ) > 2;
+    const pointerDist = Math.hypot(
+      worldPt.x - dragTok.pointerDownWorld.x,
+      worldPt.y - dragTok.pointerDownWorld.y
+    );
+
+    const pathRes = shiftOverride
+      ? {
+          reachable: true,
+          path: [dragTok.startHex, clamped],
+          steps: getHexDistanceFeet(dragTok.startHex, clamped) / 5,
+          feet: getHexDistanceFeet(dragTok.startHex, clamped),
+        }
+      : findHexPath(dragTok.startHex, clamped, geom, sc?.walls ?? []);
+
+    return {
+      ...dragTok,
+      freeUnsnap: false,
+      currentHex: clamped,
+      currentWorld: hexToWorldCenter(clamped, geom),
+      hasMoved:
+        clamped.col !== dragTok.startHex.col ||
+        clamped.row !== dragTok.startHex.row ||
+        (startedOffCenter && pointerDist > 4 / this.zoom()),
+      shiftOverride,
+      pathResult: pathRes,
+    };
+  }
+
+  onViewportDragOver(event: DragEvent): void {
+    const sc = this.vttStore.activeScene();
+    if (!sc) return;
+
+    const payload = this.vttStore.draggingRosterPayload();
+    const hasRosterMime = Boolean(
+      event.dataTransfer?.types?.includes('application/x-mot-roster')
+    );
+    if (!payload && !hasRosterMime) return;
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+
+    const rawWorld = this.screenToWorld(event.clientX, event.clientY);
+    const clampedWorld = clampWorldPointToBounds(
+      rawWorld,
+      this.worldBounds(),
+      20
+    );
+    const geom = this.vttStore.gridGeometry();
+    const clampedHex = clampHexToBounds(
+      worldPointToHex(clampedWorld, geom),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+    const unsnapped = sc.grid_mode === 'gridless' || Boolean(event.shiftKey);
+
+    this.rosterDropPreview.set({
+      worldPt: clampedWorld,
+      hex: clampedHex,
+      unsnapped,
+      name: payload?.name ?? 'Deploy Actor',
+      color: payload?.color ?? '#38B29A',
+    });
+  }
+
+  onViewportDragLeave(event: DragEvent): void {
+    const vp = this.viewportRef().nativeElement;
+    const rel = event.relatedTarget as Node | null;
+    if (!rel || !vp.contains(rel)) {
+      this.rosterDropPreview.set(null);
+    }
+  }
+
+  onViewportDrop(event: DragEvent): void {
+    const sc = this.vttStore.activeScene();
+    this.rosterDropPreview.set(null);
+    if (!sc) return;
+
+    let payload = this.vttStore.draggingRosterPayload();
+    if (!payload && event.dataTransfer) {
+      const rawJson =
+        event.dataTransfer.getData('application/x-mot-roster') ||
+        event.dataTransfer.getData('text/plain');
+      if (rawJson && rawJson.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(rawJson) as VttRosterDragPayload;
+          if (
+            parsed &&
+            (parsed.kind === 'roster-actor' || parsed.kind === 'character')
+          ) {
+            payload = parsed;
+          }
+        } catch {
+          payload = null;
+        }
+      }
+    }
+
+    if (!payload) return;
+    event.preventDefault();
+
+    const rawWorld = this.screenToWorld(event.clientX, event.clientY);
+    const clampedWorld = clampWorldPointToBounds(
+      rawWorld,
+      this.worldBounds(),
+      20
+    );
+    const unsnapped = sc.grid_mode === 'gridless' || Boolean(event.shiftKey);
+    void this.vttStore.dropActorAtWorldPoint(payload, clampedWorld, unsnapped);
+  }
+
+  @HostListener('window:mousedown', ['$event'])
+  onWindowMouseDown(event: MouseEvent): void {
+    if (!this.isPhysicalRightClick(event)) return;
+    if (this.cancelActiveMovementOrDraft()) {
+      this.suppressContextMenuUntil = Date.now() + 400;
+      this.suppressRightPanUntilPointerUp = true;
+      this.isPanning.set(false);
+      this.panPointerStart = null;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
   onContextMenu(event: MouseEvent): void {
     event.preventDefault();
+    if (
+      Date.now() < this.suppressContextMenuUntil ||
+      this.cancelActiveMovementOrDraft()
+    ) {
+      this.suppressContextMenuUntil = Date.now() + 400;
+      event.stopPropagation();
+    }
   }
 
   onViewportPointerDown(event: PointerEvent): void {
     const sc = this.vttStore.activeScene();
     if (!sc) return;
+
+    this.ctrlPressed.set(Boolean(event.ctrlKey || event.metaKey));
+
+    if (this.isPhysicalRightClick(event)) {
+      if (
+        this.suppressRightPanUntilPointerUp ||
+        this.cancelActiveMovementOrDraft()
+      ) {
+        this.suppressContextMenuUntil = Date.now() + 400;
+        this.suppressRightPanUntilPointerUp = true;
+        event.preventDefault();
+        return;
+      }
+    }
+
+    if (this.tokenContextMenu()) {
+      this.tokenContextMenu.set(null);
+    }
 
     if (this.lightContextMenu()) {
       this.lightContextMenu.set(null);
@@ -651,7 +1129,7 @@ export class VttCanvasComponent implements AfterViewInit {
     const tool = this.vttStore.activeTool();
     if (
       event.button === 1 ||
-      event.button === 2 ||
+      this.isPhysicalRightClick(event) ||
       this.spacePressed() ||
       tool === 'pan'
     ) {
@@ -665,19 +1143,63 @@ export class VttCanvasComponent implements AfterViewInit {
       return;
     }
 
-    if (event.button !== 0) return;
+    if (!this.isPrimaryPointerDown(event)) return;
 
     const worldPt = this.screenToWorld(event.clientX, event.clientY);
     const geom = this.vttStore.gridGeometry();
-    const hex = clampHexToBounds(
-      worldPointToHex(worldPt, geom),
-      geom.gridWidth,
-      geom.gridHeight
-    );
+    const activeChain = this.chainedTokenMove();
+
+    if (tool === 'select' && activeChain) {
+      if (event.ctrlKey || event.metaKey || this.ctrlPressed()) {
+        this.shiftPressed.set(Boolean(event.shiftKey));
+        this.lastPointerWorld.set(worldPt);
+        const seedDrag: DragTokenState = {
+          tokenId: activeChain.tokenId,
+          gridMode: activeChain.gridMode,
+          freeUnsnap: activeChain.gridMode === 'gridless' || Boolean(event.shiftKey),
+          startHex: activeChain.currentHex,
+          currentHex: activeChain.currentHex,
+          startWorld: activeChain.currentWorld,
+          currentWorld: activeChain.currentWorld,
+          pointerDownWorld: activeChain.currentWorld,
+          hasMoved: false,
+          shiftOverride: Boolean(event.shiftKey) && this.vttStore.isGm(),
+          pathResult: {
+            reachable: true,
+            path: [activeChain.currentHex],
+            steps: 0,
+            feet: 0,
+          },
+          gridlessBlocked: false,
+          gridlessFeet: 0,
+        };
+        this.dragTokenState.set(
+          this.recomputeDragTokenForPointer(
+            seedDrag,
+            worldPt,
+            Boolean(event.shiftKey)
+          )
+        );
+        return;
+      }
+
+      this.commitActiveChainedMove();
+    }
 
     if (tool === 'ruler') {
-      this.rulerStart.set(hex);
-      this.rulerCurrent.set(hex);
+      if (sc.grid_mode === 'gridless') {
+        const clamped = clampWorldPointToBounds(worldPt, this.worldBounds(), 8);
+        this.rulerWorldStart.set(clamped);
+        this.rulerWorldCurrent.set(clamped);
+      } else {
+        const hex = clampHexToBounds(
+          worldPointToHex(worldPt, geom),
+          geom.gridWidth,
+          geom.gridHeight
+        );
+        this.rulerStart.set(hex);
+        this.rulerCurrent.set(hex);
+      }
       return;
     }
 
@@ -708,17 +1230,45 @@ export class VttCanvasComponent implements AfterViewInit {
   onTokenPointerDown(event: PointerEvent, item: RenderableVttToken): void {
     event.stopPropagation();
 
+    this.ctrlPressed.set(Boolean(event.ctrlKey || event.metaKey));
+
+    if (this.tokenContextMenu()) {
+      this.tokenContextMenu.set(null);
+    }
+    if (this.lightContextMenu()) {
+      this.lightContextMenu.set(null);
+    }
+
+    if (this.isPhysicalRightClick(event)) {
+      if (
+        this.suppressRightPanUntilPointerUp ||
+        this.cancelActiveMovementOrDraft()
+      ) {
+        this.suppressContextMenuUntil = Date.now() + 400;
+        this.suppressRightPanUntilPointerUp = true;
+        event.preventDefault();
+        return;
+      }
+      if (this.vttStore.isGm()) {
+        return;
+      }
+    }
+
     if (event.altKey && event.button === 0) {
       void this.vttStore.pingWorldPoint(item.center);
       return;
     }
 
-    if (event.button === 1 || event.button === 2 || this.spacePressed()) {
+    if (
+      event.button === 1 ||
+      this.isPhysicalRightClick(event) ||
+      this.spacePressed()
+    ) {
       this.onViewportPointerDown(event);
       return;
     }
 
-    if (event.button !== 0) return;
+    if (!this.isPrimaryPointerDown(event)) return;
 
     const pendingTarget = this.vttStore.pendingTargetAction();
     if (pendingTarget) {
@@ -728,28 +1278,107 @@ export class VttCanvasComponent implements AfterViewInit {
       return;
     }
 
+    const existingChain = this.chainedTokenMove();
+    if (existingChain && existingChain.tokenId !== item.token.id) {
+      this.commitActiveChainedMove();
+    }
+
     this.vttStore.selectedTokenId.set(item.token.id);
     this.vttStore.selectedLightId.set(null);
 
+    const sc = this.vttStore.activeScene();
+    const gridMode = sc?.grid_mode ?? 'square';
     const tool = this.vttStore.activeTool();
+
     if (tool === 'ruler') {
-      const startHex = { col: item.token.x, row: item.token.y };
-      this.rulerStart.set(startHex);
-      this.rulerCurrent.set(startHex);
+      if (gridMode === 'gridless') {
+        this.rulerWorldStart.set(item.center);
+        this.rulerWorldCurrent.set(item.center);
+      } else {
+        const startHex = { col: item.token.x, row: item.token.y };
+        this.rulerStart.set(startHex);
+        this.rulerCurrent.set(startHex);
+      }
       return;
     }
 
     if (tool === 'select' && item.isControllable) {
-      const startHex = { col: item.token.x, row: item.token.y };
+      const chainForToken = this.chainedTokenMove();
+      const startHex =
+        chainForToken && chainForToken.tokenId === item.token.id
+          ? chainForToken.currentHex
+          : { col: item.token.x, row: item.token.y };
+      const startWorld =
+        chainForToken && chainForToken.tokenId === item.token.id
+          ? chainForToken.currentWorld
+          : item.center;
+      const pointerDownWorld = this.screenToWorld(event.clientX, event.clientY);
+      const shiftHeld = Boolean(event.shiftKey);
+      this.shiftPressed.set(shiftHeld);
+      this.lastPointerWorld.set(pointerDownWorld);
+
       this.dragTokenState.set({
         tokenId: item.token.id,
+        gridMode,
+        freeUnsnap: gridMode === 'gridless' || shiftHeld,
         startHex,
         currentHex: startHex,
+        startWorld,
+        currentWorld: startWorld,
+        pointerDownWorld,
         hasMoved: false,
-        shiftOverride: event.shiftKey && this.vttStore.isGm(),
+        shiftOverride: shiftHeld && this.vttStore.isGm(),
         pathResult: { reachable: true, path: [startHex], steps: 0, feet: 0 },
+        gridlessBlocked: false,
+        gridlessFeet: 0,
       });
     }
+  }
+
+  onTokenContextMenu(event: MouseEvent, item: RenderableVttToken): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (
+      Date.now() < this.suppressContextMenuUntil ||
+      this.cancelActiveMovementOrDraft()
+    ) {
+      this.suppressContextMenuUntil = Date.now() + 400;
+      return;
+    }
+    if (!this.vttStore.isGm()) return;
+
+    this.dragTokenState.set(null);
+    this.lightContextMenu.set(null);
+    this.vttStore.selectedTokenId.set(item.token.id);
+    this.vttStore.selectedLightId.set(null);
+
+    const rect = this.viewportRef().nativeElement.getBoundingClientRect();
+    const rawX = event.clientX - rect.left;
+    const rawY = event.clientY - rect.top;
+    const clampedX = Math.max(
+      12,
+      Math.min(this.viewportWidth() - 216, rawX + 8)
+    );
+    const clampedY = Math.max(
+      12,
+      Math.min(this.viewportHeight() - 170, rawY + 8)
+    );
+
+    this.tokenContextMenu.set({
+      tokenId: item.token.id,
+      screenX: Math.round(clampedX),
+      screenY: Math.round(clampedY),
+    });
+  }
+
+  toggleTokenHiddenFromMenu(token: VttTokenModel): void {
+    this.tokenContextMenu.set(null);
+    void this.vttStore.toggleTokenHidden(token.id);
+  }
+
+  removeTokenFromMenu(tokenId: string): void {
+    this.tokenContextMenu.set(null);
+    void this.vttStore.removeToken(tokenId);
   }
 
   onDoorButtonClick(event: MouseEvent, wallId: string): void {
@@ -783,6 +1412,13 @@ export class VttCanvasComponent implements AfterViewInit {
   onLightHandleContextMenu(event: MouseEvent, light: VttLightSource): void {
     event.preventDefault();
     event.stopPropagation();
+    if (
+      Date.now() < this.suppressContextMenuUntil ||
+      this.cancelActiveMovementOrDraft()
+    ) {
+      this.suppressContextMenuUntil = Date.now() + 400;
+      return;
+    }
     if (!this.vttStore.isGm()) return;
 
     this.dragLightState.set(null);
@@ -791,8 +1427,14 @@ export class VttCanvasComponent implements AfterViewInit {
     const rect = this.viewportRef().nativeElement.getBoundingClientRect();
     const rawX = event.clientX - rect.left;
     const rawY = event.clientY - rect.top;
-    const clampedX = Math.max(12, Math.min(this.viewportWidth() - 196, rawX + 8));
-    const clampedY = Math.max(12, Math.min(this.viewportHeight() - 160, rawY + 8));
+    const clampedX = Math.max(
+      12,
+      Math.min(this.viewportWidth() - 196, rawX + 8)
+    );
+    const clampedY = Math.max(
+      12,
+      Math.min(this.viewportHeight() - 160, rawY + 8)
+    );
 
     this.lightContextMenu.set({
       lightId: light.id,
@@ -896,6 +1538,28 @@ export class VttCanvasComponent implements AfterViewInit {
 
   @HostListener('window:pointermove', ['$event'])
   onWindowPointerMove(event: PointerEvent): void {
+    const nextCtrl = Boolean(event.ctrlKey || event.metaKey);
+    if (nextCtrl !== this.ctrlPressed()) {
+      this.ctrlPressed.set(nextCtrl);
+      if (!nextCtrl && !this.dragTokenState() && this.chainedTokenMove()) {
+        this.commitActiveChainedMove();
+      }
+    }
+    const nextShift = Boolean(event.shiftKey);
+    if (nextShift !== this.shiftPressed()) {
+      this.shiftPressed.set(nextShift);
+    }
+
+    if (
+      (event.buttons & 2) !== 0 &&
+      (this.dragTokenState() !== null || this.chainedTokenMove() !== null)
+    ) {
+      this.cancelActiveMovementOrDraft();
+      this.suppressContextMenuUntil = Date.now() + 400;
+      this.suppressRightPanUntilPointerUp = true;
+      return;
+    }
+
     if (this.isPanning() && this.panPointerStart) {
       const dx = event.clientX - this.panPointerStart.x;
       const dy = event.clientY - this.panPointerStart.y;
@@ -917,10 +1581,15 @@ export class VttCanvasComponent implements AfterViewInit {
       event.clientY <= rect.bottom;
 
     const worldPt = this.screenToWorld(event.clientX, event.clientY);
+    this.lastPointerWorld.set(worldPt);
     const geom = this.vttStore.gridGeometry();
     const rawHex = worldPointToHex(worldPt, geom);
 
-    if (insideViewport && isHexInBounds(rawHex, geom.gridWidth, geom.gridHeight)) {
+    if (
+      sc.grid_mode !== 'gridless' &&
+      insideViewport &&
+      isHexInBounds(rawHex, geom.gridWidth, geom.gridHeight)
+    ) {
       const prev = this.hoveredHex();
       if (!prev || prev.col !== rawHex.col || prev.row !== rawHex.row) {
         this.hoveredHex.set(rawHex);
@@ -968,6 +1637,13 @@ export class VttCanvasComponent implements AfterViewInit {
       return;
     }
 
+    if (this.rulerWorldStart()) {
+      this.rulerWorldCurrent.set(
+        clampWorldPointToBounds(worldPt, this.worldBounds(), 8)
+      );
+      return;
+    }
+
     if (this.rulerStart()) {
       const clamped = clampHexToBounds(rawHex, geom.gridWidth, geom.gridHeight);
       this.rulerCurrent.set(clamped);
@@ -976,40 +1652,25 @@ export class VttCanvasComponent implements AfterViewInit {
 
     const dragTok = this.dragTokenState();
     if (dragTok) {
-      const clamped = clampHexToBounds(rawHex, geom.gridWidth, geom.gridHeight);
-      const shiftOverride = event.shiftKey && this.vttStore.isGm();
-      if (
-        clamped.col !== dragTok.currentHex.col ||
-        clamped.row !== dragTok.currentHex.row ||
-        shiftOverride !== dragTok.shiftOverride
-      ) {
-        const pathRes = shiftOverride
-          ? {
-              reachable: true,
-              path: [dragTok.startHex, clamped],
-              steps: getHexDistanceFeet(dragTok.startHex, clamped) / 5,
-              feet: getHexDistanceFeet(dragTok.startHex, clamped),
-            }
-          : findHexPath(dragTok.startHex, clamped, geom, sc.walls);
-
-        this.dragTokenState.set({
-          ...dragTok,
-          currentHex: clamped,
-          hasMoved:
-            clamped.col !== dragTok.startHex.col ||
-            clamped.row !== dragTok.startHex.row,
-          shiftOverride,
-          pathResult: pathRes,
-        });
-      }
+      this.dragTokenState.set(
+        this.recomputeDragTokenForPointer(dragTok, worldPt, nextShift)
+      );
     }
   }
 
-  @HostListener('window:pointerup')
-  onWindowPointerUp(): void {
+  @HostListener('window:pointerup', ['$event'])
+  onWindowPointerUp(event: PointerEvent): void {
+    if (event.button === 2 || (event.buttons & 2) === 0) {
+      this.suppressRightPanUntilPointerUp = false;
+    }
+
     if (this.isPanning()) {
       this.isPanning.set(false);
       this.panPointerStart = null;
+    }
+
+    if (event.button === 2 && !this.isPrimaryPointerDown(event)) {
+      return;
     }
 
     const dragLight = this.dragLightState();
@@ -1044,38 +1705,173 @@ export class VttCanvasComponent implements AfterViewInit {
       );
     }
 
+    if (this.rulerWorldStart()) {
+      this.rulerWorldStart.set(null);
+      this.rulerWorldCurrent.set(null);
+    }
+
     if (this.rulerStart()) {
       this.rulerStart.set(null);
       this.rulerCurrent.set(null);
     }
 
-    const dragTok = this.dragTokenState();
-    if (dragTok) {
+    const rawDragTok = this.dragTokenState();
+    if (rawDragTok) {
       this.dragTokenState.set(null);
-      if (
-        dragTok.hasMoved &&
-        (dragTok.pathResult.reachable || dragTok.shiftOverride)
-      ) {
-        void this.vttStore.moveTokenToHex(
-          dragTok.tokenId,
-          dragTok.currentHex.col,
-          dragTok.currentHex.row,
-          dragTok.pathResult.feet,
-          dragTok.shiftOverride
-        );
+      const pointerUpWorld = this.screenToWorld(event.clientX, event.clientY);
+      const dragTok = this.recomputeDragTokenForPointer(
+        rawDragTok,
+        pointerUpWorld,
+        Boolean(event.shiftKey)
+      );
+
+      const keepChaining = Boolean(
+        event.ctrlKey || event.metaKey || this.ctrlPressed()
+      );
+      const existingChain = this.chainedTokenMove();
+      const geom = this.vttStore.gridGeometry();
+      const startTileCenter = hexToWorldCenter(dragTok.startHex, geom);
+      const startedOffCenter =
+        Math.hypot(
+          dragTok.startWorld.x - startTileCenter.x,
+          dragTok.startWorld.y - startTileCenter.y
+        ) > 2;
+
+      const legValid = dragTok.freeUnsnap
+        ? dragTok.hasMoved &&
+          (!dragTok.gridlessBlocked || dragTok.shiftOverride)
+        : dragTok.hasMoved &&
+          (dragTok.pathResult.reachable || dragTok.shiftOverride) &&
+          (dragTok.currentHex.col !== dragTok.startHex.col ||
+            dragTok.currentHex.row !== dragTok.startHex.row ||
+            startedOffCenter);
+
+      if (legValid) {
+        const legFeet = dragTok.freeUnsnap
+          ? dragTok.gridlessFeet
+          : dragTok.pathResult.feet;
+        const baseChain =
+          existingChain && existingChain.tokenId === dragTok.tokenId
+            ? existingChain
+            : null;
+        const originHex = baseChain ? baseChain.originHex : dragTok.startHex;
+        const originWorld = baseChain
+          ? baseChain.originWorld
+          : dragTok.startWorld;
+        const prevLegs = baseChain ? baseChain.legs : [];
+        const nextTotalFeet = (baseChain ? baseChain.totalFeet : 0) + legFeet;
+        const nextWorld = dragTok.freeUnsnap
+          ? dragTok.currentWorld
+          : hexToWorldCenter(dragTok.currentHex, geom);
+
+        const newLeg: ChainedMoveLeg = {
+          fromHex: dragTok.startHex,
+          toHex: dragTok.currentHex,
+          fromWorld: dragTok.startWorld,
+          toWorld: nextWorld,
+          hexPath: dragTok.freeUnsnap ? [] : dragTok.pathResult.path,
+          feet: legFeet,
+          cumulativeFeet: nextTotalFeet,
+          shiftOverride: dragTok.shiftOverride,
+          freeUnsnap: dragTok.freeUnsnap,
+        };
+
+        const tok = this.vttStore
+          .sceneTokens()
+          .find((t) => t.id === dragTok.tokenId);
+
+        const nextChain: ChainedTokenMoveState = {
+          tokenId: dragTok.tokenId,
+          tokenName: tok?.name ?? 'Token',
+          gridMode: dragTok.gridMode,
+          originHex,
+          originWorld,
+          currentHex: dragTok.currentHex,
+          currentWorld: nextWorld,
+          legs: [...prevLegs, newLeg],
+          totalFeet: nextTotalFeet,
+          anyShiftOverride:
+            Boolean(baseChain?.anyShiftOverride) || dragTok.shiftOverride,
+          lastUnsnapped: dragTok.freeUnsnap,
+        };
+
+        if (keepChaining) {
+          this.chainedTokenMove.set(nextChain);
+        } else if (nextChain.legs.length > 1) {
+          this.chainedTokenMove.set(null);
+          this.commitChainedTokenMoveState(nextChain);
+        } else {
+          this.chainedTokenMove.set(null);
+          if (dragTok.freeUnsnap) {
+            void this.vttStore.moveTokenToWorldPoint(
+              dragTok.tokenId,
+              dragTok.currentWorld,
+              dragTok.gridlessFeet,
+              dragTok.shiftOverride,
+              this.worldBounds()
+            );
+          } else {
+            void this.vttStore.moveTokenToHex(
+              dragTok.tokenId,
+              dragTok.currentHex.col,
+              dragTok.currentHex.row,
+              dragTok.pathResult.feet,
+              dragTok.shiftOverride
+            );
+          }
+        }
+      } else if (!keepChaining && existingChain) {
+        this.commitActiveChainedMove();
       }
+    }
+  }
+
+  dismissTransientEscapeState(): boolean {
+    let dismissed = false;
+    if (this.editingLightDraft()) {
+      this.editingLightDraft.set(null);
+      dismissed = true;
+    }
+    if (this.lightContextMenu()) {
+      this.lightContextMenu.set(null);
+      dismissed = true;
+    }
+    if (this.tokenContextMenu()) {
+      this.tokenContextMenu.set(null);
+      dismissed = true;
+    }
+    if (this.cancelActiveMovementOrDraft()) {
+      dismissed = true;
+    }
+    return dismissed;
+  }
+
+  private syncShiftStateChange(shiftHeld: boolean): void {
+    this.shiftPressed.set(shiftHeld);
+    const dragTok = this.dragTokenState();
+    const lastPt = this.lastPointerWorld();
+    if (dragTok && lastPt) {
+      this.dragTokenState.set(
+        this.recomputeDragTokenForPointer(dragTok, lastPt, shiftHeld)
+      );
+    }
+    const dropPrev = this.rosterDropPreview();
+    const sc = this.vttStore.activeScene();
+    if (dropPrev && sc && sc.grid_mode !== 'gridless') {
+      this.rosterDropPreview.set({
+        ...dropPrev,
+        unsnapped: shiftHeld,
+      });
     }
   }
 
   @HostListener('window:keydown', ['$event'])
   onWindowKeyDown(event: KeyboardEvent): void {
-    if (event.code === 'Escape') {
-      if (this.lightContextMenu()) {
-        this.lightContextMenu.set(null);
-      }
-      if (this.editingLightDraft()) {
-        this.editingLightDraft.set(null);
-      }
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.ctrlPressed.set(true);
+    }
+    if (event.key === 'Shift') {
+      this.syncShiftStateChange(true);
     }
     const tag = (event.target as HTMLElement | null)?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
@@ -1089,6 +1885,31 @@ export class VttCanvasComponent implements AfterViewInit {
     if (event.code === 'Space') {
       this.spacePressed.set(false);
     }
+    if (event.key === 'Shift' || (!event.shiftKey && this.shiftPressed())) {
+      this.syncShiftStateChange(false);
+    }
+    if (
+      event.key === 'Control' ||
+      event.key === 'Meta' ||
+      (!event.ctrlKey && !event.metaKey && this.ctrlPressed())
+    ) {
+      this.ctrlPressed.set(false);
+      if (!this.dragTokenState() && this.chainedTokenMove()) {
+        this.commitActiveChainedMove();
+      }
+    }
+  }
+
+  @HostListener('window:blur')
+  onWindowBlur(): void {
+    this.spacePressed.set(false);
+    this.ctrlPressed.set(false);
+    this.shiftPressed.set(false);
+    this.rosterDropPreview.set(null);
+    this.isPanning.set(false);
+    this.panPointerStart = null;
+    this.suppressRightPanUntilPointerUp = false;
+    this.cancelActiveMovementOrDraft();
   }
 
   private renderFrame(): void {
@@ -1100,7 +1921,10 @@ export class VttCanvasComponent implements AfterViewInit {
 
     const vw = Math.max(1, this.viewportWidth());
     const vh = Math.max(1, this.viewportHeight());
-    const dpr = Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
+    const dpr = Math.min(
+      2,
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+    );
 
     const targetW = Math.round(vw * dpr);
     const targetH = Math.round(vh * dpr);
@@ -1110,39 +1934,85 @@ export class VttCanvasComponent implements AfterViewInit {
     }
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#060B0A';
+    ctx.fillStyle = '#050908';
     ctx.fillRect(0, 0, vw, vh);
 
     if (!sc) return;
 
-    const geom = this.vttStore.gridGeometry();
+    const layout = this.vttStore.sceneLayout();
+    const geom = layout.geometry;
     const wb = this.worldBounds();
     const z = this.zoom();
     const px = this.panX();
     const py = this.panY();
     const R = getHexRadius(geom.gridSizePx);
+    const bgColor = sc.background_color || DEFAULT_VTT_BG_COLOR;
 
     ctx.save();
     ctx.translate(px, py);
     ctx.scale(z, z);
 
-    const img = this.mapImage();
-    if (img) {
-      ctx.fillStyle = '#0B1412';
-      ctx.fillRect(0, 0, wb.width, wb.height);
-      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
-    } else {
-      const floorGrad = ctx.createLinearGradient(0, 0, wb.width, wb.height);
-      floorGrad.addColorStop(0, '#0F1C1A');
-      floorGrad.addColorStop(0.5, '#132421');
-      floorGrad.addColorStop(1, '#0C1715');
-      ctx.fillStyle = floorGrad;
-      ctx.fillRect(0, 0, wb.width, wb.height);
+    if (layout.padding > 0) {
+      ctx.fillStyle = '#091211';
+      ctx.fillRect(0, 0, layout.totalWidth, layout.totalHeight);
 
-      ctx.strokeStyle = 'rgba(56, 178, 154, 0.22)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, Math.max(0, wb.width - 2), Math.max(0, wb.height - 2));
+      ctx.save();
+      ctx.strokeStyle = 'rgba(138, 176, 171, 0.22)';
+      ctx.lineWidth = Math.max(1, 1.4 / z);
+      ctx.setLineDash([8 / z, 6 / z]);
+      ctx.strokeRect(
+        0.5 / z,
+        0.5 / z,
+        Math.max(0, layout.totalWidth - 1 / z),
+        Math.max(0, layout.totalHeight - 1 / z)
+      );
+      ctx.restore();
     }
+
+    const img = this.mapImage();
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(
+      layout.sceneX,
+      layout.sceneY,
+      layout.innerWidth,
+      layout.innerHeight
+    );
+
+    if (img) {
+      ctx.drawImage(
+        img,
+        layout.sceneX,
+        layout.sceneY,
+        layout.innerWidth,
+        layout.innerHeight
+      );
+    } else {
+      const sheen = ctx.createLinearGradient(
+        layout.sceneX,
+        layout.sceneY,
+        layout.sceneX + layout.innerWidth,
+        layout.sceneY + layout.innerHeight
+      );
+      sheen.addColorStop(0, 'rgba(255, 255, 255, 0.028)');
+      sheen.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+      sheen.addColorStop(1, 'rgba(0, 0, 0, 0.18)');
+      ctx.fillStyle = sheen;
+      ctx.fillRect(
+        layout.sceneX,
+        layout.sceneY,
+        layout.innerWidth,
+        layout.innerHeight
+      );
+    }
+
+    ctx.strokeStyle = 'rgba(56, 178, 154, 0.42)';
+    ctx.lineWidth = Math.max(1, 2 / z);
+    ctx.strokeRect(
+      layout.sceneX,
+      layout.sceneY,
+      layout.innerWidth,
+      layout.innerHeight
+    );
 
     const lights = this.lightPolygons();
     for (const lp of lights) {
@@ -1164,7 +2034,10 @@ export class VttCanvasComponent implements AfterViewInit {
         lp.origin.y,
         lp.dimRadiusPx
       );
-      const brightStop = Math.max(0.05, Math.min(0.92, lp.brightRadiusPx / lp.dimRadiusPx));
+      const brightStop = Math.max(
+        0.05,
+        Math.min(0.92, lp.brightRadiusPx / lp.dimRadiusPx)
+      );
       grad.addColorStop(0, hexToRgba(lp.color, 0.36));
       grad.addColorStop(brightStop, hexToRgba(lp.color, 0.19));
       grad.addColorStop(1, hexToRgba(lp.color, 0));
@@ -1179,22 +2052,42 @@ export class VttCanvasComponent implements AfterViewInit {
       ctx.restore();
     }
 
-    if (sc.grid_opacity > 0.01) {
-      ctx.beginPath();
-      for (let col = 0; col < geom.gridWidth; col++) {
-        for (let row = 0; row < geom.gridHeight; row++) {
-          const c = hexToWorldCenter({ col, row }, geom);
-          const pts = getHexPolygonPoints(c, R);
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length; i++) {
-            ctx.lineTo(pts[i].x, pts[i].y);
-          }
-          ctx.closePath();
+    if (sc.grid_mode !== 'gridless' && sc.grid_opacity > 0.01) {
+      const step = Math.max(20, geom.gridSizePx);
+      const visMinX = Math.max(0, -px / z - step);
+      const visMaxX = Math.min(layout.totalWidth, (vw - px) / z + step);
+      const visMinY = Math.max(0, -py / z - step);
+      const visMaxY = Math.min(layout.totalHeight, (vh - py) / z + step);
+
+      if (visMinX < visMaxX && visMinY < visMaxY) {
+        const startColLine = Math.floor((visMinX - geom.offsetX) / step);
+        const endColLine = Math.ceil((visMaxX - geom.offsetX) / step);
+        const startRowLine = Math.floor((visMinY - geom.offsetY) / step);
+        const endRowLine = Math.ceil((visMaxY - geom.offsetY) / step);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, layout.totalWidth, layout.totalHeight);
+        ctx.clip();
+
+        ctx.beginPath();
+        for (let col = startColLine; col <= endColLine; col++) {
+          const x = geom.offsetX + col * step;
+          if (x < 0 || x > layout.totalWidth) continue;
+          ctx.moveTo(x, visMinY);
+          ctx.lineTo(x, visMaxY);
         }
+        for (let row = startRowLine; row <= endRowLine; row++) {
+          const y = geom.offsetY + row * step;
+          if (y < 0 || y > layout.totalHeight) continue;
+          ctx.moveTo(visMinX, y);
+          ctx.lineTo(visMaxX, y);
+        }
+        ctx.strokeStyle = `rgba(215, 238, 234, ${Math.min(0.9, sc.grid_opacity)})`;
+        ctx.lineWidth = Math.max(0.75, 1.15 / z);
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.strokeStyle = `rgba(215, 238, 234, ${Math.min(0.9, sc.grid_opacity)})`;
-      ctx.lineWidth = Math.max(0.8, 1.15 / z);
-      ctx.stroke();
     }
 
     const pendingTarget = this.vttStore.pendingTargetAction();
@@ -1204,23 +2097,48 @@ export class VttCanvasComponent implements AfterViewInit {
         .find((t) => t.id === pendingTarget.attackerTokenId);
       if (attacker) {
         ctx.save();
-        for (let col = 0; col < geom.gridWidth; col++) {
-          for (let row = 0; row < geom.gridHeight; row++) {
-            const dFeet = getHexDistanceFeet(
-              { col: attacker.x, row: attacker.y },
-              { col, row }
-            );
-            if (dFeet > 0 && dFeet <= pendingTarget.reachFeet) {
-              const c = hexToWorldCenter({ col, row }, geom);
-              const pts = getHexPolygonPoints(c, R * 0.96);
-              ctx.beginPath();
-              ctx.moveTo(pts[0].x, pts[0].y);
-              for (let i = 1; i < pts.length; i++) {
-                ctx.lineTo(pts[i].x, pts[i].y);
+        if (sc.grid_mode === 'gridless') {
+          const attOrigin = getTokenWorldCenter(attacker, geom, 'gridless');
+          const reachPx = feetToWorldPixels(
+            pendingTarget.reachFeet,
+            geom.gridSizePx
+          );
+          ctx.beginPath();
+          ctx.arc(attOrigin.x, attOrigin.y, reachPx, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(251, 146, 60, 0.11)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(251, 146, 60, 0.55)';
+          ctx.lineWidth = 2 / z;
+          ctx.setLineDash([7 / z, 5 / z]);
+          ctx.stroke();
+        } else {
+          const reachSteps = Math.max(
+            1,
+            Math.ceil(pendingTarget.reachFeet / 5) + 2
+          );
+          const colStart = Math.max(0, attacker.x - reachSteps);
+          const colEnd = Math.min(geom.gridWidth - 1, attacker.x + reachSteps);
+          const rowStart = Math.max(0, attacker.y - reachSteps);
+          const rowEnd = Math.min(geom.gridHeight - 1, attacker.y + reachSteps);
+
+          for (let col = colStart; col <= colEnd; col++) {
+            for (let row = rowStart; row <= rowEnd; row++) {
+              const dFeet = getHexDistanceFeet(
+                { col: attacker.x, row: attacker.y },
+                { col, row }
+              );
+              if (dFeet > 0 && dFeet <= pendingTarget.reachFeet) {
+                const c = hexToWorldCenter({ col, row }, geom);
+                const pts = getHexPolygonPoints(c, R * 0.96);
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) {
+                  ctx.lineTo(pts[i].x, pts[i].y);
+                }
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(251, 146, 60, 0.13)';
+                ctx.fill();
               }
-              ctx.closePath();
-              ctx.fillStyle = 'rgba(251, 146, 60, 0.13)';
-              ctx.fill();
             }
           }
         }
@@ -1229,7 +2147,10 @@ export class VttCanvasComponent implements AfterViewInit {
     }
 
     const hov = this.hoveredHex();
-    if (hov) {
+    const suppressTileHover =
+      Boolean(this.dragTokenState()?.freeUnsnap) ||
+      Boolean(this.rosterDropPreview()?.unsnapped);
+    if (sc.grid_mode !== 'gridless' && hov && !suppressTileHover) {
       const hc = hexToWorldCenter(hov, geom);
       const pts = getHexPolygonPoints(hc, R * 0.97);
       ctx.beginPath();
@@ -1258,10 +2179,68 @@ export class VttCanvasComponent implements AfterViewInit {
     this.renderWallsAndDraft(ctx, z);
     this.renderLightGuidesAndDraft(ctx, z);
     this.renderPathsAndRulers(ctx, z, R);
+    this.renderRosterDropPreview(ctx, z, R);
     this.renderPendingClashVector(ctx, z);
     this.renderPings(ctx, z);
 
     ctx.restore();
+  }
+
+  private renderRosterDropPreview(
+    ctx: CanvasRenderingContext2D,
+    z: number,
+    hexRadius: number
+  ): void {
+    const preview = this.rosterDropPreview();
+    const sc = this.vttStore.activeScene();
+    if (!preview || !sc) return;
+
+    const geom = this.vttStore.gridGeometry();
+    const center = preview.unsnapped
+      ? preview.worldPt
+      : hexToWorldCenter(preview.hex, geom);
+    const tint = preview.color || '#38B29A';
+
+    ctx.save();
+    if (!preview.unsnapped && sc.grid_mode !== 'gridless') {
+      const pts = getHexPolygonPoints(center, hexRadius * 0.97);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = hexToRgba(tint, 0.18);
+      ctx.fill();
+      ctx.strokeStyle = tint;
+      ctx.lineWidth = 2.2 / z;
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, hexRadius * 0.78, 0, Math.PI * 2);
+    ctx.fillStyle = hexToRgba(tint, 0.24);
+    ctx.fill();
+    ctx.setLineDash([6 / z, 4 / z]);
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 2.4 / z;
+    ctx.stroke();
+    ctx.restore();
+
+    const modeHint =
+      sc.grid_mode === 'gridless'
+        ? 'Free Position'
+        : preview.unsnapped
+          ? 'Free Position (Shift)'
+          : `Tile (${preview.hex.col}, ${preview.hex.row}) · Shift = Free`;
+    this.drawWorldPill(
+      ctx,
+      center.x,
+      center.y - hexRadius - 14 / z,
+      `Deploy ${preview.name} · ${modeHint}`,
+      tint,
+      z
+    );
   }
 
   private renderLightGuidesAndDraft(
@@ -1321,7 +2300,10 @@ export class VttCanvasComponent implements AfterViewInit {
     if (dimFeet <= 0) return;
 
     const dimPx = feetToWorldPixels(dimFeet, geom.gridSizePx);
-    const brightPx = feetToWorldPixels(target.bright_feet ?? 0, geom.gridSizePx);
+    const brightPx = feetToWorldPixels(
+      target.bright_feet ?? 0,
+      geom.gridSizePx
+    );
     const tint = target.color || '#FF9B42';
 
     ctx.save();
@@ -1398,7 +2380,7 @@ export class VttCanvasComponent implements AfterViewInit {
       fctx.fillRect(-40, -40, wb.width + 80, wb.height + 80);
     } else if (sc.explored_fog?.cells?.length) {
       fctx.beginPath();
-      const expandedR = hexRadius * 1.07;
+      const expandedR = hexRadius * 1.04;
       for (const key of sc.explored_fog.cells) {
         const parsed = parseHexKey(key);
         if (!parsed) continue;
@@ -1429,12 +2411,19 @@ export class VttCanvasComponent implements AfterViewInit {
         fctx.fill();
       }
 
-      if (!sc.global_illumination && lights.length > 0 && obs.unboundedLosPolygon.length >= 3) {
+      if (
+        !sc.global_illumination &&
+        lights.length > 0 &&
+        obs.unboundedLosPolygon.length >= 3
+      ) {
         fctx.save();
         fctx.beginPath();
         fctx.moveTo(obs.unboundedLosPolygon[0].x, obs.unboundedLosPolygon[0].y);
         for (let i = 1; i < obs.unboundedLosPolygon.length; i++) {
-          fctx.lineTo(obs.unboundedLosPolygon[i].x, obs.unboundedLosPolygon[i].y);
+          fctx.lineTo(
+            obs.unboundedLosPolygon[i].x,
+            obs.unboundedLosPolygon[i].y
+          );
         }
         fctx.closePath();
         fctx.clip();
@@ -1466,8 +2455,11 @@ export class VttCanvasComponent implements AfterViewInit {
     const sc = this.vttStore.activeScene();
     if (!sc) return;
 
-    const showAllWalls = this.vttStore.isGm() && !this.vttStore.previewPlayerVision();
-    const visibleDoorIds = new Set(this.visibleDoorHandles().map((d) => d.wall.id));
+    const showAllWalls =
+      this.vttStore.isGm() && !this.vttStore.previewPlayerVision();
+    const visibleDoorIds = new Set(
+      this.visibleDoorHandles().map((d) => d.wall.id)
+    );
 
     for (const w of sc.walls) {
       if (!showAllWalls) {
@@ -1543,33 +2535,206 @@ export class VttCanvasComponent implements AfterViewInit {
     z: number,
     hexRadius: number
   ): void {
+    const sc = this.vttStore.activeScene();
     const geom = this.vttStore.gridGeometry();
+    const chain = this.chainedTokenMove();
     const dragTok = this.dragTokenState();
 
-    if (dragTok && dragTok.hasMoved) {
-      const tok = this.vttStore.sceneTokens().find((t) => t.id === dragTok.tokenId);
-      const speedFeet = tok?.move_feet ?? 20;
-      const pathRes = dragTok.pathResult;
+    if (chain && chain.legs.length > 0) {
+      const chainTok = this.vttStore
+        .sceneTokens()
+        .find((t) => t.id === chain.tokenId);
+      const speedFeet = chainTok?.move_feet ?? 20;
+      const originPt = chain.originWorld;
 
-      let stroke = '#38B29A';
-      if (!pathRes.reachable && !dragTok.shiftOverride) {
-        stroke = '#F43F5E';
-      } else if (pathRes.feet > speedFeet * 2) {
-        stroke = '#FB7185';
-      } else if (pathRes.feet > speedFeet) {
-        stroke = '#F59E0B';
+      ctx.save();
+      ctx.strokeStyle = 'rgba(94, 234, 212, 0.72)';
+      ctx.lineWidth = 2 / z;
+      ctx.setLineDash([5 / z, 4 / z]);
+      ctx.beginPath();
+      ctx.arc(originPt.x, originPt.y, hexRadius * 0.62, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      const hasActiveDragLeg = Boolean(
+        dragTok && dragTok.tokenId === chain.tokenId && dragTok.hasMoved
+      );
+
+      for (let i = 0; i < chain.legs.length; i++) {
+        const leg = chain.legs[i];
+        let legStroke = '#38B29A';
+        if (leg.cumulativeFeet > speedFeet * 2) {
+          legStroke = '#FB7185';
+        } else if (leg.cumulativeFeet > speedFeet) {
+          legStroke = '#F59E0B';
+        }
+
+        if (leg.freeUnsnap) {
+          this.strokeWorldRay(ctx, leg.fromWorld, leg.toWorld, legStroke, z);
+        } else {
+          this.strokeHexPath(ctx, leg.hexPath, geom, legStroke, z, hexRadius);
+        }
+
+        const isLastLockedLeg = i === chain.legs.length - 1;
+        if (!isLastLockedLeg || hasActiveDragLeg) {
+          const wpPt = leg.freeUnsnap
+            ? leg.toWorld
+            : hexToWorldCenter(leg.toHex, geom);
+          this.drawWorldPill(
+            ctx,
+            wpPt.x,
+            wpPt.y - hexRadius * 0.55 - 8 / z,
+            `${leg.cumulativeFeet} ft`,
+            legStroke,
+            z
+          );
+        }
       }
 
-      this.strokeHexPath(ctx, pathRes.path, geom, stroke, z, hexRadius);
+      if (!hasActiveDragLeg) {
+        let chainStroke = '#38B29A';
+        if (chain.totalFeet > speedFeet * 2) {
+          chainStroke = '#FB7185';
+        } else if (chain.totalFeet > speedFeet) {
+          chainStroke = '#F59E0B';
+        }
+        const chainEndPt = chain.lastUnsnapped
+          ? chain.currentWorld
+          : hexToWorldCenter(chain.currentHex, geom);
+        const movesNeeded = Math.max(
+          1,
+          Math.ceil(chain.totalFeet / Math.max(5, speedFeet))
+        );
+        const chainLabel = `${chain.totalFeet} ft · ${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'} · Chain`;
+        this.drawWorldPill(
+          ctx,
+          chainEndPt.x,
+          chainEndPt.y - hexRadius - 14 / z,
+          chainLabel,
+          chainStroke,
+          z
+        );
+      }
+    }
 
-      const endPt = hexToWorldCenter(dragTok.currentHex, geom);
-      const label =
-        !pathRes.reachable && !dragTok.shiftOverride
-          ? `Blocked (${pathRes.feet} ft)`
-          : pathRes.feet <= speedFeet
-            ? `${pathRes.feet} ft · 1 Move`
-            : `${pathRes.feet} ft · ${Math.ceil(pathRes.feet / Math.max(5, speedFeet))} Moves`;
-      this.drawWorldPill(ctx, endPt.x, endPt.y - hexRadius - 14 / z, label, stroke, z);
+    if (dragTok && dragTok.hasMoved) {
+      const tok = this.vttStore
+        .sceneTokens()
+        .find((t) => t.id === dragTok.tokenId);
+      const speedFeet = tok?.move_feet ?? 20;
+      const priorFeet =
+        chain && chain.tokenId === dragTok.tokenId ? chain.totalFeet : 0;
+
+      if (dragTok.freeUnsnap) {
+        const legFeet = dragTok.gridlessFeet;
+        const totalFeet = priorFeet + legFeet;
+        let stroke = '#38B29A';
+        if (dragTok.gridlessBlocked && !dragTok.shiftOverride) {
+          stroke = '#F43F5E';
+        } else if (totalFeet > speedFeet * 2) {
+          stroke = '#FB7185';
+        } else if (totalFeet > speedFeet) {
+          stroke = '#F59E0B';
+        }
+
+        this.strokeWorldRay(
+          ctx,
+          dragTok.startWorld,
+          dragTok.currentWorld,
+          stroke,
+          z
+        );
+
+        const freeBadge =
+          dragTok.gridMode !== 'gridless' ? ' · Free (Shift)' : '';
+        const movesNeeded =
+          totalFeet > 0
+            ? Math.ceil(totalFeet / Math.max(5, speedFeet))
+            : 0;
+        const movesStr =
+          movesNeeded === 0
+            ? 'Free Nudge'
+            : `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
+        const label =
+          dragTok.gridlessBlocked && !dragTok.shiftOverride
+            ? priorFeet > 0
+              ? `Blocked (${priorFeet} + ${legFeet} ft)`
+              : `Blocked (${legFeet} ft)`
+            : priorFeet > 0
+              ? `${totalFeet} ft (+${legFeet} ft) · ${movesStr}${freeBadge}`
+              : `${totalFeet} ft · ${movesStr}${freeBadge}${this.ctrlPressed() ? ' · Chain' : ''}`;
+        this.drawWorldPill(
+          ctx,
+          dragTok.currentWorld.x,
+          dragTok.currentWorld.y - hexRadius - 14 / z,
+          label,
+          stroke,
+          z
+        );
+      } else {
+        const pathRes = dragTok.pathResult;
+        const legFeet = pathRes.feet;
+        const totalFeet = priorFeet + legFeet;
+
+        let stroke = '#38B29A';
+        if (!pathRes.reachable && !dragTok.shiftOverride) {
+          stroke = '#F43F5E';
+        } else if (totalFeet > speedFeet * 2) {
+          stroke = '#FB7185';
+        } else if (totalFeet > speedFeet) {
+          stroke = '#F59E0B';
+        }
+
+        this.strokeHexPath(ctx, pathRes.path, geom, stroke, z, hexRadius);
+
+        const endPt = hexToWorldCenter(dragTok.currentHex, geom);
+        const movesNeeded = Math.max(
+          1,
+          Math.ceil(totalFeet / Math.max(5, speedFeet))
+        );
+        const movesStr = `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
+        const label =
+          !pathRes.reachable && !dragTok.shiftOverride
+            ? priorFeet > 0
+              ? `Blocked (${priorFeet} + ${legFeet} ft)`
+              : `Blocked (${legFeet} ft)`
+            : priorFeet > 0
+              ? `${totalFeet} ft (+${legFeet} ft) · ${movesStr}`
+              : `${totalFeet} ft · ${movesStr}${this.ctrlPressed() ? ' · Chain' : ''}`;
+        this.drawWorldPill(
+          ctx,
+          endPt.x,
+          endPt.y - hexRadius - 14 / z,
+          label,
+          stroke,
+          z
+        );
+      }
+    }
+
+    const rWorldA = this.rulerWorldStart();
+    const rWorldB = this.rulerWorldCurrent();
+    if (rWorldA && rWorldB) {
+      const distPx = Math.hypot(rWorldB.x - rWorldA.x, rWorldB.y - rWorldA.y);
+      if (distPx > 3) {
+        const feet = worldPixelsToFeet(distPx, geom.gridSizePx);
+        const blocked = isWorldSegmentBlockedByWalls(
+          rWorldA,
+          rWorldB,
+          sc?.walls ?? []
+        );
+        const stroke = blocked ? '#F43F5E' : '#38BDF8';
+        this.strokeWorldRay(ctx, rWorldA, rWorldB, stroke, z);
+        const label = blocked ? `${feet} ft (Wall Blocked)` : `${feet} ft`;
+        this.drawWorldPill(
+          ctx,
+          rWorldB.x,
+          rWorldB.y - 22 / z,
+          label,
+          stroke,
+          z
+        );
+      }
     }
 
     const rulerPath = this.activeRulerPath();
@@ -1581,8 +2746,46 @@ export class VttCanvasComponent implements AfterViewInit {
       const label = rulerPath.reachable
         ? `${rulerPath.feet} ft`
         : `${rulerPath.feet} ft (Wall Blocked)`;
-      this.drawWorldPill(ctx, endPt.x, endPt.y - hexRadius - 12 / z, label, stroke, z);
+      this.drawWorldPill(
+        ctx,
+        endPt.x,
+        endPt.y - hexRadius - 12 / z,
+        label,
+        stroke,
+        z
+      );
     }
+  }
+
+  private strokeWorldRay(
+    ctx: CanvasRenderingContext2D,
+    fromPt: VttPoint,
+    toPt: VttPoint,
+    color: string,
+    z: number
+  ): void {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3.2 / z;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([8 / z, 5 / z]);
+
+    ctx.beginPath();
+    ctx.moveTo(fromPt.x, fromPt.y);
+    ctx.lineTo(toPt.x, toPt.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(fromPt.x, fromPt.y, 4 / z, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(toPt.x, toPt.y, 6 / z, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   private strokeHexPath(
@@ -1614,7 +2817,13 @@ export class VttCanvasComponent implements AfterViewInit {
     for (let i = 1; i < coords.length; i++) {
       const pt = hexToWorldCenter(coords[i], geom);
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, i === coords.length - 1 ? 5.5 / z : 3.2 / z, 0, Math.PI * 2);
+      ctx.arc(
+        pt.x,
+        pt.y,
+        i === coords.length - 1 ? 5.5 / z : 3.2 / z,
+        0,
+        Math.PI * 2
+      );
       ctx.fillStyle = color;
       ctx.fill();
     }
@@ -1636,17 +2845,21 @@ export class VttCanvasComponent implements AfterViewInit {
     ctx.restore();
   }
 
-  private renderPendingClashVector(ctx: CanvasRenderingContext2D, z: number): void {
+  private renderPendingClashVector(
+    ctx: CanvasRenderingContext2D,
+    z: number
+  ): void {
+    const sc = this.vttStore.activeScene();
     const clash = this.vttStore.pendingClash();
-    if (!clash) return;
+    if (!sc || !clash) return;
     const toks = this.vttStore.sceneTokens();
     const att = toks.find((t) => t.id === clash.attackerTokenId);
     const def = toks.find((t) => t.id === clash.defenderTokenId);
     if (!att || !def) return;
 
     const geom = this.vttStore.gridGeometry();
-    const a = hexToWorldCenter({ col: att.x, row: att.y }, geom);
-    const b = hexToWorldCenter({ col: def.x, row: def.y }, geom);
+    const a = getTokenWorldCenter(att, geom, sc.grid_mode);
+    const b = getTokenWorldCenter(def, geom, sc.grid_mode);
 
     ctx.save();
     ctx.strokeStyle = '#FB923C';

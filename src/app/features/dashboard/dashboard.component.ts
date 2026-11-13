@@ -26,6 +26,21 @@ export class DashboardComponent {
 
   constructor() {
     void this.campaignStore.ensureLoaded();
+    this.prefillInviteFromUrl();
+  }
+
+  private prefillInviteFromUrl(): void {
+    try {
+      const urlTree = this.router.parseUrl?.(this.router.url);
+      const rawInvite = urlTree?.queryParams?.['invite'];
+      if (typeof rawInvite === 'string' && rawInvite.trim().length > 0) {
+        this.joinCode = rawInvite.trim().toUpperCase();
+        this.showCreateForm.set(false);
+        this.showJoinForm.set(true);
+      }
+    } catch {
+      return;
+    }
   }
 
   openCreateDrawer(): void {

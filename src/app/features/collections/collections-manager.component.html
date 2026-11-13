@@ -1,0 +1,872 @@
+<div
+  [class]="embedded() ? 'space-y-5' : 'mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-6'"
+>
+  @if (!embedded()) {
+    <section
+      class="overflow-hidden rounded-2xl border border-[#243B37] bg-[#122220] p-6 text-[#EBF5F3] sm:p-7"
+    >
+      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div>
+          <div class="flex flex-wrap items-center gap-3">
+            <h1 class="font-display text-2xl font-bold text-white sm:text-3xl">
+              Collections
+            </h1>
+            <span
+              class="rounded-md border border-[#C4491A] bg-[#0D1615] px-2.5 py-0.5 font-mono-num text-xs font-bold text-[#FF8C5A] tabular-nums"
+            >
+              {{ collectionsStore.folders().length }} Folders ·
+              {{ collectionsStore.actors().length }} Actors
+            </span>
+          </div>
+          <p class="mt-1.5 max-w-2xl text-sm text-[#8AB0AB]">
+            Organize reusable Characters, NPCs, and Adversaries into nested folders. Import characters you already created or forge actors from scratch, then load them directly into any campaign's VTT Roster.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <a
+            routerLink="/characters/new"
+            class="inline-flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#0D1615] px-3.5 py-2 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:border-[#38B29A] hover:text-white"
+          >
+            <span>Full Character Sheet Builder</span>
+          </a>
+          <button
+            type="button"
+            (click)="openImportModal()"
+            class="inline-flex items-center gap-2 rounded-xl border border-[#38B29A] bg-[#0D1615] px-3.5 py-2 text-xs font-bold text-[#38B29A] transition-colors hover:bg-[#38B29A] hover:text-[#081210]"
+          >
+            <span>Import Character</span>
+          </button>
+          <button
+            type="button"
+            (click)="openCreateActorModal('character')"
+            class="mot-btn-primary text-xs"
+          >
+            + Make From Scratch
+          </button>
+        </div>
+      </div>
+    </section>
+  }
+
+  <section class="mot-card p-5 space-y-5">
+    <div class="flex flex-col justify-between gap-3 border-b border-[var(--mot-border)] pb-4 lg:flex-row lg:items-center">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="relative min-w-[230px] flex-1 sm:flex-initial">
+          <input
+            type="text"
+            class="mot-input py-1.5 text-xs"
+            placeholder="Search actors, weapons, or folders..."
+            [ngModel]="searchQuery()"
+            (ngModelChange)="searchQuery.set($event)"
+          />
+        </div>
+
+        <div class="inline-flex rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-1">
+          <button
+            type="button"
+            (click)="kindFilter.set('all')"
+            class="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors"
+            [class.bg-[var(--mot-accent)]]="kindFilter() === 'all'"
+            [class.text-white]="kindFilter() === 'all'"
+            [class.text-[var(--mot-text-muted)]]="kindFilter() !== 'all'"
+          >
+            All
+          </button>
+          <button
+            type="button"
+            (click)="kindFilter.set('character')"
+            class="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors"
+            [class.bg-[var(--mot-accent)]]="kindFilter() === 'character'"
+            [class.text-white]="kindFilter() === 'character'"
+            [class.text-[var(--mot-text-muted)]]="kindFilter() !== 'character'"
+          >
+            Characters
+          </button>
+          <button
+            type="button"
+            (click)="kindFilter.set('npc')"
+            class="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors"
+            [class.bg-[var(--mot-accent)]]="kindFilter() === 'npc'"
+            [class.text-white]="kindFilter() === 'npc'"
+            [class.text-[var(--mot-text-muted)]]="kindFilter() !== 'npc'"
+          >
+            NPCs &amp; Adversaries
+          </button>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          (click)="openCreateFolderModal(null)"
+          class="mot-btn-ghost px-3 py-1.5 text-xs"
+        >
+          + Folder
+        </button>
+        <button
+          type="button"
+          (click)="openImportModal()"
+          class="mot-btn-ghost px-3 py-1.5 text-xs"
+        >
+          Import Existing
+        </button>
+        <button
+          type="button"
+          (click)="openCreateActorModal('character')"
+          class="mot-btn-primary px-3.5 py-1.5 text-xs"
+        >
+          + Make From Scratch
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-12">
+      <aside class="lg:col-span-4 space-y-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-3">
+        <div class="flex items-center justify-between px-1 pb-1">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-[var(--mot-text-muted)]">
+            Collection Folders
+          </span>
+          <button
+            type="button"
+            (click)="openCreateFolderModal(null)"
+            class="text-[11px] font-bold text-[var(--mot-teal-text)] hover:underline"
+          >
+            + New Folder
+          </button>
+        </div>
+
+        <button
+          type="button"
+          (click)="selectFolderFilter('all')"
+          class="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors"
+          [class.border-[var(--mot-accent)]]="selectedFolderFilter() === 'all'"
+          [class.bg-[var(--mot-surface)]]="selectedFolderFilter() === 'all'"
+          [class.text-[var(--mot-text)]]="selectedFolderFilter() === 'all'"
+          [class.border-transparent]="selectedFolderFilter() !== 'all'"
+          [class.text-[var(--mot-text-muted)]]="selectedFolderFilter() !== 'all'"
+        >
+          <span>All Collection Actors</span>
+          <span class="font-mono-num text-[11px] font-bold tabular-nums">
+            {{ filteredActorsForTree().length }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          (click)="selectFolderFilter('root')"
+          (dragover)="onFolderDragOver('root', $event)"
+          (dragleave)="onFolderDragLeave('root')"
+          (drop)="onFolderDrop(null, $event)"
+          class="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors"
+          [class.border-[var(--mot-teal)]]="dragOverTarget() === 'root'"
+          [class.border-[var(--mot-accent)]]="selectedFolderFilter() === 'root' && dragOverTarget() !== 'root'"
+          [class.bg-[var(--mot-surface)]]="selectedFolderFilter() === 'root' || dragOverTarget() === 'root'"
+          [class.text-[var(--mot-text)]]="selectedFolderFilter() === 'root'"
+          [class.border-transparent]="selectedFolderFilter() !== 'root' && dragOverTarget() !== 'root'"
+          [class.text-[var(--mot-text-muted)]]="selectedFolderFilter() !== 'root'"
+        >
+          <span>Unfiled (Root Directory)</span>
+          <span class="font-mono-num text-[11px] font-bold tabular-nums">
+            {{ directoryTree().rootItems.length }}
+          </span>
+        </button>
+
+        <ng-template #folderNodeTpl let-node="node">
+          <div class="space-y-1">
+            <div
+              (click)="selectFolderFilter(node.folder.id)"
+              (dragover)="onFolderDragOver(node.folder.id, $event)"
+              (dragleave)="onFolderDragLeave(node.folder.id)"
+              (drop)="onFolderDrop(node.folder.id, $event)"
+              [style.padding-left.px]="10 + node.depth * 14"
+              class="group flex cursor-pointer items-center justify-between gap-2 rounded-lg border py-1.5 pr-2 text-xs transition-colors"
+              [class.border-[var(--mot-teal)]]="dragOverTarget() === node.folder.id"
+              [class.border-[var(--mot-accent)]]="selectedFolderFilter() === node.folder.id && dragOverTarget() !== node.folder.id"
+              [class.bg-[var(--mot-surface)]]="selectedFolderFilter() === node.folder.id || dragOverTarget() === node.folder.id"
+              [class.border-transparent]="selectedFolderFilter() !== node.folder.id && dragOverTarget() !== node.folder.id"
+            >
+              <div class="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  (click)="toggleFolderCollapse(node.folder.id, $event)"
+                  class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] text-[var(--mot-text-muted)] hover:text-[var(--mot-text)]"
+                >
+                  {{ isFolderCollapsed(node.folder.id) ? '▸' : '▾' }}
+                </button>
+                <span
+                  class="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  [style.background-color]="node.folder.color || '#C4491A'"
+                ></span>
+                <span class="truncate font-semibold text-[var(--mot-text)]">
+                  {{ node.folder.name }}
+                </span>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-1">
+                <span class="font-mono-num text-[11px] text-[var(--mot-text-muted)] tabular-nums">
+                  {{ node.totalItemCount }}
+                </span>
+                @if (node.depth < 2) {
+                  <button
+                    type="button"
+                    title="New Subfolder"
+                    (click)="openCreateFolderModal(node.folder.id); $event.stopPropagation()"
+                    class="rounded px-1 py-0.5 text-[10px] font-bold text-[var(--mot-text-muted)] opacity-0 transition-opacity hover:text-[var(--mot-text)] group-hover:opacity-100"
+                  >
+                    +
+                  </button>
+                }
+                <button
+                  type="button"
+                  title="Edit Folder"
+                  (click)="openEditFolderModal(node, $event)"
+                  class="rounded px-1 py-0.5 text-[10px] font-semibold text-[var(--mot-text-muted)] opacity-0 transition-opacity hover:text-[var(--mot-text)] group-hover:opacity-100"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  title="Delete Folder"
+                  (click)="removeFolder(node.folder.id, $event)"
+                  class="rounded px-1 py-0.5 text-[10px] font-bold text-[var(--mot-hp-text)] opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-100"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            @if (!isFolderCollapsed(node.folder.id) && node.subfolders.length > 0) {
+              <div class="space-y-1">
+                @for (sub of node.subfolders; track sub.folder.id) {
+                  <ng-container
+                    *ngTemplateOutlet="folderNodeTpl; context: { node: sub }"
+                  />
+                }
+              </div>
+            }
+          </div>
+        </ng-template>
+
+        @if (directoryTree().folders.length > 0) {
+          <div class="space-y-1 pt-1">
+            @for (folderNode of directoryTree().folders; track folderNode.folder.id) {
+              <ng-container
+                *ngTemplateOutlet="folderNodeTpl; context: { node: folderNode }"
+              />
+            }
+          </div>
+        } @else {
+          <p class="px-2 py-3 text-[11px] text-[var(--mot-text-muted)]">
+            No folders yet. Create folders like "Bosses", "Townsfolk", or "Party Allies" and drag actors onto them.
+          </p>
+        }
+      </aside>
+
+      <div class="lg:col-span-8 space-y-3">
+        @if (visibleActors().length === 0) {
+          <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-bg-inset)] px-6 py-12 text-center">
+            <div class="font-display text-base font-bold text-[var(--mot-text)]">
+              No Actors in This View
+            </div>
+            <p class="mt-1 max-w-md text-xs text-[var(--mot-text-muted)]">
+              Make a custom Character or NPC from scratch, or import a character you already built in the Character Sheet studio.
+            </p>
+            <div class="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+              <button
+                type="button"
+                (click)="openCreateActorModal('character')"
+                class="mot-btn-primary text-xs"
+              >
+                + Make From Scratch
+              </button>
+              <button
+                type="button"
+                (click)="openImportModal()"
+                class="mot-btn-ghost text-xs"
+              >
+                Import Existing Character
+              </button>
+            </div>
+          </div>
+        } @else {
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            @for (actor of visibleActors(); track actor.id) {
+              <article
+                draggable="true"
+                (dragstart)="onActorDragStart(actor, $event)"
+                (dragend)="onActorDragEnd()"
+                class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-4 transition-colors hover:border-[var(--mot-border-strong)]"
+              >
+                <div class="space-y-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex min-w-0 items-center gap-3">
+                      <div
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+                      >
+                        <app-compendium-icon
+                          [icon]="actor.icon || 'greatsword'"
+                          [color]="actor.color || '#38B29A'"
+                          sizeClass="h-5 w-5"
+                        />
+                      </div>
+                      <div class="min-w-0">
+                        <div class="truncate font-display text-sm font-bold text-[var(--mot-text)]">
+                          {{ actor.name }}
+                        </div>
+                        <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span
+                            class="rounded px-1.5 py-0.5 font-bold uppercase tracking-wide"
+                            [class.bg-emerald-950/60]="actor.faction === 'ally'"
+                            [class.text-emerald-300]="actor.faction === 'ally'"
+                            [class.bg-red-950/60]="actor.faction === 'enemy'"
+                            [class.text-red-300]="actor.faction === 'enemy'"
+                            [class.bg-amber-950/60]="actor.faction === 'neutral'"
+                            [class.text-amber-300]="actor.faction === 'neutral'"
+                          >
+                            {{ actor.faction }}
+                          </span>
+                          <span class="rounded border border-[var(--mot-border)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-text-muted)]">
+                            {{ actor.actor_kind === 'character' ? 'Character' : 'NPC / Multi-Spawn' }}
+                          </span>
+                          @if (actor.folder_id && folderNameById().get(actor.folder_id)) {
+                            <span class="truncate text-[10px] text-[var(--mot-text-muted)]">
+                              · {{ folderNameById().get(actor.folder_id) }}
+                            </span>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-4 gap-1.5 text-center font-mono-num text-[11px]">
+                    <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1">
+                      <div class="text-[9px] uppercase text-[var(--mot-text-muted)]">HP</div>
+                      <div class="font-bold text-[var(--mot-hp-text)]">{{ actor.max_hp }}</div>
+                    </div>
+                    <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1">
+                      <div class="text-[9px] uppercase text-[var(--mot-text-muted)]">SP</div>
+                      <div class="font-bold text-[var(--mot-sp-text)]">{{ actor.max_sp }}</div>
+                    </div>
+                    <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1">
+                      <div class="text-[9px] uppercase text-[var(--mot-text-muted)]">DR</div>
+                      <div class="font-bold text-[var(--mot-text)]">{{ actor.armor_dr }}</div>
+                    </div>
+                    <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1">
+                      <div class="text-[9px] uppercase text-[var(--mot-text-muted)]">Move</div>
+                      <div class="font-bold text-[var(--mot-teal-text)]">{{ actor.move_feet }} ft</div>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--mot-text-muted)]">
+                    <span>
+                      <strong class="text-[var(--mot-text)]">{{ actor.npc_stats.weapon_name || 'Unarmed' }}</strong>
+                      · +{{ actor.npc_stats.attack_mod ?? 0 }} Hit · {{ actor.npc_stats.flat_damage ?? 0 }} DMG · {{ actor.npc_stats.reach_feet ?? 5 }} ft
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex items-center justify-between border-t border-[var(--mot-border)] pt-2.5">
+                  <div class="flex items-center gap-2">
+                    @if (actor.source_character_id) {
+                      <a
+                        [routerLink]="['/characters', actor.source_character_id]"
+                        class="text-[11px] font-semibold text-[var(--mot-teal-text)] hover:underline"
+                      >
+                        Sheet ↗
+                      </a>
+                    } @else {
+                      <span class="text-[10px] text-[var(--mot-text-muted)]">
+                        Drag to folder
+                      </span>
+                    }
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="openEditActorModal(actor)"
+                      class="rounded-lg border border-[var(--mot-border)] px-2 py-1 text-[11px] font-semibold text-[var(--mot-text)] hover:border-[var(--mot-accent)]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      (click)="collectionsStore.duplicateActor(actor.id)"
+                      class="rounded-lg border border-[var(--mot-border)] px-2 py-1 text-[11px] font-semibold text-[var(--mot-text-muted)] hover:text-[var(--mot-text)]"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      (click)="collectionsStore.deleteActor(actor.id)"
+                      class="rounded-lg border border-[var(--mot-border)] px-2 py-1 text-[11px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </article>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  </section>
+</div>
+
+@if (folderModal(); as fm) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
+    (click)="closeFolderModal()"
+  >
+    <div
+      class="w-full max-w-md rounded-2xl border border-[var(--mot-border-strong)] bg-[var(--mot-surface)] p-6 shadow-2xl space-y-4"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="flex items-center justify-between">
+        <h3 class="font-display text-lg font-bold text-[var(--mot-text)]">
+          {{ fm.mode === 'create' ? 'Create Collection Folder' : 'Edit Collection Folder' }}
+        </h3>
+        <button
+          type="button"
+          (click)="closeFolderModal()"
+          class="text-sm font-bold text-[var(--mot-text-muted)] hover:text-[var(--mot-text)]"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Folder Name
+          </label>
+          <input
+            type="text"
+            class="mot-input text-sm"
+            placeholder="e.g. Boss Encounters, Recurring NPCs..."
+            [(ngModel)]="fm.name"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Parent Folder
+          </label>
+          <select class="mot-input text-sm" [(ngModel)]="fm.parentFolderId">
+            <option value="">Root Directory</option>
+            @for (opt of getValidParentFolderOptions(fm.folderId); track opt.id) {
+              <option [value]="opt.id">{{ opt.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1.5 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Folder Color
+          </label>
+          <div class="flex flex-wrap items-center gap-2">
+            @for (swatch of folderSwatches; track swatch) {
+              <button
+                type="button"
+                (click)="fm.color = swatch"
+                class="h-7 w-7 rounded-lg border-2 transition-transform"
+                [style.background-color]="swatch"
+                [class.border-white]="fm.color === swatch"
+                [class.scale-110]="fm.color === swatch"
+                [class.border-transparent]="fm.color !== swatch"
+              ></button>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" (click)="closeFolderModal()" class="mot-btn-ghost text-xs">
+          Cancel
+        </button>
+        <button type="button" (click)="saveFolderModal()" class="mot-btn-primary text-xs">
+          {{ fm.mode === 'create' ? 'Create Folder' : 'Save Changes' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (actorModal(); as am) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    (click)="closeActorModal()"
+  >
+    <div
+      class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--mot-border-strong)] bg-[var(--mot-surface)] p-6 shadow-2xl space-y-5"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="flex items-center justify-between border-b border-[var(--mot-border)] pb-3">
+        <div>
+          <h3 class="font-display text-lg font-bold text-[var(--mot-text)]">
+            {{ am.mode === 'create' ? 'Make Actor From Scratch' : 'Edit Collection Actor' }}
+          </h3>
+          <p class="text-xs text-[var(--mot-text-muted)]">
+            Configure token appearance, vitals, movement speed, and combat stats.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="closeActorModal()"
+          class="text-sm font-bold text-[var(--mot-text-muted)] hover:text-[var(--mot-text)]"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            (click)="setActorModalKind('character')"
+            class="flex-1 rounded-xl border px-3 py-2 text-left text-xs transition-colors"
+            [class.border-[var(--mot-accent)]]="am.actorKind === 'character'"
+            [class.bg-[var(--mot-bg-inset)]]="am.actorKind === 'character'"
+            [class.border-[var(--mot-border)]]="am.actorKind !== 'character'"
+          >
+            <div class="font-bold text-[var(--mot-text)]">Unique Character</div>
+            <div class="text-[11px] text-[var(--mot-text-muted)]">
+              Single persistent persona on a map (Hero, Companion, Named Boss).
+            </div>
+          </button>
+          <button
+            type="button"
+            (click)="setActorModalKind('npc')"
+            class="flex-1 rounded-xl border px-3 py-2 text-left text-xs transition-colors"
+            [class.border-[var(--mot-accent)]]="am.actorKind === 'npc'"
+            [class.bg-[var(--mot-bg-inset)]]="am.actorKind === 'npc'"
+            [class.border-[var(--mot-border)]]="am.actorKind !== 'npc'"
+          >
+            <div class="font-bold text-[var(--mot-text)]">NPC / Adversary</div>
+            <div class="text-[11px] text-[var(--mot-text-muted)]">
+              Multi-spawn template (drag onto map repeatedly for numbered copies).
+            </div>
+          </button>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Name
+          </label>
+          <input
+            type="text"
+            class="mot-input text-sm"
+            placeholder="e.g. Captain Vaelen, Ashen Hound..."
+            [(ngModel)]="am.name"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Folder
+          </label>
+          <select class="mot-input text-sm" [(ngModel)]="am.folderId">
+            <option value="">Unfiled (Root Directory)</option>
+            @for (opt of folderOptions(); track opt.id) {
+              <option [value]="opt.id">{{ opt.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Default Faction
+          </label>
+          <select class="mot-input text-sm" [(ngModel)]="am.faction">
+            <option value="ally">Ally</option>
+            <option value="enemy">Enemy</option>
+            <option value="neutral">Neutral</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Token Color
+          </label>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            @for (c of actorColorSwatches; track c) {
+              <button
+                type="button"
+                (click)="am.color = c"
+                class="h-6 w-6 rounded-full border-2 transition-transform"
+                [style.background-color]="c"
+                [class.border-white]="am.color === c"
+                [class.scale-110]="am.color === c"
+                [class.border-transparent]="am.color !== c"
+              ></button>
+            }
+          </div>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="mb-1.5 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Token Icon
+          </label>
+          <div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-2">
+            @for (preset of iconPresets; track preset.id) {
+              <button
+                type="button"
+                [title]="preset.label"
+                (click)="am.icon = preset.id"
+                class="flex h-8 w-8 items-center justify-center rounded-lg border transition-colors"
+                [class.border-[var(--mot-accent)]]="am.icon === preset.id"
+                [class.bg-[var(--mot-surface)]]="am.icon === preset.id"
+                [class.border-transparent]="am.icon !== preset.id"
+              >
+                <app-compendium-icon
+                  [icon]="preset.id"
+                  [color]="am.color"
+                  sizeClass="h-4 w-4"
+                />
+              </button>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-6">
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Max HP</label>
+          <input type="number" min="1" class="mot-input text-xs font-mono-num" [(ngModel)]="am.maxHp" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Max SP</label>
+          <input type="number" min="0" class="mot-input text-xs font-mono-num" [(ngModel)]="am.maxSp" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Max AP</label>
+          <input type="number" min="1" class="mot-input text-xs font-mono-num" [(ngModel)]="am.maxAp" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Armor DR</label>
+          <input type="number" min="0" class="mot-input text-xs font-mono-num" [(ngModel)]="am.armorDr" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Shield Blk</label>
+          <input type="number" min="0" class="mot-input text-xs font-mono-num" [(ngModel)]="am.shieldBlock" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Move (ft)</label>
+          <input type="number" min="0" step="5" class="mot-input text-xs font-mono-num" [(ngModel)]="am.moveFeet" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-3.5 sm:grid-cols-4">
+        <div class="col-span-2">
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Primary Attack / Weapon</label>
+          <input type="text" class="mot-input text-xs" [(ngModel)]="am.weaponName" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Attack AP</label>
+          <input type="number" min="0" class="mot-input text-xs font-mono-num" [(ngModel)]="am.attackAp" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Combat Tag</label>
+          <select class="mot-input text-xs" [(ngModel)]="am.combatTag">
+            @for (tag of combatTagChoices; track tag) {
+              <option [value]="tag">{{ tag }}</option>
+            }
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Attack Mod</label>
+          <input type="number" class="mot-input text-xs font-mono-num" [(ngModel)]="am.attackMod" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Flat DMG</label>
+          <input type="number" min="0" class="mot-input text-xs font-mono-num" [(ngModel)]="am.flatDamage" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Reach (ft)</label>
+          <input type="number" min="5" step="5" class="mot-input text-xs font-mono-num" [(ngModel)]="am.reachFeet" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Parry / Dodge</label>
+          <div class="flex gap-1.5">
+            <input type="number" class="mot-input text-xs font-mono-num" title="Parry Mod" [(ngModel)]="am.parryMod" />
+            <input type="number" class="mot-input text-xs font-mono-num" title="Dodge Mod" [(ngModel)]="am.dodgeMod" />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+          Notes / Roleplay Bio
+        </label>
+        <textarea
+          rows="2"
+          class="mot-input text-xs"
+          placeholder="Tactics, personality cues, loot, or faction notes..."
+          [(ngModel)]="am.notes"
+        ></textarea>
+      </div>
+
+      <div class="flex items-center justify-between border-t border-[var(--mot-border)] pt-3">
+        <a
+          routerLink="/characters/new"
+          class="text-xs font-semibold text-[var(--mot-teal-text)] hover:underline"
+        >
+          Need full Skill Trees &amp; Gear? Open Sheet Builder ↗
+        </a>
+        <div class="flex gap-2">
+          <button type="button" (click)="closeActorModal()" class="mot-btn-ghost text-xs">
+            Cancel
+          </button>
+          <button type="button" (click)="saveActorModal()" class="mot-btn-primary text-xs">
+            {{ am.mode === 'create' ? 'Create Actor' : 'Save Actor' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+@if (importModalOpen()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    (click)="closeImportModal()"
+  >
+    <div
+      class="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--mot-border-strong)] bg-[var(--mot-surface)] p-6 shadow-2xl space-y-4"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="flex items-center justify-between border-b border-[var(--mot-border)] pb-3">
+        <div>
+          <h3 class="font-display text-lg font-bold text-[var(--mot-text)]">
+            Import into Collections
+          </h3>
+          <p class="text-xs text-[var(--mot-text-muted)]">
+            Import characters you already created or starter adversary archetypes into a folder.
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="closeImportModal()"
+          class="text-sm font-bold text-[var(--mot-text-muted)] hover:text-[var(--mot-text)]"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Destination Folder
+          </label>
+          <select
+            class="mot-input text-xs"
+            [ngModel]="importTargetFolderId()"
+            (ngModelChange)="importTargetFolderId.set($event)"
+          >
+            <option value="">Unfiled (Root Directory)</option>
+            @for (opt of folderOptions(); track opt.id) {
+              <option [value]="opt.id">{{ opt.label }}</option>
+            }
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-[var(--mot-text-muted)]">
+            Filter
+          </label>
+          <input
+            type="text"
+            class="mot-input text-xs"
+            placeholder="Filter by name..."
+            [ngModel]="importSearch()"
+            (ngModelChange)="importSearch.set($event)"
+          />
+        </div>
+      </div>
+
+      <div class="inline-flex rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] p-1">
+        <button
+          type="button"
+          (click)="importTab.set('characters')"
+          class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+          [class.bg-[var(--mot-accent)]]="importTab() === 'characters'"
+          [class.text-white]="importTab() === 'characters'"
+          [class.text-[var(--mot-text-muted)]]="importTab() !== 'characters'"
+        >
+          My Characters ({{ collectionsStore.myCharacters().length }})
+        </button>
+        <button
+          type="button"
+          (click)="importTab.set('presets')"
+          class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+          [class.bg-[var(--mot-accent)]]="importTab() === 'presets'"
+          [class.text-white]="importTab() === 'presets'"
+          [class.text-[var(--mot-text-muted)]]="importTab() !== 'presets'"
+        >
+          Starter Adversaries ({{ npcPresets.length }})
+        </button>
+      </div>
+
+      @if (importTab() === 'characters') {
+        @if (filteredImportCharacters().length === 0) {
+          <div class="rounded-xl border border-dashed border-[var(--mot-border)] p-6 text-center text-xs text-[var(--mot-text-muted)]">
+            No matching characters found. You can forge a full sheet at
+            <a routerLink="/characters/new" class="font-semibold text-[var(--mot-teal-text)] underline">/characters/new</a>.
+          </div>
+        } @else {
+          <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
+            @for (char of filteredImportCharacters(); track char.id) {
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] px-3.5 py-2.5">
+                <div class="min-w-0">
+                  <div class="truncate font-display text-sm font-bold text-[var(--mot-text)]">
+                    {{ char.name }}
+                  </div>
+                  <div class="text-[11px] text-[var(--mot-text-muted)]">
+                    Level {{ char.level }} &middot; {{ char.equipped_armor }} Armor &middot; HP {{ char.current_hp }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  (click)="importCharacter(char)"
+                  class="mot-btn-primary shrink-0 px-3 py-1.5 text-xs"
+                >
+                  Import
+                </button>
+              </div>
+            }
+          </div>
+        }
+      } @else {
+        <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
+          @for (preset of filteredImportPresets(); track preset.id) {
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-bg-inset)] px-3.5 py-2.5">
+              <div class="flex min-w-0 items-center gap-3">
+                <app-compendium-icon
+                  [icon]="preset.icon"
+                  [color]="preset.color"
+                  sizeClass="h-5 w-5"
+                />
+                <div class="min-w-0">
+                  <div class="truncate font-display text-sm font-bold text-[var(--mot-text)]">
+                    {{ preset.name }}
+                  </div>
+                  <div class="text-[11px] text-[var(--mot-text-muted)]">
+                    HP {{ preset.max_hp }} · SP {{ preset.max_sp }} · {{ preset.npc_stats.weapon_name }} · Move {{ preset.move_feet }} ft
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="importPreset(preset)"
+                class="mot-btn-primary shrink-0 px-3 py-1.5 text-xs"
+              >
+                Import
+              </button>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

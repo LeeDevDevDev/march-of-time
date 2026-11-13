@@ -5,6 +5,30 @@ import {
 
 export type VttFaction = 'ally' | 'enemy' | 'neutral';
 
+export type VttGridMode = 'square' | 'hex' | 'gridless';
+
+export type VttDirectoryScope = 'maps' | 'characters' | 'npcs' | 'items';
+
+export const DEFAULT_VTT_GRID_WIDTH = 16;
+export const DEFAULT_VTT_GRID_HEIGHT = 11;
+export const DEFAULT_VTT_GRID_SIZE_PX = 100;
+export const DEFAULT_VTT_SCENE_WIDTH_PX = 1600;
+export const DEFAULT_VTT_SCENE_HEIGHT_PX = 1100;
+export const DEFAULT_VTT_SCENE_PADDING = 0.2;
+export const DEFAULT_VTT_GRID_OPACITY = 0.2;
+export const DEFAULT_VTT_BG_COLOR = '#0E1917';
+
+export interface VttFolderModel {
+  id: string;
+  campaign_id: string;
+  scope: VttDirectoryScope;
+  parent_folder_id: string | null;
+  name: string;
+  color: string | null;
+  sort_order: number;
+  created_at?: string;
+}
+
 export type VttToolMode =
   | 'select'
   | 'pan'
@@ -57,9 +81,20 @@ export interface VttLightSource {
   enabled?: boolean;
 }
 
+export interface VttSceneMetaFallback {
+  folder_id?: string | null;
+  grid_mode?: VttGridMode;
+  background_color?: string;
+  scene_width?: number | null;
+  scene_height?: number | null;
+  padding?: number;
+  sort_order?: number;
+}
+
 export interface VttExploredFog {
   cells?: string[];
   revealed_all?: boolean;
+  __scene_meta?: VttSceneMetaFallback;
 }
 
 export interface VttNpcStats {
@@ -73,6 +108,10 @@ export interface VttNpcStats {
   dodge_mod?: number;
   can_dodge?: boolean;
   enables_martial_parry?: boolean;
+  __world_x?: number | null;
+  __world_y?: number | null;
+  __unsnapped?: boolean;
+  __roster_actor_id?: string | null;
 }
 
 export type VttDefenseChoice = 'parry' | 'dodge' | 'take_hit';
@@ -136,15 +175,22 @@ export interface VttSceneModel {
   id: string;
   campaign_id: string | null;
   gm_id: string;
+  folder_id: string | null;
   name: string;
   is_active_scene: boolean;
   map_image_url: string | null;
+  background_color: string;
+  grid_mode: VttGridMode;
+  scene_width: number | null;
+  scene_height: number | null;
+  padding: number;
   grid_width: number;
   grid_height: number;
   grid_size_px: number;
   grid_offset_x: number;
   grid_offset_y: number;
   grid_opacity: number;
+  sort_order: number;
   round_number: number;
   combat_active: boolean;
   active_turn_token_id: string | null;
@@ -171,6 +217,8 @@ export interface VttTokenModel {
   y: number;
   q: number;
   r: number;
+  world_x?: number | null;
+  world_y?: number | null;
   size: number;
   icon: string | null;
   color: string | null;
@@ -357,4 +405,98 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       can_dodge: false,
     },
   },
+];
+
+export type VttActorKind = 'character' | 'npc';
+
+export interface VttRosterActorModel {
+  id: string;
+  campaign_id: string;
+  folder_id: string | null;
+  character_id: string | null;
+  collection_actor_id: string | null;
+  owner_id: string | null;
+  actor_kind: VttActorKind;
+  is_unique: boolean;
+  name: string;
+  faction: VttFaction;
+  size: number;
+  icon: string | null;
+  color: string | null;
+  max_hp: number;
+  max_sp: number;
+  max_ap: number;
+  armor_dr: number;
+  shield_block: number;
+  move_feet: number;
+  vision_feet: number;
+  light_bright_feet: number;
+  light_dim_feet: number;
+  light_color: string;
+  npc_stats: VttNpcStats;
+  notes: string;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CollectionFolderModel {
+  id: string;
+  owner_id: string;
+  parent_folder_id: string | null;
+  name: string;
+  color: string | null;
+  sort_order: number;
+  created_at?: string;
+}
+
+export interface CollectionActorModel {
+  id: string;
+  owner_id: string;
+  folder_id: string | null;
+  source_character_id: string | null;
+  actor_kind: VttActorKind;
+  is_unique: boolean;
+  name: string;
+  faction: VttFaction;
+  size: number;
+  icon: string | null;
+  color: string | null;
+  max_hp: number;
+  max_sp: number;
+  max_ap: number;
+  armor_dr: number;
+  shield_block: number;
+  move_feet: number;
+  vision_feet: number;
+  light_bright_feet: number;
+  light_dim_feet: number;
+  light_color: string;
+  npc_stats: VttNpcStats;
+  notes: string;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface VttRosterDragPayload {
+  kind: 'roster-actor' | 'character';
+  actorId?: string;
+  characterId?: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  faction: VttFaction;
+  isUnique: boolean;
+}
+
+export const VTT_ACTOR_COLOR_SWATCHES: string[] = [
+  '#38B29A',
+  '#C4491A',
+  '#EF4444',
+  '#D97706',
+  '#0284C7',
+  '#8B5CF6',
+  '#E11D48',
+  '#64748B',
 ];

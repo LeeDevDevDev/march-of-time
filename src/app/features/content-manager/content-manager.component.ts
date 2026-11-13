@@ -18,13 +18,20 @@ import {
 } from '../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../core/compendium/compendium.store';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog.component';
+import { CollectionsManagerComponent } from '../collections/collections-manager.component';
+import { CollectionsStore } from '../collections/collections.store';
 import { KeywordsManagerComponent } from './components/keywords-manager/keywords-manager.component';
 import { PerkNodeModalComponent } from './components/perk-node-modal/perk-node-modal.component';
 import { SkillTreesManagerComponent } from './components/skill-trees-manager/skill-trees-manager.component';
 import { StandaloneArtsManagerComponent } from './components/standalone-arts-manager/standalone-arts-manager.component';
 import { WeaponsManagerComponent } from './components/weapons-manager/weapons-manager.component';
 
-export type ContentStudioTab = 'trees' | 'standalone' | 'weapons' | 'keywords';
+export type ContentStudioTab =
+  | 'trees'
+  | 'standalone'
+  | 'weapons'
+  | 'keywords'
+  | 'collections';
 
 export function parseContentManagerUrl(rawUrl: string): {
   tab: ContentStudioTab;
@@ -49,7 +56,8 @@ export function parseContentManagerUrl(rawUrl: string): {
   if (
     first === 'standalone' ||
     first === 'weapons' ||
-    first === 'keywords'
+    first === 'keywords' ||
+    first === 'collections'
   ) {
     return { tab: first, treeId: null };
   }
@@ -119,6 +127,7 @@ type PendingDeleteState =
     StandaloneArtsManagerComponent,
     WeaponsManagerComponent,
     KeywordsManagerComponent,
+    CollectionsManagerComponent,
     PerkNodeModalComponent,
     ConfirmDialogComponent,
   ],
@@ -126,6 +135,7 @@ type PendingDeleteState =
 })
 export class ContentManagerComponent implements OnInit {
   readonly compendiumStore = inject(CompendiumStore);
+  readonly collectionsStore = inject(CollectionsStore);
   private readonly router = inject(Router);
 
   @ViewChild(StandaloneArtsManagerComponent)
@@ -160,6 +170,9 @@ export class ContentManagerComponent implements OnInit {
     const parsed = parseContentManagerUrl(url);
     this.studioTab.set(parsed.tab);
     this.activeTreeId.set(parsed.treeId);
+    if (parsed.tab === 'collections') {
+      void this.collectionsStore.loadCollections();
+    }
   }
 
   onActiveTreeIdChange(nextTreeId: string | null): void {

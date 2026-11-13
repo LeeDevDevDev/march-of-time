@@ -9,6 +9,7 @@ import {
 } from '../../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../../core/compendium/compendium.store';
 import { NotificationStore } from '../../../core/notifications/notification.store';
+import { VttSettingsStore } from '../../../core/settings/vtt-settings.store';
 import {
   CharacterModel,
   DerivedCharacterStats,
@@ -18,6 +19,12 @@ import {
 } from '../../characters/models/character.model';
 import { CharacterService } from '../../characters/services/character.service';
 import { CharacterStore } from '../../characters/store/character.store';
+import {
+  ActorTemplateDraft,
+  CollectionsStore,
+  buildActorTemplateFromCharacter,
+  buildActorTemplateFromNpcPreset,
+} from '../../collections/collections.store';
 import { GameCardModel } from '../../dashboard/models/campaign.model';
 import {
   DefenderClashCapabilities,
@@ -26,12 +33,20 @@ import {
   resolveClashReaction,
   roll2d10Check,
 } from '../engine/clash.engine';
+import { canNestFolderInside } from '../engine/directory-tree.engine';
 import {
   HexGridGeometry,
+  SceneCanvasLayout,
   clampHexToBounds,
-  getHexDistanceFeet,
-  getHexWorldBounds,
+  clampWorldPointToBounds,
+  computeSceneCanvasLayout,
+  getTokenDistanceFeet,
+  getTokenWorldCenter,
+  hexKey,
+  hexToWorldCenter,
   offsetToAxial,
+  parseHexKey,
+  worldPointToHex,
 } from '../engine/hex-grid.engine';
 import {
   buildLightPolygons,
@@ -39,14 +54,29 @@ import {
   collectNewlyExploredHexKeys,
 } from '../engine/visibility.engine';
 import {
+  DEFAULT_VTT_BG_COLOR,
+  DEFAULT_VTT_GRID_HEIGHT,
+  DEFAULT_VTT_GRID_OPACITY,
+  DEFAULT_VTT_GRID_SIZE_PX,
+  DEFAULT_VTT_GRID_WIDTH,
+  DEFAULT_VTT_SCENE_HEIGHT_PX,
+  DEFAULT_VTT_SCENE_PADDING,
+  DEFAULT_VTT_SCENE_WIDTH_PX,
+  CollectionActorModel,
+  HexCoord,
   VttClashResolution,
   VttDefenseChoice,
+  VttDirectoryScope,
+  VttExploredFog,
   VttFaction,
+  VttFolderModel,
   VttLightSource,
   VttLogEntry,
   VttNpcPreset,
   VttPendingClash,
   VttPoint,
+  VttRosterActorModel,
+  VttRosterDragPayload,
   VttSceneModel,
   VttTokenModel,
   VttToolMode,
@@ -75,6 +105,53 @@ export interface PendingTargetAction {
   inflictStatuses: Exclude<CombatStatusEffect, 'None'>[];
 }
 
+export type VttUndoPayload =
+  | {
+      kind: 'token_patch';
+      tokenId: string;
+      previousTokenPatch: Partial<VttTokenModel>;
+      previousExploredFog?: VttExploredFog;
+    }
+  | {
+      kind: 'token_spawned';
+      tokenId: string;
+      previousExploredFog?: VttExploredFog;
+    }
+  | {
+      kind: 'token_removed';
+      tokenSnapshot: VttTokenModel;
+    }
+  | {
+      kind: 'scene_patch';
+      previousScenePatch: Partial<VttSceneModel>;
+      selectedLightIdAfterUndo?: string | null;
+    };
+
+export type VttUndoEntry = VttUndoPayload & {
+  id: string;
+  sceneId: string;
+  label: string;
+  createdAt: number;
+};
+
+const MAX_VTT_UNDO_STACK = 30;
+
+function cloneExploredFog(fog: VttExploredFog | undefined): VttExploredFog {
+  return {
+    cells: [...(fog?.cells ?? [])],
+    revealed_all: Boolean(fog?.revealed_all),
+    ...(fog?.__scene_meta ? { __scene_meta: { ...fog.__scene_meta } } : {}),
+  };
+}
+
+function cloneWalls(walls: VttWallSegment[]): VttWallSegment[] {
+  return (walls ?? []).map((w) => ({ ...w }));
+}
+
+function cloneLights(lights: VttLightSource[]): VttLightSource[] {
+  return (lights ?? []).map((l) => ({ ...l }));
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttStore {
   private readonly vttService = inject(VttService);
@@ -82,7 +159,9 @@ export class VttStore {
   private readonly compendiumStore = inject(CompendiumStore);
   private readonly characterStore = inject(CharacterStore);
   private readonly characterService = inject(CharacterService);
+  private readonly collectionsStore = inject(CollectionsStore);
   private readonly notifications = inject(NotificationStore);
+  private readonly settingsStore = inject(VttSettingsStore);
 
   private realtimeChannel: RealtimeChannel | null = null;
 
@@ -91,6 +170,9 @@ export class VttStore {
   readonly needsMigration = signal(false);
 
   readonly campaign = signal<GameCardModel | null>(null);
+  readonly folders = signal<VttFolderModel[]>([]);
+  readonly rosterActors = signal<VttRosterActorModel[]>([]);
+  readonly draggingRosterPayload = signal<VttRosterDragPayload | null>(null);
   readonly scenes = signal<VttSceneModel[]>([]);
   readonly activeSceneId = signal<string | null>(null);
   readonly tokens = signal<VttTokenModel[]>([]);
@@ -106,11 +188,17 @@ export class VttStore {
   readonly selectedLightId = signal<string | null>(null);
   readonly pendingTargetAction = signal<PendingTargetAction | null>(null);
   readonly activePings = signal<VttPingBroadcast[]>([]);
+  readonly activeSceneNaturalSize = signal<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   readonly attackRollMode = signal<'normal' | 'advantage' | 'disadvantage'>(
     'normal'
   );
   readonly manualRollOverride = signal<number | null>(null);
+  readonly undoStack = signal<VttUndoEntry[]>([]);
+  readonly isUndoing = signal(false);
 
   readonly isGm = computed(() => {
     const camp = this.campaign();
@@ -119,8 +207,13 @@ export class VttStore {
     return camp.gm_id === uid || this.authStore.isAdmin();
   });
 
+  readonly mapFolders = computed<VttFolderModel[]>(() =>
+    this.folders().filter((f) => f.scope === 'maps')
+  );
+
   readonly activeScene = computed<VttSceneModel | null>(() => {
     const list = this.scenes();
+    if (list.length === 0) return null;
     const sel = this.activeSceneId();
     if (sel) {
       const found = list.find((s) => s.id === sel);
@@ -129,16 +222,18 @@ export class VttStore {
     return list.find((s) => s.is_active_scene) ?? list[0] ?? null;
   });
 
-  readonly gridGeometry = computed<HexGridGeometry>(() => {
-    const sc = this.activeScene();
-    return {
-      gridWidth: sc?.grid_width ?? 16,
-      gridHeight: sc?.grid_height ?? 11,
-      gridSizePx: sc?.grid_size_px ?? 64,
-      offsetX: sc?.grid_offset_x ?? 0,
-      offsetY: sc?.grid_offset_y ?? 0,
-    };
+  readonly partyActiveScene = computed<VttSceneModel | null>(() => {
+    const list = this.scenes();
+    return list.find((s) => s.is_active_scene) ?? list[0] ?? null;
   });
+
+  readonly sceneLayout = computed<SceneCanvasLayout>(() =>
+    this.getSceneLayout(this.activeScene())
+  );
+
+  readonly gridGeometry = computed<HexGridGeometry>(
+    () => this.sceneLayout().geometry
+  );
 
   readonly sceneTokens = computed<VttTokenModel[]>(() => {
     const sc = this.activeScene();
@@ -257,6 +352,147 @@ export class VttStore {
     return getLegalDefenderReactions(clash, caps);
   });
 
+  readonly activeSceneUndoStack = computed<VttUndoEntry[]>(() => {
+    const sc = this.activeScene();
+    if (!sc) return [];
+    return this.undoStack().filter((entry) => entry.sceneId === sc.id);
+  });
+
+  readonly canUndo = computed<boolean>(
+    () => this.activeSceneUndoStack().length > 0 && !this.isUndoing()
+  );
+
+  readonly nextUndoLabel = computed<string | null>(() => {
+    const list = this.activeSceneUndoStack();
+    return list.length > 0 ? list[list.length - 1].label : null;
+  });
+
+  pushUndoEntry(
+    sceneId: string,
+    label: string,
+    payload: VttUndoPayload
+  ): void {
+    if (this.isUndoing() || !sceneId) return;
+    const entry: VttUndoEntry = {
+      ...payload,
+      id: `undo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      sceneId,
+      label,
+      createdAt: Date.now(),
+    };
+    this.undoStack.update((curr) => {
+      const appended = [...curr, entry];
+      return appended.length > MAX_VTT_UNDO_STACK
+        ? appended.slice(appended.length - MAX_VTT_UNDO_STACK)
+        : appended;
+    });
+  }
+
+  async undoLastAction(): Promise<boolean> {
+    const sc = this.activeScene();
+    if (!sc || this.isUndoing()) return false;
+
+    const stack = this.undoStack();
+    let targetIdx = -1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].sceneId === sc.id) {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx === -1) return false;
+
+    const entry = stack[targetIdx];
+    this.undoStack.set([
+      ...stack.slice(0, targetIdx),
+      ...stack.slice(targetIdx + 1),
+    ]);
+
+    this.isUndoing.set(true);
+    try {
+      if (entry.kind === 'token_patch') {
+        const tok = this.tokens().find((t) => t.id === entry.tokenId);
+        if (tok) {
+          await this.patchToken(entry.tokenId, entry.previousTokenPatch);
+          this.selectedTokenId.set(entry.tokenId);
+        }
+        if (entry.previousExploredFog) {
+          await this.patchScene(sc.id, {
+            explored_fog: cloneExploredFog(entry.previousExploredFog),
+          });
+        } else {
+          this.syncExploredFogFromObservers();
+        }
+      } else if (entry.kind === 'token_spawned') {
+        await this.removeTokenInternal(entry.tokenId);
+        if (entry.previousExploredFog) {
+          await this.patchScene(sc.id, {
+            explored_fog: cloneExploredFog(entry.previousExploredFog),
+          });
+        }
+      } else if (entry.kind === 'token_removed') {
+        const snap = entry.tokenSnapshot;
+        const { id: snapId, ...restSnap } = snap;
+        const isUuid =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            snapId
+          );
+        const res = await this.vttService.insertToken({
+          ...restSnap,
+          ...(isUuid ? { id: snapId } : {}),
+        });
+        if (!res.error && res.token) {
+          this.tokens.update((curr) =>
+            curr.some((t) => t.id === res.token!.id)
+              ? curr
+              : [...curr, res.token!]
+          );
+          this.selectedTokenId.set(res.token.id);
+          this.syncExploredFogFromObservers();
+        }
+      } else if (entry.kind === 'scene_patch') {
+        await this.patchScene(sc.id, entry.previousScenePatch);
+        if (entry.selectedLightIdAfterUndo !== undefined) {
+          this.selectedLightId.set(entry.selectedLightIdAfterUndo);
+        }
+        if (entry.previousScenePatch.explored_fog === undefined) {
+          this.syncExploredFogFromObservers();
+        }
+      }
+
+      this.notifications.info('Undid Event', entry.label);
+      return true;
+    } finally {
+      this.isUndoing.set(false);
+    }
+  }
+
+  getSceneLayout(
+    scene: VttSceneModel | null,
+    natOverride?: { width: number; height: number } | null
+  ): SceneCanvasLayout {
+    const nat =
+      natOverride !== undefined
+        ? natOverride
+        : scene && this.activeScene()?.id === scene.id
+          ? this.activeSceneNaturalSize()
+          : null;
+    return computeSceneCanvasLayout({
+      sceneWidthPx: scene?.scene_width ?? null,
+      sceneHeightPx: scene?.scene_height ?? null,
+      naturalImageWidth: scene?.map_image_url ? nat?.width ?? null : null,
+      naturalImageHeight: scene?.map_image_url ? nat?.height ?? null : null,
+      gridSizePx: scene?.grid_size_px ?? DEFAULT_VTT_GRID_SIZE_PX,
+      padding: scene?.padding ?? DEFAULT_VTT_SCENE_PADDING,
+      offsetX: scene?.grid_offset_x ?? 0,
+      offsetY: scene?.grid_offset_y ?? 0,
+    });
+  }
+
+  getFoldersForScope(scope: VttDirectoryScope): VttFolderModel[] {
+    return this.folders().filter((f) => f.scope === scope);
+  }
+
   canControlToken(token: VttTokenModel | null | undefined): boolean {
     if (!token) return false;
     if (this.isGm()) return true;
@@ -324,10 +560,14 @@ export class VttStore {
         this.characterStore.ensureLoaded(),
       ]);
 
-      const [campRes, visibleChars] = await Promise.all([
-        this.vttService.fetchCampaignById(campaignId),
-        this.vttService.fetchAllVisibleCharacters(),
-      ]);
+      const [campRes, visibleChars, loadedFolders, loadedRoster] =
+        await Promise.all([
+          this.vttService.fetchCampaignById(campaignId),
+          this.vttService.fetchAllVisibleCharacters(),
+          this.vttService.fetchCampaignFolders(campaignId),
+          this.vttService.fetchCampaignRosterActors(campaignId),
+          this.collectionsStore.loadCollections(),
+        ]);
 
       if (!campRes.data) {
         this.error.set(campRes.error ?? 'Campaign not found.');
@@ -337,6 +577,8 @@ export class VttStore {
 
       this.campaign.set(campRes.data);
       this.allCharacters.set(visibleChars);
+      this.folders.set(loadedFolders);
+      this.rosterActors.set(loadedRoster);
 
       const scenesRes = await this.vttService.fetchCampaignScenes(
         campaignId,
@@ -350,13 +592,26 @@ export class VttStore {
         campRes.data.gm_id === uid || this.authStore.isAdmin();
 
       if (loadedScenes.length === 0 && userIsGm && uid) {
+        const initLayout = computeSceneCanvasLayout({
+          sceneWidthPx: DEFAULT_VTT_SCENE_WIDTH_PX,
+          sceneHeightPx: DEFAULT_VTT_SCENE_HEIGHT_PX,
+          gridSizePx: DEFAULT_VTT_GRID_SIZE_PX,
+          padding: DEFAULT_VTT_SCENE_PADDING,
+        });
         const created = await this.vttService.createScene({
           campaign_id: campaignId,
           gm_id: uid,
-          name: `${campRes.data.name} — Skirmish`,
+          name: `${campRes.data.name} — Blank Scene`,
           is_active_scene: true,
-          grid_width: 16,
-          grid_height: 11,
+          grid_mode: 'square',
+          scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+          scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+          padding: DEFAULT_VTT_SCENE_PADDING,
+          grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+          grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+          grid_width: initLayout.gridCols,
+          grid_height: initLayout.gridRows,
+          background_color: DEFAULT_VTT_BG_COLOR,
         });
         if (created.needsMigration) {
           this.needsMigration.set(true);
@@ -392,21 +647,28 @@ export class VttStore {
         campaignId,
         {
           onEncounterUpsert: (incomingScene) => {
-            const hadScene = this.scenes().some(
+            const existingLocal = this.scenes().find(
               (s) => s.id === incomingScene.id
             );
+            const mergedScene: VttSceneModel =
+              existingLocal?.folder_id?.startsWith('local-folder-') &&
+              !incomingScene.folder_id
+                ? { ...incomingScene, folder_id: existingLocal.folder_id }
+                : incomingScene;
+
             this.scenes.update((curr) =>
-              hadScene
+              existingLocal
                 ? curr.map((s) =>
-                    s.id === incomingScene.id ? incomingScene : s
+                    s.id === mergedScene.id ? mergedScene : s
                   )
-                : [...curr, incomingScene]
+                : [...curr, mergedScene]
             );
-            if (!this.isGm() && incomingScene.is_active_scene) {
+            if (!this.isGm() && mergedScene.is_active_scene) {
               const prevActive = this.activeSceneId();
-              if (prevActive !== incomingScene.id) {
-                this.activeSceneId.set(incomingScene.id);
-                void this.loadTokensForScene(incomingScene.id);
+              if (prevActive !== mergedScene.id) {
+                this.activeSceneNaturalSize.set(null);
+                this.activeSceneId.set(mergedScene.id);
+                void this.loadTokensForScene(mergedScene.id);
               }
             }
           },
@@ -415,12 +677,50 @@ export class VttStore {
               curr.filter((s) => s.id !== deletedId)
             );
             if (this.activeSceneId() === deletedId) {
+              this.activeSceneNaturalSize.set(null);
               const fallback = this.scenes()[0]?.id ?? null;
               this.activeSceneId.set(fallback);
               if (fallback) {
                 void this.loadTokensForScene(fallback);
+              } else {
+                this.tokens.set([]);
               }
             }
+          },
+          onFolderUpsert: (incomingFolder) => {
+            this.folders.update((curr) => {
+              const exists = curr.some((f) => f.id === incomingFolder.id);
+              return exists
+                ? curr.map((f) =>
+                    f.id === incomingFolder.id ? incomingFolder : f
+                  )
+                : [...curr, incomingFolder];
+            });
+          },
+          onFolderDelete: (folderId) => {
+            this.folders.update((curr) =>
+              curr.filter((f) => f.id !== folderId)
+            );
+          },
+          onRosterActorUpsert: (incomingActor) => {
+            this.rosterActors.update((curr) => {
+              const existingLocal = curr.find(
+                (a) => a.id === incomingActor.id
+              );
+              const mergedActor: VttRosterActorModel =
+                existingLocal?.folder_id?.startsWith('local-folder-') &&
+                !incomingActor.folder_id
+                  ? { ...incomingActor, folder_id: existingLocal.folder_id }
+                  : incomingActor;
+              return existingLocal
+                ? curr.map((a) => (a.id === mergedActor.id ? mergedActor : a))
+                : [...curr, mergedActor];
+            });
+          },
+          onRosterActorDelete: (actorId) => {
+            this.rosterActors.update((curr) =>
+              curr.filter((a) => a.id !== actorId)
+            );
           },
           onTokenUpsert: (incomingToken) => {
             this.tokens.update((curr) => {
@@ -441,11 +741,14 @@ export class VttStore {
             }
           },
           onLogInsert: (entry) => {
-            this.logs.update((curr) =>
-              curr.some((e) => e.id === entry.id) ? curr : [...curr, entry]
-            );
+            const alreadyPresent = this.logs().some((e) => e.id === entry.id);
+            if (!alreadyPresent) {
+              this.logs.update((curr) => [...curr, entry]);
+              this.triggerLogAudioCue(entry.kind);
+            }
           },
           onPing: (ping) => {
+            this.settingsStore.playUiCue('ping');
             this.activePings.update((curr) => [...curr, ping]);
             setTimeout(() => {
               this.activePings.update((curr) =>
@@ -466,9 +769,146 @@ export class VttStore {
     this.vttService.unsubscribeChannel(this.realtimeChannel);
     this.realtimeChannel = null;
     this.pendingTargetAction.set(null);
+    this.draggingRosterPayload.set(null);
     this.selectedTokenId.set(null);
     this.selectedLightId.set(null);
     this.activePings.set([]);
+    this.activeSceneNaturalSize.set(null);
+    this.undoStack.set([]);
+  }
+
+  async createDirectoryFolder(input: {
+    scope: VttDirectoryScope;
+    name: string;
+    parent_folder_id?: string | null;
+    color?: string | null;
+  }): Promise<VttFolderModel | null> {
+    const camp = this.campaign();
+    if (!camp || !this.isGm()) return null;
+
+    const trimmed = input.name.trim() || 'New Folder';
+    const parentId = input.parent_folder_id || null;
+    if (!canNestFolderInside(null, parentId, this.folders(), input.scope)) {
+      this.notifications.error(
+        'Folder Depth Reached',
+        'Folders can be nested up to 3 levels deep.'
+      );
+      return null;
+    }
+
+    const siblings = this.folders().filter(
+      (f) => f.scope === input.scope && f.parent_folder_id === parentId
+    );
+    const nextSort =
+      siblings.reduce((acc, s) => Math.max(acc, s.sort_order), -1) + 1;
+
+    const res = await this.vttService.createFolder({
+      campaign_id: camp.id,
+      scope: input.scope,
+      parent_folder_id: parentId,
+      name: trimmed,
+      color: input.color ?? '#C4491A',
+      sort_order: nextSort,
+    });
+
+    if (res.error || !res.folder) {
+      this.notifications.error(
+        'Unable to Create Folder',
+        res.error ?? 'Unknown error.'
+      );
+      return null;
+    }
+
+    this.folders.update((curr) =>
+      curr.some((f) => f.id === res.folder!.id) ? curr : [...curr, res.folder!]
+    );
+    return res.folder;
+  }
+
+  async updateDirectoryFolder(
+    folderId: string,
+    patch: {
+      name?: string;
+      parent_folder_id?: string | null;
+      color?: string | null;
+      sort_order?: number;
+    }
+  ): Promise<void> {
+    const camp = this.campaign();
+    const target = this.folders().find((f) => f.id === folderId);
+    if (!camp || !target || !this.isGm()) return;
+
+    if (
+      patch.parent_folder_id !== undefined &&
+      !canNestFolderInside(
+        folderId,
+        patch.parent_folder_id,
+        this.folders(),
+        target.scope
+      )
+    ) {
+      this.notifications.error(
+        'Invalid Folder Move',
+        'Cannot move a folder inside itself or exceed 3 nesting levels.'
+      );
+      return;
+    }
+
+    const cleanPatch: Partial<VttFolderModel> = {
+      ...patch,
+      name: patch.name !== undefined ? patch.name.trim() || target.name : undefined,
+    };
+    if (cleanPatch.name === undefined) {
+      delete cleanPatch.name;
+    }
+
+    this.folders.update((curr) =>
+      curr.map((f) => (f.id === folderId ? { ...f, ...cleanPatch } : f))
+    );
+
+    const err = await this.vttService.updateFolder(camp.id, folderId, cleanPatch);
+    if (err) {
+      this.notifications.error('Folder Update Error', err);
+    }
+  }
+
+  async deleteDirectoryFolder(folderId: string): Promise<void> {
+    const camp = this.campaign();
+    const target = this.folders().find((f) => f.id === folderId);
+    if (!camp || !target || !this.isGm()) return;
+
+    const fallbackParent = target.parent_folder_id ?? null;
+
+    const childFolders = this.folders().filter(
+      (f) => f.parent_folder_id === folderId
+    );
+    for (const cf of childFolders) {
+      await this.updateDirectoryFolder(cf.id, {
+        parent_folder_id: fallbackParent,
+      });
+    }
+
+    if (target.scope === 'maps') {
+      const affectedMaps = this.scenes().filter(
+        (s) => s.folder_id === folderId
+      );
+      for (const sc of affectedMaps) {
+        await this.patchScene(sc.id, { folder_id: fallbackParent });
+      }
+    } else if (target.scope === 'characters') {
+      const affectedActors = this.rosterActors().filter(
+        (a) => a.folder_id === folderId
+      );
+      for (const actor of affectedActors) {
+        await this.updateRosterActor(actor.id, { folder_id: fallbackParent });
+      }
+    }
+
+    this.folders.update((curr) => curr.filter((f) => f.id !== folderId));
+    const err = await this.vttService.deleteFolder(camp.id, folderId);
+    if (err) {
+      this.notifications.error('Folder Delete Error', err);
+    }
   }
 
   async loadTokensForScene(sceneId: string): Promise<void> {
@@ -481,8 +921,16 @@ export class VttStore {
     sceneId: string,
     makePartyActive = false
   ): Promise<void> {
+    if (!sceneId) return;
+    const prevId = this.activeSceneId();
     this.activeSceneId.set(sceneId);
-    await this.loadTokensForScene(sceneId);
+    if (prevId !== sceneId) {
+      this.activeSceneNaturalSize.set(null);
+      this.selectedTokenId.set(null);
+      this.selectedLightId.set(null);
+      this.pendingTargetAction.set(null);
+      await this.loadTokensForScene(sceneId);
+    }
 
     if (makePartyActive && this.isGm()) {
       const all = this.scenes();
@@ -493,76 +941,461 @@ export class VttStore {
         }
       }
       this.notifications.success(
-        'Active Map Switched',
-        'Players have been moved to this scene.'
+        'Party Moved to Scene',
+        'Players are now viewing this scene.'
       );
     }
   }
 
-  async createNewScene(name: string, width = 16, height = 11): Promise<void> {
+  async createBlankMap(input: {
+    name: string;
+    folder_id?: string | null;
+    activateForParty?: boolean;
+  }): Promise<VttSceneModel | null> {
     const camp = this.campaign();
     const uid = this.authStore.user()?.id;
-    if (!camp || !uid || !this.isGm()) return;
+    if (!camp || !uid || !this.isGm()) return null;
 
-    const trimmed = name.trim() || 'New Battlemap';
+    const trimmed = input.name.trim() || 'Untitled Scene';
+    const hasExistingMaps = this.scenes().length > 0;
+    const shouldActivate =
+      !hasExistingMaps || Boolean(input.activateForParty);
+
+    const siblings = this.scenes().filter(
+      (s) => (s.folder_id ?? null) === (input.folder_id ?? null)
+    );
+    const nextSort =
+      siblings.reduce((acc, s) => Math.max(acc, s.sort_order ?? 0), -1) + 1;
+
+    const initLayout = computeSceneCanvasLayout({
+      sceneWidthPx: DEFAULT_VTT_SCENE_WIDTH_PX,
+      sceneHeightPx: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      gridSizePx: DEFAULT_VTT_GRID_SIZE_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+    });
+
     const res = await this.vttService.createScene({
       campaign_id: camp.id,
       gm_id: uid,
       name: trimmed,
-      is_active_scene: false,
-      grid_width: Math.max(6, Math.min(48, width)),
-      grid_height: Math.max(6, Math.min(48, height)),
+      folder_id: input.folder_id ?? null,
+      is_active_scene: shouldActivate,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: initLayout.gridCols,
+      grid_height: initLayout.gridRows,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      sort_order: nextSort,
     });
+
+    if (res.needsMigration) {
+      this.needsMigration.set(true);
+    }
 
     if (res.error || !res.scene) {
       this.notifications.error(
         'Unable to Create Scene',
         res.error ?? 'Unknown error.'
       );
-      return;
+      return null;
     }
 
     this.scenes.update((curr) =>
       curr.some((s) => s.id === res.scene!.id) ? curr : [...curr, res.scene!]
     );
-    await this.selectOrActivateScene(res.scene.id, true);
+    await this.selectOrActivateScene(res.scene.id, shouldActivate);
+    return res.scene;
+  }
+
+  async createNewScene(
+    name: string,
+    sceneWidthPx = DEFAULT_VTT_SCENE_WIDTH_PX,
+    sceneHeightPx = DEFAULT_VTT_SCENE_HEIGHT_PX
+  ): Promise<void> {
+    const created = await this.createBlankMap({
+      name,
+      activateForParty: true,
+    });
+    if (
+      created &&
+      (sceneWidthPx !== DEFAULT_VTT_SCENE_WIDTH_PX ||
+        sceneHeightPx !== DEFAULT_VTT_SCENE_HEIGHT_PX)
+    ) {
+      await this.patchScene(created.id, {
+        scene_width: Math.max(200, Math.round(sceneWidthPx)),
+        scene_height: Math.max(200, Math.round(sceneHeightPx)),
+      });
+    }
+  }
+
+  async moveSceneToFolder(
+    sceneId: string,
+    folderId: string | null
+  ): Promise<void> {
+    if (!this.isGm()) return;
+    const sc = this.scenes().find((s) => s.id === sceneId);
+    if (!sc || (sc.folder_id ?? null) === (folderId ?? null)) return;
+    await this.patchScene(sceneId, { folder_id: folderId ?? null });
+  }
+
+  async duplicateScene(sceneId: string): Promise<VttSceneModel | null> {
+    const camp = this.campaign();
+    const uid = this.authStore.user()?.id;
+    const source = this.scenes().find((s) => s.id === sceneId);
+    if (!camp || !uid || !source || !this.isGm()) return null;
+
+    const clonedWalls: VttWallSegment[] = (source.walls ?? []).map((w, idx) => ({
+      ...w,
+      id: `wall-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+    }));
+    const clonedLights: VttLightSource[] = (source.lights ?? []).map(
+      (l, idx) => ({
+        ...l,
+        id: `light-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+      })
+    );
+
+    const res = await this.vttService.createScene({
+      campaign_id: camp.id,
+      gm_id: uid,
+      name: `${source.name} (Copy)`,
+      folder_id: source.folder_id,
+      is_active_scene: false,
+      map_image_url: source.map_image_url,
+      background_color: source.background_color,
+      grid_mode: source.grid_mode,
+      scene_width: source.scene_width,
+      scene_height: source.scene_height,
+      padding: source.padding,
+      grid_width: source.grid_width,
+      grid_height: source.grid_height,
+      grid_size_px: source.grid_size_px,
+      grid_offset_x: source.grid_offset_x,
+      grid_offset_y: source.grid_offset_y,
+      grid_opacity: source.grid_opacity,
+      fog_enabled: source.fog_enabled,
+      global_illumination: source.global_illumination,
+      darkness_level: source.darkness_level,
+      walls: clonedWalls,
+      lights: clonedLights,
+      sort_order: (source.sort_order ?? 0) + 1,
+    });
+
+    if (res.error || !res.scene) {
+      this.notifications.error(
+        'Unable to Duplicate Scene',
+        res.error ?? 'Unknown error.'
+      );
+      return null;
+    }
+
+    this.scenes.update((curr) =>
+      curr.some((s) => s.id === res.scene!.id) ? curr : [...curr, res.scene!]
+    );
+    await this.selectOrActivateScene(res.scene.id, false);
+    this.notifications.success('Scene Duplicated', `Created "${res.scene.name}".`);
+    return res.scene;
+  }
+
+  async deleteSceneById(sceneId: string): Promise<void> {
+    if (!this.isGm()) return;
+    const target = this.scenes().find((s) => s.id === sceneId);
+    if (!target) return;
+
+    const wasViewing = this.activeScene()?.id === sceneId;
+    const wasPartyActive = target.is_active_scene;
+
+    this.scenes.update((curr) => curr.filter((s) => s.id !== sceneId));
+    this.tokens.update((curr) =>
+      curr.filter((t) => t.encounter_id !== sceneId)
+    );
+    this.undoStack.update((curr) =>
+      curr.filter((entry) => entry.sceneId !== sceneId)
+    );
+
+    const err = await this.vttService.deleteScene(sceneId);
+    if (err) {
+      this.notifications.error('Unable to Delete Scene', err);
+      return;
+    }
+
+    const remaining = this.scenes();
+    if (remaining.length === 0) {
+      this.activeSceneNaturalSize.set(null);
+      this.activeSceneId.set(null);
+      this.selectedTokenId.set(null);
+      this.selectedLightId.set(null);
+      this.tokens.set([]);
+      return;
+    }
+
+    const fallback =
+      remaining.find((s) => s.is_active_scene) ?? remaining[0];
+    if (wasViewing) {
+      await this.selectOrActivateScene(fallback.id, wasPartyActive);
+    } else if (wasPartyActive) {
+      await this.patchScene(fallback.id, { is_active_scene: true });
+    }
   }
 
   async patchScene(
     sceneId: string,
     patch: Partial<VttSceneModel>
   ): Promise<void> {
+    const prevScene = this.scenes().find((s) => s.id === sceneId) ?? null;
+    const enrichedPatch: Partial<VttSceneModel> = { ...patch };
+
+    const layoutAffecting =
+      prevScene !== null &&
+      (patch.padding !== undefined ||
+        patch.grid_size_px !== undefined ||
+        patch.scene_width !== undefined ||
+        patch.scene_height !== undefined ||
+        patch.grid_offset_x !== undefined ||
+        patch.grid_offset_y !== undefined ||
+        patch.map_image_url !== undefined);
+
+    const oldLayout = prevScene ? this.getSceneLayout(prevScene) : null;
+    let newLayout: SceneCanvasLayout | null = null;
+    let dx = 0;
+    let dy = 0;
+
+    if (prevScene) {
+      const urlChanged =
+        patch.map_image_url !== undefined &&
+        patch.map_image_url !== prevScene.map_image_url;
+      const candidate: VttSceneModel = { ...prevScene, ...enrichedPatch };
+      newLayout = this.getSceneLayout(candidate, urlChanged ? null : undefined);
+
+      if (layoutAffecting && oldLayout && newLayout) {
+        enrichedPatch.grid_width = newLayout.gridCols;
+        enrichedPatch.grid_height = newLayout.gridRows;
+        dx = newLayout.sceneX - oldLayout.sceneX;
+        dy = newLayout.sceneY - oldLayout.sceneY;
+
+        if ((dx !== 0 || dy !== 0) && patch.walls === undefined && prevScene.walls.length > 0) {
+          enrichedPatch.walls = prevScene.walls.map((w) => ({
+            ...w,
+            x1: Math.round(w.x1 + dx),
+            y1: Math.round(w.y1 + dy),
+            x2: Math.round(w.x2 + dx),
+            y2: Math.round(w.y2 + dy),
+          }));
+        }
+
+        if ((dx !== 0 || dy !== 0) && patch.lights === undefined && prevScene.lights.length > 0) {
+          enrichedPatch.lights = prevScene.lights.map((l) => ({
+            ...l,
+            x: Math.round(l.x + dx),
+            y: Math.round(l.y + dy),
+          }));
+        }
+
+        const sizeChanged =
+          patch.grid_size_px !== undefined &&
+          patch.grid_size_px !== prevScene.grid_size_px;
+        if (
+          (dx !== 0 || dy !== 0 || sizeChanged) &&
+          patch.explored_fog === undefined &&
+          (prevScene.explored_fog?.cells?.length ?? 0) > 0
+        ) {
+          const remapped = new Set<string>();
+          for (const key of prevScene.explored_fog?.cells ?? []) {
+            const parsed = parseHexKey(key);
+            if (!parsed) continue;
+            const oldPt = hexToWorldCenter(parsed, oldLayout.geometry);
+            const nextHex = worldPointToHex(
+              { x: oldPt.x + dx, y: oldPt.y + dy },
+              newLayout.geometry
+            );
+            if (
+              nextHex.col >= 0 &&
+              nextHex.col < newLayout.gridCols &&
+              nextHex.row >= 0 &&
+              nextHex.row < newLayout.gridRows
+            ) {
+              remapped.add(hexKey(nextHex.col, nextHex.row));
+            }
+          }
+          enrichedPatch.explored_fog = {
+            ...prevScene.explored_fog,
+            cells: Array.from(remapped),
+          };
+        }
+      }
+    }
+
     this.scenes.update((curr) =>
-      curr.map((s) => (s.id === sceneId ? { ...s, ...patch } : s))
+      curr.map((s) => (s.id === sceneId ? { ...s, ...enrichedPatch } : s))
     );
+
     const res = await this.vttService.updateScene(
       sceneId,
-      patch,
-      this.needsMigration()
+      enrichedPatch,
+      this.needsMigration(),
+      prevScene
     );
     if (res.needsMigration) {
       this.needsMigration.set(true);
     }
     if (res.error) {
       this.notifications.error('Scene Sync Error', res.error);
-    }
-  }
-
-  async uploadActiveSceneMap(file: File): Promise<void> {
-    const camp = this.campaign();
-    const sc = this.activeScene();
-    if (!camp || !sc || !this.isGm()) return;
-
-    const res = await this.vttService.uploadMapImage(camp.id, file);
-    if (res.error || !res.url) {
-      this.notifications.error('Map Upload Failed', res.error ?? '');
       return;
     }
 
-    await this.patchScene(sc.id, { map_image_url: res.url });
+    if (
+      prevScene &&
+      oldLayout &&
+      newLayout &&
+      this.activeScene()?.id === sceneId
+    ) {
+      const modeChanged =
+        patch.grid_mode !== undefined &&
+        patch.grid_mode !== prevScene.grid_mode;
+      const sizeChanged =
+        patch.grid_size_px !== undefined &&
+        patch.grid_size_px !== prevScene.grid_size_px;
+
+      if (modeChanged || dx !== 0 || dy !== 0 || sizeChanged) {
+        await this.reconcileSceneTokensAfterLayoutChange(
+          sceneId,
+          prevScene.grid_mode,
+          oldLayout,
+          enrichedPatch.grid_mode ?? prevScene.grid_mode,
+          newLayout,
+          dx,
+          dy
+        );
+      }
+    }
+  }
+
+  private async reconcileSceneTokensAfterLayoutChange(
+    sceneId: string,
+    prevMode: VttSceneModel['grid_mode'],
+    oldLayout: SceneCanvasLayout,
+    nextMode: VttSceneModel['grid_mode'],
+    newLayout: SceneCanvasLayout,
+    dx: number,
+    dy: number
+  ): Promise<void> {
+    const sceneToks = this.tokens().filter((t) => t.encounter_id === sceneId);
+    const bounds = {
+      width: newLayout.totalWidth,
+      height: newLayout.totalHeight,
+    };
+
+    for (const tok of sceneToks) {
+      const prevPt = getTokenWorldCenter(tok, oldLayout.geometry, prevMode);
+      const shiftedPt = clampWorldPointToBounds(
+        { x: prevPt.x + dx, y: prevPt.y + dy },
+        bounds
+      );
+      const snapped = clampHexToBounds(
+        worldPointToHex(shiftedPt, newLayout.geometry),
+        newLayout.geometry.gridWidth,
+        newLayout.geometry.gridHeight
+      );
+      const axial = offsetToAxial(snapped.col, snapped.row);
+
+      if (nextMode !== 'gridless') {
+        if (
+          tok.x !== snapped.col ||
+          tok.y !== snapped.row ||
+          tok.world_x !== null ||
+          tok.world_y !== null
+        ) {
+          await this.patchToken(tok.id, {
+            x: snapped.col,
+            y: snapped.row,
+            q: axial.q,
+            r: axial.r,
+            world_x: null,
+            world_y: null,
+          });
+        }
+      } else {
+        const nextWx = Math.round(shiftedPt.x);
+        const nextWy = Math.round(shiftedPt.y);
+        if (
+          tok.x !== snapped.col ||
+          tok.y !== snapped.row ||
+          tok.world_x !== nextWx ||
+          tok.world_y !== nextWy
+        ) {
+          await this.patchToken(tok.id, {
+            x: snapped.col,
+            y: snapped.row,
+            q: axial.q,
+            r: axial.r,
+            world_x: nextWx,
+            world_y: nextWy,
+          });
+        }
+      }
+    }
+  }
+
+  async uploadMapFile(file: File): Promise<string | null> {
+    const camp = this.campaign();
+    if (!camp || !this.isGm()) return null;
+
+    const res = await this.vttService.uploadMapImage(camp.id, file);
+    if (res.error || !res.url) {
+      this.notifications.error('Scene Image Upload Failed', res.error ?? '');
+      return null;
+    }
+    return res.url;
+  }
+
+  private probeImageFileDimensions(
+    file: File
+  ): Promise<{ width: number; height: number } | null> {
+    if (typeof Image === 'undefined' || typeof URL === 'undefined') {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(
+          img.naturalWidth > 0 && img.naturalHeight > 0
+            ? { width: img.naturalWidth, height: img.naturalHeight }
+            : null
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(null);
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  async uploadActiveSceneMap(file: File): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm()) return;
+
+    const [url, dims] = await Promise.all([
+      this.uploadMapFile(file),
+      this.probeImageFileDimensions(file),
+    ]);
+    if (!url) return;
+
+    await this.patchScene(sc.id, {
+      map_image_url: url,
+      scene_width: dims?.width ?? null,
+      scene_height: dims?.height ?? null,
+    });
     this.notifications.success(
-      'Battlemap Uploaded',
-      'Custom map image applied to current scene.'
+      'Scene Background Updated',
+      'Custom background image applied to current scene.'
     );
   }
 
@@ -575,6 +1408,9 @@ export class VttStore {
     if (!sc || !this.isGm()) return;
     if (Math.hypot(b.x - a.x, b.y - a.y) < 8) return;
 
+    const prevWalls = cloneWalls(sc.walls);
+    const prevFog = cloneExploredFog(sc.explored_fog);
+
     const wall: VttWallSegment = {
       id: `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       x1: Math.round(a.x),
@@ -584,6 +1420,16 @@ export class VttStore {
       kind,
       open: kind === 'door' ? false : undefined,
     };
+
+    const kindLabel =
+      kind === 'door' ? 'Door' : kind === 'window' ? 'Window' : 'Wall';
+    this.pushUndoEntry(sc.id, `Add ${kindLabel} Segment`, {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        walls: prevWalls,
+        explored_fog: prevFog,
+      },
+    });
 
     await this.patchScene(sc.id, { walls: [...sc.walls, wall] });
     this.syncExploredFogFromObservers();
@@ -595,6 +1441,16 @@ export class VttStore {
     const target = sc.walls.find((w) => w.id === wallId && w.kind === 'door');
     if (!target) return;
 
+    const prevWalls = cloneWalls(sc.walls);
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    this.pushUndoEntry(sc.id, target.open ? 'Close Door' : 'Open Door', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        walls: prevWalls,
+        explored_fog: prevFog,
+      },
+    });
+
     const nextWalls = sc.walls.map((w) =>
       w.id === wallId ? { ...w, open: !w.open } : w
     );
@@ -605,6 +1461,19 @@ export class VttStore {
   async deleteWallSegment(wallId: string): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+    const target = sc.walls.find((w) => w.id === wallId);
+    if (!target) return;
+
+    const prevWalls = cloneWalls(sc.walls);
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    this.pushUndoEntry(sc.id, 'Delete Wall Segment', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        walls: prevWalls,
+        explored_fog: prevFog,
+      },
+    });
+
     await this.patchScene(sc.id, {
       walls: sc.walls.filter((w) => w.id !== wallId),
     });
@@ -613,7 +1482,16 @@ export class VttStore {
 
   async clearAllWalls(): Promise<void> {
     const sc = this.activeScene();
-    if (!sc || !this.isGm()) return;
+    if (!sc || !this.isGm() || sc.walls.length === 0) return;
+
+    this.pushUndoEntry(sc.id, 'Clear All Walls', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        walls: cloneWalls(sc.walls),
+        explored_fog: cloneExploredFog(sc.explored_fog),
+      },
+    });
+
     await this.patchScene(sc.id, { walls: [] });
   }
 
@@ -627,6 +1505,11 @@ export class VttStore {
   ): Promise<VttLightSource | null> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return null;
+
+    const prevLights = cloneLights(sc.lights);
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    const prevSelectedLight = this.selectedLightId();
+
     const dimFeet = Math.max(5, Math.round(options?.dim_feet ?? 40));
     const brightFeet = Math.max(
       0,
@@ -641,6 +1524,16 @@ export class VttStore {
       color: options?.color ?? '#FF9B42',
       enabled: true,
     };
+
+    this.pushUndoEntry(sc.id, 'Place Light Source', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        lights: prevLights,
+        explored_fog: prevFog,
+      },
+      selectedLightIdAfterUndo: prevSelectedLight,
+    });
+
     await this.patchScene(sc.id, { lights: [...sc.lights, light] });
     this.selectedLightId.set(light.id);
     this.syncExploredFogFromObservers();
@@ -649,7 +1542,17 @@ export class VttStore {
 
   async clearAllLights(): Promise<void> {
     const sc = this.activeScene();
-    if (!sc || !this.isGm()) return;
+    if (!sc || !this.isGm() || sc.lights.length === 0) return;
+
+    this.pushUndoEntry(sc.id, 'Clear All Lights', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        lights: cloneLights(sc.lights),
+        explored_fog: cloneExploredFog(sc.explored_fog),
+      },
+      selectedLightIdAfterUndo: null,
+    });
+
     await this.patchScene(sc.id, { lights: [] });
     this.selectedLightId.set(null);
     this.syncExploredFogFromObservers();
@@ -661,6 +1564,28 @@ export class VttStore {
   ): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+    const existing = sc.lights.find((l) => l.id === lightId);
+    if (!existing) return;
+
+    const movedOnly =
+      patch.x !== undefined &&
+      patch.y !== undefined &&
+      patch.bright_feet === undefined &&
+      patch.dim_feet === undefined &&
+      patch.enabled === undefined;
+
+    this.pushUndoEntry(
+      sc.id,
+      movedOnly ? 'Move Light Source' : 'Edit Light Source',
+      {
+        kind: 'scene_patch',
+        previousScenePatch: {
+          lights: cloneLights(sc.lights),
+          explored_fog: cloneExploredFog(sc.explored_fog),
+        },
+      }
+    );
+
     const nextLights = sc.lights.map((l) =>
       l.id === lightId ? { ...l, ...patch } : l
     );
@@ -671,6 +1596,18 @@ export class VttStore {
   async deleteLightSource(lightId: string): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+    const existing = sc.lights.find((l) => l.id === lightId);
+    if (!existing) return;
+
+    this.pushUndoEntry(sc.id, 'Delete Light Source', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        lights: cloneLights(sc.lights),
+        explored_fog: cloneExploredFog(sc.explored_fog),
+      },
+      selectedLightIdAfterUndo: lightId,
+    });
+
     await this.patchScene(sc.id, {
       lights: sc.lights.filter((l) => l.id !== lightId),
     });
@@ -682,8 +1619,20 @@ export class VttStore {
   async resetExploredFog(): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+
+    this.pushUndoEntry(sc.id, 'Reset Explored Fog', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        explored_fog: cloneExploredFog(sc.explored_fog),
+      },
+    });
+
     await this.patchScene(sc.id, {
-      explored_fog: { cells: [], revealed_all: false },
+      explored_fog: {
+        ...sc.explored_fog,
+        cells: [],
+        revealed_all: false,
+      },
     });
     this.syncExploredFogFromObservers();
   }
@@ -691,96 +1640,376 @@ export class VttStore {
   async revealEntireMapFog(): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+
+    this.pushUndoEntry(sc.id, 'Reveal Entire Scene Fog', {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        explored_fog: cloneExploredFog(sc.explored_fog),
+      },
+    });
+
     await this.patchScene(sc.id, {
       explored_fog: {
+        ...sc.explored_fog,
         cells: sc.explored_fog.cells ?? [],
         revealed_all: true,
       },
     });
   }
 
+  async toggleSceneBooleanField(
+    field: 'fog_enabled' | 'global_illumination'
+  ): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm()) return;
+    const prevValue = sc[field];
+    const prevFog = cloneExploredFog(sc.explored_fog);
+
+    this.pushUndoEntry(
+      sc.id,
+      field === 'fog_enabled'
+        ? 'Toggle Dynamic Fog of War'
+        : 'Toggle Global Daylight',
+      {
+        kind: 'scene_patch',
+        previousScenePatch: {
+          [field]: prevValue,
+          explored_fog: prevFog,
+        },
+      }
+    );
+
+    await this.patchScene(sc.id, { [field]: !prevValue });
+    this.syncExploredFogFromObservers();
+  }
+
   syncExploredFogFromObservers(): void {
+    this.syncExploredFogAlongTokenWaypoints();
+  }
+
+  private syncExploredFogAlongTokenWaypoints(
+    movingTokenId?: string,
+    intermediateWaypoints?: {
+      col: number;
+      row: number;
+      world_x: number | null;
+      world_y: number | null;
+    }[]
+  ): void {
     const sc = this.activeScene();
     if (!sc || !sc.fog_enabled || sc.explored_fog?.revealed_all) return;
 
     const observers = this.observerTokens();
     if (observers.length === 0) return;
 
-    const geom = this.gridGeometry();
-    const bounds = getHexWorldBounds(geom);
-    const maxDiag = Math.hypot(bounds.width, bounds.height) + 200;
-
-    const lights = buildLightPolygons(
-      sc.lights,
-      this.sceneTokens(),
-      sc.walls,
-      geom
-    );
-    const visions = buildObserverVisions(
-      observers,
-      sc.walls,
-      geom,
-      sc.global_illumination,
-      maxDiag
-    );
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const maxDiag = Math.hypot(layout.totalWidth, layout.totalHeight) + 200;
+    const allSceneTokens = this.sceneTokens();
 
     const existing = new Set<string>(sc.explored_fog.cells ?? []);
-    const newlySeen = collectNewlyExploredHexKeys(
-      existing,
-      visions,
-      lights,
-      sc.walls,
-      geom,
-      sc.global_illumination
-    );
+    const initialCount = existing.size;
 
-    if (newlySeen.length > 0) {
-      const merged = [...existing, ...newlySeen];
+    const collectAtStep = (
+      overrideTokenId?: string,
+      overridePos?: {
+        col: number;
+        row: number;
+        world_x: number | null;
+        world_y: number | null;
+      }
+    ) => {
+      const stepSceneTokens =
+        overrideTokenId && overridePos
+          ? allSceneTokens.map((t) =>
+              t.id === overrideTokenId
+                ? {
+                    ...t,
+                    x: overridePos.col,
+                    y: overridePos.row,
+                    world_x: overridePos.world_x,
+                    world_y: overridePos.world_y,
+                  }
+                : t
+            )
+          : allSceneTokens;
+
+      const stepObservers =
+        overrideTokenId && overridePos
+          ? observers.map((t) =>
+              t.id === overrideTokenId
+                ? {
+                    ...t,
+                    x: overridePos.col,
+                    y: overridePos.row,
+                    world_x: overridePos.world_x,
+                    world_y: overridePos.world_y,
+                  }
+                : t
+            )
+          : observers;
+
+      const lights = buildLightPolygons(
+        sc.lights,
+        stepSceneTokens,
+        sc.walls,
+        geom,
+        sc.grid_mode
+      );
+      const visions = buildObserverVisions(
+        stepObservers,
+        sc.walls,
+        geom,
+        sc.global_illumination,
+        maxDiag,
+        sc.grid_mode
+      );
+      const newlySeen = collectNewlyExploredHexKeys(
+        existing,
+        visions,
+        lights,
+        sc.walls,
+        geom,
+        sc.global_illumination
+      );
+      for (const k of newlySeen) {
+        existing.add(k);
+      }
+    };
+
+    if (
+      movingTokenId &&
+      intermediateWaypoints &&
+      intermediateWaypoints.length > 0 &&
+      observers.some((o) => o.id === movingTokenId)
+    ) {
+      for (const wp of intermediateWaypoints) {
+        collectAtStep(movingTokenId, wp);
+      }
+    }
+
+    collectAtStep();
+
+    if (existing.size > initialCount) {
       void this.patchScene(sc.id, {
         explored_fog: {
           ...sc.explored_fog,
-          cells: merged,
+          cells: Array.from(existing),
         },
       });
     }
   }
 
-  private findOpenSpawnHex(preferredFaction: VttFaction): {
+  private findOpenSpawnLocation(preferredFaction: VttFaction): {
     col: number;
     row: number;
+    world_x: number | null;
+    world_y: number | null;
   } {
-    const geom = this.gridGeometry();
-    const occupied = new Set(
-      this.sceneTokens().map((t) => `${t.x},${t.y}`)
-    );
-    const startCol =
-      preferredFaction === 'enemy'
-        ? Math.max(1, geom.gridWidth - 3)
-        : 2;
-    const centerRow = Math.floor(geom.gridHeight / 2);
+    const sc = this.activeScene();
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const existingTokens = this.sceneTokens();
+    const occupied = new Set(existingTokens.map((t) => `${t.x},${t.y}`));
 
-    for (let radius = 0; radius < Math.max(geom.gridWidth, geom.gridHeight); radius++) {
-      for (let dc = -radius; dc <= radius; dc++) {
-        for (let dr = -radius; dr <= radius; dr++) {
-          const col = startCol + dc;
-          const row = centerRow + dr;
+    const minInner = clampHexToBounds(
+      worldPointToHex(
+        { x: layout.sceneX + 32, y: layout.sceneY + 32 },
+        geom
+      ),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+    const maxInner = clampHexToBounds(
+      worldPointToHex(
+        {
+          x: layout.sceneX + Math.max(48, layout.innerWidth - 32),
+          y: layout.sceneY + Math.max(48, layout.innerHeight - 32),
+        },
+        geom
+      ),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+
+    const insetX = Math.min(
+      layout.innerWidth * 0.22,
+      Math.max(80, layout.gridSizePx * 2)
+    );
+    const anchorWorld =
+      preferredFaction === 'enemy'
+        ? {
+            x: layout.sceneX + layout.innerWidth - insetX,
+            y: layout.sceneY + layout.innerHeight * 0.5,
+          }
+        : {
+            x: layout.sceneX + insetX,
+            y: layout.sceneY + layout.innerHeight * 0.5,
+          };
+    const anchorHex = clampHexToBounds(
+      worldPointToHex(anchorWorld, geom),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+
+    let chosenCol = anchorHex.col;
+    let chosenRow = anchorHex.row;
+    let found = false;
+
+    const minCol = Math.min(minInner.col, maxInner.col);
+    const maxCol = Math.max(minInner.col, maxInner.col);
+    const minRow = Math.min(minInner.row, maxInner.row);
+    const maxRow = Math.max(minInner.row, maxInner.row);
+
+    for (
+      let radius = 0;
+      radius <= Math.max(maxCol - minCol, maxRow - minRow) + 1 && !found;
+      radius++
+    ) {
+      for (let dc = -radius; dc <= radius && !found; dc++) {
+        for (let dr = -radius; dr <= radius && !found; dr++) {
+          const col = anchorHex.col + dc;
+          const row = anchorHex.row + dr;
           if (
-            col >= 0 &&
-            col < geom.gridWidth &&
-            row >= 0 &&
-            row < geom.gridHeight &&
+            col >= minCol &&
+            col <= maxCol &&
+            row >= minRow &&
+            row <= maxRow &&
             !occupied.has(`${col},${row}`)
           ) {
-            return { col, row };
+            chosenCol = col;
+            chosenRow = row;
+            found = true;
           }
         }
       }
     }
 
-    return { col: 1, row: 1 };
+    if (!found) {
+      for (
+        let radius = 0;
+        radius < Math.max(geom.gridWidth, geom.gridHeight) && !found;
+        radius++
+      ) {
+        for (let dc = -radius; dc <= radius && !found; dc++) {
+          for (let dr = -radius; dr <= radius && !found; dr++) {
+            const col = anchorHex.col + dc;
+            const row = anchorHex.row + dr;
+            if (
+              col >= 0 &&
+              col < geom.gridWidth &&
+              row >= 0 &&
+              row < geom.gridHeight &&
+              !occupied.has(`${col},${row}`)
+            ) {
+              chosenCol = col;
+              chosenRow = row;
+              found = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (sc?.grid_mode === 'gridless') {
+      const basePt = hexToWorldCenter({ col: chosenCol, row: chosenRow }, geom);
+      let wx = Math.round(basePt.x);
+      let wy = Math.round(basePt.y);
+
+      const bounds = {
+        width: layout.totalWidth,
+        height: layout.totalHeight,
+      };
+      for (let attempt = 0; attempt < 16; attempt++) {
+        const collides = existingTokens.some((t) => {
+          const tc = getTokenWorldCenter(t, geom, 'gridless');
+          return Math.hypot(tc.x - wx, tc.y - wy) < 34;
+        });
+        if (!collides) break;
+        const angle = (attempt * Math.PI) / 4;
+        const ring = 44 * (1 + Math.floor(attempt / 8));
+        const shifted = clampWorldPointToBounds(
+          {
+            x: basePt.x + Math.cos(angle) * ring,
+            y: basePt.y + Math.sin(angle) * ring,
+          },
+          bounds
+        );
+        wx = shifted.x;
+        wy = shifted.y;
+      }
+
+      return { col: chosenCol, row: chosenRow, world_x: wx, world_y: wy };
+    }
+
+    return { col: chosenCol, row: chosenRow, world_x: null, world_y: null };
   }
 
-  async deployCharacterToken(character: CharacterModel): Promise<void> {
+  private resolveDropPlacement(
+    faction: VttFaction,
+    placement?: { worldPt: VttPoint; unsnapped: boolean }
+  ): {
+    col: number;
+    row: number;
+    world_x: number | null;
+    world_y: number | null;
+    unsnappedOnGrid: boolean;
+  } {
+    const sc = this.activeScene();
+    if (!sc || !placement) {
+      const spawn = this.findOpenSpawnLocation(faction);
+      return {
+        col: spawn.col,
+        row: spawn.row,
+        world_x: spawn.world_x,
+        world_y: spawn.world_y,
+        unsnappedOnGrid: false,
+      };
+    }
+
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const bounds = { width: layout.totalWidth, height: layout.totalHeight };
+    const clampedWorld = clampWorldPointToBounds(placement.worldPt, bounds);
+    const clampedHex = clampHexToBounds(
+      worldPointToHex(clampedWorld, geom),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+
+    if (sc.grid_mode === 'gridless') {
+      return {
+        col: clampedHex.col,
+        row: clampedHex.row,
+        world_x: clampedWorld.x,
+        world_y: clampedWorld.y,
+        unsnappedOnGrid: false,
+      };
+    }
+
+    if (placement.unsnapped) {
+      return {
+        col: clampedHex.col,
+        row: clampedHex.row,
+        world_x: clampedWorld.x,
+        world_y: clampedWorld.y,
+        unsnappedOnGrid: true,
+      };
+    }
+
+    return {
+      col: clampedHex.col,
+      row: clampedHex.row,
+      world_x: null,
+      world_y: null,
+      unsnappedOnGrid: false,
+    };
+  }
+
+  async deployCharacterToken(
+    character: CharacterModel,
+    placement?: { worldPt: VttPoint; unsnapped: boolean }
+  ): Promise<void> {
     const sc = this.activeScene();
     if (!sc) return;
 
@@ -789,6 +2018,26 @@ export class VttStore {
     );
     if (existing) {
       this.selectedTokenId.set(existing.id);
+      if (placement && this.canControlToken(existing)) {
+        if (sc.grid_mode === 'gridless' || placement.unsnapped) {
+          await this.moveTokenToWorldPoint(
+            existing.id,
+            placement.worldPt,
+            0,
+            true
+          );
+        } else {
+          const resolved = this.resolveDropPlacement('ally', placement);
+          await this.moveTokenToHex(
+            existing.id,
+            resolved.col,
+            resolved.row,
+            0,
+            true
+          );
+        }
+        return;
+      }
       this.notifications.info(
         'Already Deployed',
         `${character.name} is already on this battlemap.`
@@ -804,7 +2053,7 @@ export class VttStore {
     const wepVis = stats.activeWeapon
       ? resolveWeaponVisuals(stats.activeWeapon)
       : { icon: 'greatsword', color: '#38B29A' };
-    const spawn = this.findOpenSpawnHex('ally');
+    const spawn = this.resolveDropPlacement('ally', placement);
     const axial = offsetToAxial(spawn.col, spawn.row);
 
     const res = await this.vttService.insertToken({
@@ -817,6 +2066,8 @@ export class VttStore {
       y: spawn.row,
       q: axial.q,
       r: axial.r,
+      world_x: spawn.world_x,
+      world_y: spawn.world_y,
       size: 1,
       icon: wepVis.icon,
       color: '#38B29A',
@@ -836,7 +2087,7 @@ export class VttStore {
       shield_raised: Boolean(character.active_cooldowns?.['__shield_raised']),
       is_hidden: false,
       statuses: [],
-      npc_stats: {},
+      npc_stats: spawn.unsnappedOnGrid ? { __unsnapped: true } : {},
     });
 
     if (res.error || !res.token) {
@@ -847,10 +2098,16 @@ export class VttStore {
       return;
     }
 
+    const prevFog = cloneExploredFog(sc.explored_fog);
     this.tokens.update((curr) =>
       curr.some((t) => t.id === res.token!.id) ? curr : [...curr, res.token!]
     );
     this.selectedTokenId.set(res.token.id);
+    this.pushUndoEntry(sc.id, `Deploy ${res.token.name}`, {
+      kind: 'token_spawned',
+      tokenId: res.token.id,
+      previousExploredFog: prevFog,
+    });
     this.syncExploredFogFromObservers();
     await this.postLog({
       kind: 'system',
@@ -859,7 +2116,499 @@ export class VttStore {
     });
   }
 
-  async spawnNpcPreset(preset: VttNpcPreset, customName?: string): Promise<void> {
+  canManageRosterActor(actor: VttRosterActorModel): boolean {
+    if (this.isGm()) return true;
+    const uid = this.authStore.user()?.id;
+    return Boolean(uid && actor.owner_id === uid);
+  }
+
+  canDeployRosterActor(actor: VttRosterActorModel): boolean {
+    if (this.isGm()) return true;
+    const uid = this.authStore.user()?.id;
+    if (!uid) return false;
+    if (actor.owner_id === uid) return true;
+    if (actor.character_id) {
+      const char =
+        this.allCharacters().find((c) => c.id === actor.character_id) ??
+        this.characterStore
+          .characters()
+          .find((c) => c.id === actor.character_id);
+      if (char?.owner_id === uid) return true;
+    }
+    return false;
+  }
+
+  async createRosterActorFromScratch(
+    draft: ActorTemplateDraft,
+    options?: {
+      ownerId?: string | null;
+      collectionActorId?: string | null;
+      saveToCollections?: boolean;
+      silent?: boolean;
+    }
+  ): Promise<VttRosterActorModel | null> {
+    const camp = this.campaign();
+    const uid = this.authStore.user()?.id ?? null;
+    if (!camp || !uid) return null;
+    if (!this.isGm() && draft.actor_kind !== 'character') {
+      return null;
+    }
+
+    let linkedCollectionId = options?.collectionActorId ?? null;
+    if (options?.saveToCollections) {
+      const savedCol = await this.collectionsStore.createActorFromScratch(
+        { ...draft, folder_id: null },
+        true
+      );
+      if (savedCol) {
+        linkedCollectionId = savedCol.id;
+      }
+    }
+
+    const siblings = this.rosterActors().filter(
+      (a) => (a.folder_id ?? null) === (draft.folder_id ?? null)
+    );
+    const nextSort =
+      siblings.reduce((acc, a) => Math.max(acc, a.sort_order ?? 0), -1) + 1;
+
+    const res = await this.vttService.createRosterActor({
+      campaign_id: camp.id,
+      folder_id: this.isGm() ? draft.folder_id || null : null,
+      character_id: draft.source_character_id || null,
+      collection_actor_id: linkedCollectionId,
+      owner_id: options?.ownerId ?? uid,
+      actor_kind: draft.actor_kind,
+      is_unique: draft.is_unique,
+      name: draft.name.trim() || 'Unnamed Actor',
+      faction: this.isGm() ? draft.faction : 'ally',
+      size: Math.max(1, Math.round(draft.size || 1)),
+      icon: draft.icon || 'greatsword',
+      color: draft.color || '#38B29A',
+      max_hp: Math.max(1, Math.round(draft.max_hp || 10)),
+      max_sp: Math.max(0, Math.round(draft.max_sp ?? 5)),
+      max_ap: Math.max(1, Math.round(draft.max_ap || 4)),
+      armor_dr: Math.max(0, Math.round(draft.armor_dr ?? 0)),
+      shield_block: Math.max(0, Math.round(draft.shield_block ?? 0)),
+      move_feet: Math.max(0, Math.round(draft.move_feet ?? 20)),
+      vision_feet: Math.max(0, Math.round(draft.vision_feet ?? 60)),
+      light_bright_feet: Math.max(0, Math.round(draft.light_bright_feet ?? 0)),
+      light_dim_feet: Math.max(0, Math.round(draft.light_dim_feet ?? 0)),
+      light_color: draft.light_color || '#F59E0B',
+      npc_stats: { ...draft.npc_stats },
+      notes: draft.notes ?? '',
+      sort_order: nextSort,
+    });
+
+    if (res.error || !res.actor) {
+      if (!options?.silent) {
+        this.notifications.error(
+          'Unable to Add Roster Actor',
+          res.error ?? 'Unknown error.'
+        );
+      }
+      return null;
+    }
+
+    this.rosterActors.update((curr) =>
+      curr.some((a) => a.id === res.actor!.id) ? curr : [...curr, res.actor!]
+    );
+    if (!options?.silent) {
+      this.notifications.success(
+        'Added to Roster',
+        `${res.actor.name} is ready in the campaign roster.`
+      );
+    }
+    return res.actor;
+  }
+
+  async importCharacterToRoster(
+    character: CharacterModel,
+    folderId: string | null = null
+  ): Promise<VttRosterActorModel | null> {
+    const existing = this.rosterActors().find(
+      (a) => a.character_id === character.id
+    );
+    if (existing) {
+      if (this.isGm() && folderId !== existing.folder_id) {
+        await this.updateRosterActor(existing.id, { folder_id: folderId });
+      }
+      this.notifications.info(
+        'Already in Roster',
+        `${character.name} is already loaded in this campaign's Roster.`
+      );
+      return existing;
+    }
+
+    if (
+      !this.allCharacters().some((c) => c.id === character.id)
+    ) {
+      this.allCharacters.update((curr) => [...curr, character]);
+    }
+
+    const draft = buildActorTemplateFromCharacter(
+      character,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes(),
+      folderId
+    );
+    return this.createRosterActorFromScratch(draft, {
+      ownerId: character.owner_id,
+    });
+  }
+
+  async importCollectionActorToRoster(
+    colActor: CollectionActorModel,
+    folderId: string | null = null
+  ): Promise<VttRosterActorModel | null> {
+    return this.createRosterActorFromScratch(
+      {
+        folder_id: folderId,
+        source_character_id: colActor.source_character_id,
+        actor_kind: colActor.actor_kind,
+        is_unique: colActor.is_unique,
+        name: colActor.name,
+        faction: colActor.faction,
+        size: colActor.size,
+        icon: colActor.icon,
+        color: colActor.color,
+        max_hp: colActor.max_hp,
+        max_sp: colActor.max_sp,
+        max_ap: colActor.max_ap,
+        armor_dr: colActor.armor_dr,
+        shield_block: colActor.shield_block,
+        move_feet: colActor.move_feet,
+        vision_feet: colActor.vision_feet,
+        light_bright_feet: colActor.light_bright_feet,
+        light_dim_feet: colActor.light_dim_feet,
+        light_color: colActor.light_color,
+        npc_stats: { ...colActor.npc_stats },
+        notes: colActor.notes,
+      },
+      {
+        collectionActorId: colActor.id,
+      }
+    );
+  }
+
+  async importNpcPresetToRoster(
+    preset: VttNpcPreset,
+    folderId: string | null = null
+  ): Promise<VttRosterActorModel | null> {
+    if (!this.isGm()) return null;
+    const draft = buildActorTemplateFromNpcPreset(preset, folderId);
+    return this.createRosterActorFromScratch(draft);
+  }
+
+  async updateRosterActor(
+    actorId: string,
+    patch: Partial<VttRosterActorModel>
+  ): Promise<boolean> {
+    const camp = this.campaign();
+    const target = this.rosterActors().find((a) => a.id === actorId);
+    if (!camp || !target || !this.canManageRosterActor(target)) return false;
+
+    this.rosterActors.update((curr) =>
+      curr.map((a) => (a.id === actorId ? { ...a, ...patch } : a))
+    );
+
+    const err = await this.vttService.updateRosterActor(
+      camp.id,
+      actorId,
+      patch
+    );
+    if (err) {
+      this.notifications.error('Roster Update Error', err);
+      return false;
+    }
+    return true;
+  }
+
+  async duplicateRosterActor(
+    actorId: string
+  ): Promise<VttRosterActorModel | null> {
+    const existing = this.rosterActors().find((a) => a.id === actorId);
+    if (!existing || !this.canManageRosterActor(existing)) return null;
+
+    return this.createRosterActorFromScratch({
+      folder_id: existing.folder_id,
+      source_character_id: existing.character_id,
+      actor_kind: existing.actor_kind,
+      is_unique: existing.is_unique,
+      name: `${existing.name} (Copy)`,
+      faction: existing.faction,
+      size: existing.size,
+      icon: existing.icon,
+      color: existing.color,
+      max_hp: existing.max_hp,
+      max_sp: existing.max_sp,
+      max_ap: existing.max_ap,
+      armor_dr: existing.armor_dr,
+      shield_block: existing.shield_block,
+      move_feet: existing.move_feet,
+      vision_feet: existing.vision_feet,
+      light_bright_feet: existing.light_bright_feet,
+      light_dim_feet: existing.light_dim_feet,
+      light_color: existing.light_color,
+      npc_stats: { ...existing.npc_stats },
+      notes: existing.notes,
+    });
+  }
+
+  async moveRosterActorToFolder(
+    actorId: string,
+    folderId: string | null
+  ): Promise<void> {
+    if (!this.isGm()) return;
+    const existing = this.rosterActors().find((a) => a.id === actorId);
+    if (!existing || (existing.folder_id ?? null) === (folderId ?? null)) {
+      return;
+    }
+    await this.updateRosterActor(actorId, { folder_id: folderId ?? null });
+  }
+
+  async deleteRosterActor(actorId: string): Promise<void> {
+    const camp = this.campaign();
+    const existing = this.rosterActors().find((a) => a.id === actorId);
+    if (!camp || !existing || !this.canManageRosterActor(existing)) return;
+
+    this.rosterActors.update((curr) => curr.filter((a) => a.id !== actorId));
+    const err = await this.vttService.deleteRosterActor(camp.id, actorId);
+    if (err) {
+      this.notifications.error('Roster Delete Error', err);
+    }
+  }
+
+  async saveRosterActorToCollections(
+    actorId: string
+  ): Promise<CollectionActorModel | null> {
+    const existing = this.rosterActors().find((a) => a.id === actorId);
+    if (!existing) return null;
+
+    const saved = await this.collectionsStore.createActorFromScratch({
+      folder_id: null,
+      source_character_id: existing.character_id,
+      actor_kind: existing.actor_kind,
+      is_unique: existing.is_unique,
+      name: existing.name,
+      faction: existing.faction,
+      size: existing.size,
+      icon: existing.icon,
+      color: existing.color,
+      max_hp: existing.max_hp,
+      max_sp: existing.max_sp,
+      max_ap: existing.max_ap,
+      armor_dr: existing.armor_dr,
+      shield_block: existing.shield_block,
+      move_feet: existing.move_feet,
+      vision_feet: existing.vision_feet,
+      light_bright_feet: existing.light_bright_feet,
+      light_dim_feet: existing.light_dim_feet,
+      light_color: existing.light_color,
+      npc_stats: { ...existing.npc_stats },
+      notes: existing.notes,
+    });
+    if (saved) {
+      await this.updateRosterActor(actorId, { collection_actor_id: saved.id });
+    }
+    return saved;
+  }
+
+  async deployRosterActor(
+    actorId: string,
+    placement?: { worldPt: VttPoint; unsnapped: boolean }
+  ): Promise<VttTokenModel | null> {
+    const sc = this.activeScene();
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!sc || !actor || !this.canDeployRosterActor(actor)) return null;
+
+    const isUniquePersona = actor.is_unique || Boolean(actor.character_id);
+    if (isUniquePersona) {
+      const existingToken = this.sceneTokens().find(
+        (t) =>
+          (actor.character_id && t.character_id === actor.character_id) ||
+          t.npc_stats?.__roster_actor_id === actor.id
+      );
+      if (existingToken) {
+        this.selectedTokenId.set(existingToken.id);
+        if (placement && this.canControlToken(existingToken)) {
+          if (sc.grid_mode === 'gridless' || placement.unsnapped) {
+            await this.moveTokenToWorldPoint(
+              existingToken.id,
+              placement.worldPt,
+              0,
+              true
+            );
+          } else {
+            const resolved = this.resolveDropPlacement(
+              actor.faction,
+              placement
+            );
+            await this.moveTokenToHex(
+              existingToken.id,
+              resolved.col,
+              resolved.row,
+              0,
+              true
+            );
+          }
+          return (
+            this.sceneTokens().find((t) => t.id === existingToken.id) ??
+            existingToken
+          );
+        }
+        this.notifications.info(
+          'Already Deployed',
+          `${actor.name} is already on this scene.`
+        );
+        return existingToken;
+      }
+    }
+
+    const linkedChar = actor.character_id
+      ? (this.allCharacters().find((c) => c.id === actor.character_id) ??
+        this.characterStore
+          .characters()
+          .find((c) => c.id === actor.character_id) ??
+        null)
+      : null;
+
+    let maxHp = actor.max_hp;
+    let currentHp = actor.max_hp;
+    let maxSp = actor.max_sp;
+    let currentSp = actor.max_sp;
+    let currentAp = actor.max_ap;
+    let armorDr = actor.armor_dr;
+    let shieldBlock = actor.shield_block;
+    let moveFeet = actor.move_feet;
+    let shieldRaised = false;
+
+    if (linkedChar) {
+      const stats = computeDerivedStats(
+        linkedChar,
+        this.compendiumStore.allWeapons(),
+        this.compendiumStore.allPerkNodes()
+      );
+      maxHp = stats.maxHp;
+      currentHp = Math.min(linkedChar.current_hp, stats.maxHp);
+      maxSp = stats.maxSp;
+      currentSp = Math.min(linkedChar.current_sp, stats.maxSp);
+      currentAp = linkedChar.current_ap ?? actor.max_ap;
+      armorDr = stats.armorDr;
+      shieldBlock = stats.shieldBlockTotal;
+      moveFeet = stats.moveFeet;
+      shieldRaised = Boolean(linkedChar.active_cooldowns?.['__shield_raised']);
+    }
+
+    let finalName = actor.name;
+    if (!isUniquePersona) {
+      const sameBaseCount = this.sceneTokens().filter((t) =>
+        t.name.startsWith(actor.name)
+      ).length;
+      if (sameBaseCount > 0) {
+        finalName = `${actor.name} ${sameBaseCount + 1}`;
+      }
+    }
+
+    const spawn = this.resolveDropPlacement(actor.faction, placement);
+    const axial = offsetToAxial(spawn.col, spawn.row);
+
+    const res = await this.vttService.insertToken({
+      encounter_id: sc.id,
+      character_id: actor.character_id,
+      owner_id:
+        linkedChar?.owner_id ??
+        actor.owner_id ??
+        this.authStore.user()?.id ??
+        null,
+      name: finalName,
+      faction: actor.faction,
+      x: spawn.col,
+      y: spawn.row,
+      q: axial.q,
+      r: axial.r,
+      world_x: spawn.world_x,
+      world_y: spawn.world_y,
+      size: Math.max(1, actor.size),
+      icon: actor.icon || 'greatsword',
+      color: actor.color || '#38B29A',
+      current_hp: currentHp,
+      max_hp: maxHp,
+      current_sp: currentSp,
+      max_sp: maxSp,
+      current_ap: currentAp,
+      max_ap: actor.max_ap,
+      armor_dr: armorDr,
+      shield_block: shieldBlock,
+      move_feet: moveFeet,
+      vision_feet: actor.vision_feet,
+      light_bright_feet: actor.light_bright_feet,
+      light_dim_feet: actor.light_dim_feet,
+      light_color: actor.light_color || '#FF9B42',
+      shield_raised: shieldRaised,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {
+        ...actor.npc_stats,
+        __roster_actor_id: actor.id,
+        __unsnapped: spawn.unsnappedOnGrid,
+      },
+    });
+
+    if (res.error || !res.token) {
+      this.notifications.error(
+        'Unable to Deploy Actor',
+        res.error ?? 'Unknown error.'
+      );
+      return null;
+    }
+
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    this.tokens.update((curr) =>
+      curr.some((t) => t.id === res.token!.id) ? curr : [...curr, res.token!]
+    );
+    this.selectedTokenId.set(res.token.id);
+    this.pushUndoEntry(sc.id, `Deploy ${res.token.name}`, {
+      kind: 'token_spawned',
+      tokenId: res.token.id,
+      previousExploredFog: prevFog,
+    });
+    this.syncExploredFogFromObservers();
+    await this.postLog({
+      kind: 'system',
+      title: `${res.token.name} entered the battlefield`,
+      detail: `HP ${res.token.current_hp}/${res.token.max_hp} · SP ${res.token.current_sp}/${res.token.max_sp} · Move ${res.token.move_feet} ft`,
+    });
+    return res.token;
+  }
+
+  async dropActorAtWorldPoint(
+    payload: VttRosterDragPayload,
+    worldPt: VttPoint,
+    unsnapped: boolean
+  ): Promise<void> {
+    this.draggingRosterPayload.set(null);
+
+    if (payload.kind === 'roster-actor' && payload.actorId) {
+      await this.deployRosterActor(payload.actorId, { worldPt, unsnapped });
+      return;
+    }
+
+    if (payload.kind === 'character' && payload.characterId) {
+      const char =
+        this.allCharacters().find((c) => c.id === payload.characterId) ??
+        this.characterStore
+          .characters()
+          .find((c) => c.id === payload.characterId);
+      if (char) {
+        await this.deployCharacterToken(char, { worldPt, unsnapped });
+      }
+    }
+  }
+
+  async spawnNpcPreset(
+    preset: VttNpcPreset,
+    customName?: string
+  ): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
 
@@ -870,7 +2619,7 @@ export class VttStore {
       customName?.trim() ||
       (sameBaseCount > 0 ? `${preset.name} ${sameBaseCount + 1}` : preset.name);
 
-    const spawn = this.findOpenSpawnHex(preset.faction);
+    const spawn = this.findOpenSpawnLocation(preset.faction);
     const axial = offsetToAxial(spawn.col, spawn.row);
 
     const res = await this.vttService.insertToken({
@@ -883,6 +2632,8 @@ export class VttStore {
       y: spawn.row,
       q: axial.q,
       r: axial.r,
+      world_x: spawn.world_x,
+      world_y: spawn.world_y,
       size: 1,
       icon: preset.icon,
       color: preset.color,
@@ -913,10 +2664,67 @@ export class VttStore {
       return;
     }
 
+    const prevFog = cloneExploredFog(sc.explored_fog);
     this.tokens.update((curr) =>
       curr.some((t) => t.id === res.token!.id) ? curr : [...curr, res.token!]
     );
     this.selectedTokenId.set(res.token.id);
+    this.pushUndoEntry(sc.id, `Spawn ${res.token.name}`, {
+      kind: 'token_spawned',
+      tokenId: res.token.id,
+      previousExploredFog: prevFog,
+    });
+    this.syncExploredFogFromObservers();
+  }
+
+  async recordablePatchToken(
+    tokenId: string,
+    patch: Partial<VttTokenModel>,
+    label: string
+  ): Promise<void> {
+    const existing = this.tokens().find((t) => t.id === tokenId);
+    if (!existing) return;
+
+    const previousTokenPatch: Partial<VttTokenModel> = {};
+    let hasChange = false;
+    for (const key of Object.keys(patch) as (keyof VttTokenModel)[]) {
+      const nextVal = patch[key];
+      const prevVal = existing[key];
+      if (nextVal !== prevVal) {
+        hasChange = true;
+        if (Array.isArray(prevVal)) {
+          (previousTokenPatch as Record<string, unknown>)[key] = [...prevVal];
+        } else if (prevVal && typeof prevVal === 'object') {
+          (previousTokenPatch as Record<string, unknown>)[key] = {
+            ...(prevVal as Record<string, unknown>),
+          };
+        } else {
+          (previousTokenPatch as Record<string, unknown>)[key] = prevVal;
+        }
+      }
+    }
+    if (!hasChange) return;
+
+    const affectsVisibility =
+      patch.light_bright_feet !== undefined ||
+      patch.light_dim_feet !== undefined ||
+      patch.vision_feet !== undefined ||
+      patch.is_hidden !== undefined;
+    const sc = this.scenes().find((s) => s.id === existing.encounter_id);
+    const prevFog =
+      affectsVisibility && sc ? cloneExploredFog(sc.explored_fog) : undefined;
+
+    this.pushUndoEntry(existing.encounter_id, label, {
+      kind: 'token_patch',
+      tokenId: existing.id,
+      previousTokenPatch,
+      previousExploredFog: prevFog,
+    });
+
+    await this.patchToken(tokenId, patch);
+    if (affectsVisibility) {
+      this.syncExploredFogFromObservers();
+    }
   }
 
   async patchToken(
@@ -933,7 +2741,8 @@ export class VttStore {
     const err = await this.vttService.updateToken(
       tokenId,
       patch,
-      this.needsMigration()
+      this.needsMigration(),
+      existing
     );
     if (err) {
       this.notifications.error('Token Sync Error', err);
@@ -991,18 +2800,43 @@ export class VttStore {
     col: number,
     row: number,
     distanceFeet: number,
-    freeOverride = false
+    freeOverride = false,
+    intermediateHexes?: HexCoord[]
   ): Promise<void> {
     const tok = this.sceneTokens().find((t) => t.id === tokenId);
     const sc = this.activeScene();
     if (!tok || !sc || !this.canControlToken(tok)) return;
 
+    const geom = this.gridGeometry();
     const clamped = clampHexToBounds(
       { col, row },
-      sc.grid_width,
-      sc.grid_height
+      geom.gridWidth,
+      geom.gridHeight
     );
-    if (clamped.col === tok.x && clamped.row === tok.y) return;
+    const hasWaypoints = Boolean(
+      intermediateHexes && intermediateHexes.length > 0
+    );
+    if (
+      !hasWaypoints &&
+      clamped.col === tok.x &&
+      clamped.row === tok.y &&
+      (tok.world_x === null || tok.world_x === undefined) &&
+      !tok.npc_stats?.__unsnapped
+    ) {
+      return;
+    }
+
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    const previousTokenPatch: Partial<VttTokenModel> = {
+      x: tok.x,
+      y: tok.y,
+      q: tok.q,
+      r: tok.r,
+      world_x: tok.world_x,
+      world_y: tok.world_y,
+      current_ap: tok.current_ap,
+      npc_stats: { ...tok.npc_stats },
+    };
 
     const axial = offsetToAxial(clamped.col, clamped.row);
     const patch: Partial<VttTokenModel> = {
@@ -1010,6 +2844,11 @@ export class VttStore {
       y: clamped.row,
       q: axial.q,
       r: axial.r,
+      world_x: null,
+      world_y: null,
+      ...(tok.npc_stats?.__unsnapped
+        ? { npc_stats: { ...tok.npc_stats, __unsnapped: false } }
+        : {}),
     };
 
     if (
@@ -1025,7 +2864,175 @@ export class VttStore {
       patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
     }
 
+    const roundedFeet = Math.round(distanceFeet);
+    const moveLabel = hasWaypoints
+      ? `Chained Move ${tok.name} (${roundedFeet} ft)`
+      : roundedFeet > 0
+        ? `Move ${tok.name} (${roundedFeet} ft)`
+        : `Move ${tok.name}`;
+
+    this.pushUndoEntry(sc.id, moveLabel, {
+      kind: 'token_patch',
+      tokenId: tok.id,
+      previousTokenPatch,
+      previousExploredFog: prevFog,
+    });
+
     await this.patchToken(tokenId, patch);
+    if (hasWaypoints && intermediateHexes) {
+      this.syncExploredFogAlongTokenWaypoints(
+        tokenId,
+        intermediateHexes.map((h) => {
+          const ch = clampHexToBounds(h, geom.gridWidth, geom.gridHeight);
+          return {
+            col: ch.col,
+            row: ch.row,
+            world_x: null,
+            world_y: null,
+          };
+        })
+      );
+    } else {
+      this.syncExploredFogFromObservers();
+    }
+  }
+
+  async moveTokenToWorldPoint(
+    tokenId: string,
+    worldPt: VttPoint,
+    distanceFeet: number,
+    freeOverride = false,
+    worldBoundsOverride?: { width: number; height: number },
+    intermediateWorldPts?: VttPoint[]
+  ): Promise<void> {
+    const tok = this.sceneTokens().find((t) => t.id === tokenId);
+    const sc = this.activeScene();
+    if (!tok || !sc || !this.canControlToken(tok)) return;
+
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const bounds = worldBoundsOverride ?? {
+      width: layout.totalWidth,
+      height: layout.totalHeight,
+    };
+    const clampedWorld = clampWorldPointToBounds(worldPt, bounds);
+    const nearestHex = clampHexToBounds(
+      worldPointToHex(clampedWorld, geom),
+      geom.gridWidth,
+      geom.gridHeight
+    );
+    const hasWaypoints = Boolean(
+      intermediateWorldPts && intermediateWorldPts.length > 0
+    );
+
+    const unsnappedOnGrid = sc.grid_mode !== 'gridless';
+
+    if (
+      !hasWaypoints &&
+      tok.world_x === clampedWorld.x &&
+      tok.world_y === clampedWorld.y &&
+      tok.x === nearestHex.col &&
+      tok.y === nearestHex.row &&
+      Boolean(tok.npc_stats?.__unsnapped) === unsnappedOnGrid
+    ) {
+      return;
+    }
+
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    const previousTokenPatch: Partial<VttTokenModel> = {
+      x: tok.x,
+      y: tok.y,
+      q: tok.q,
+      r: tok.r,
+      world_x: tok.world_x,
+      world_y: tok.world_y,
+      current_ap: tok.current_ap,
+      npc_stats: { ...tok.npc_stats },
+    };
+
+    const axial = offsetToAxial(nearestHex.col, nearestHex.row);
+    const patch: Partial<VttTokenModel> = {
+      x: nearestHex.col,
+      y: nearestHex.row,
+      q: axial.q,
+      r: axial.r,
+      world_x: clampedWorld.x,
+      world_y: clampedWorld.y,
+      ...(unsnappedOnGrid
+        ? { npc_stats: { ...tok.npc_stats, __unsnapped: true } }
+        : {}),
+    };
+
+    if (
+      sc.combat_active &&
+      this.enforceApOnMove() &&
+      !freeOverride &&
+      distanceFeet > 0
+    ) {
+      const moveActionsNeeded = Math.max(
+        1,
+        Math.ceil(distanceFeet / Math.max(5, tok.move_feet))
+      );
+      patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+    }
+
+    const roundedFeet = Math.round(distanceFeet);
+    const moveLabel = hasWaypoints
+      ? `Chained Move ${tok.name} (${roundedFeet} ft)`
+      : roundedFeet > 0
+        ? `Move ${tok.name} (${roundedFeet} ft)`
+        : `Move ${tok.name}`;
+
+    this.pushUndoEntry(sc.id, moveLabel, {
+      kind: 'token_patch',
+      tokenId: tok.id,
+      previousTokenPatch,
+      previousExploredFog: prevFog,
+    });
+
+    await this.patchToken(tokenId, patch);
+    if (hasWaypoints && intermediateWorldPts) {
+      this.syncExploredFogAlongTokenWaypoints(
+        tokenId,
+        intermediateWorldPts.map((pt) => {
+          const cw = clampWorldPointToBounds(pt, bounds);
+          const sh = clampHexToBounds(
+            worldPointToHex(cw, geom),
+            geom.gridWidth,
+            geom.gridHeight
+          );
+          return {
+            col: sh.col,
+            row: sh.row,
+            world_x: cw.x,
+            world_y: cw.y,
+          };
+        })
+      );
+    } else {
+      this.syncExploredFogFromObservers();
+    }
+  }
+
+  async toggleTokenHidden(tokenId: string): Promise<void> {
+    if (!this.isGm()) return;
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok) return;
+    const sc = this.scenes().find((s) => s.id === tok.encounter_id);
+    const prevFog = sc ? cloneExploredFog(sc.explored_fog) : undefined;
+
+    this.pushUndoEntry(
+      tok.encounter_id,
+      `${tok.is_hidden ? 'Reveal' : 'Hide'} ${tok.name}`,
+      {
+        kind: 'token_patch',
+        tokenId: tok.id,
+        previousTokenPatch: { is_hidden: tok.is_hidden },
+        previousExploredFog: prevFog,
+      }
+    );
+
+    await this.patchToken(tok.id, { is_hidden: !tok.is_hidden });
     this.syncExploredFogFromObservers();
   }
 
@@ -1033,6 +3040,20 @@ export class VttStore {
     const tok = this.tokens().find((t) => t.id === tokenId);
     if (!tok || !this.canControlToken(tok)) return;
 
+    const snapshot: VttTokenModel = {
+      ...tok,
+      statuses: [...(tok.statuses ?? [])],
+      npc_stats: { ...(tok.npc_stats ?? {}) },
+    };
+    this.pushUndoEntry(tok.encounter_id, `Remove ${tok.name}`, {
+      kind: 'token_removed',
+      tokenSnapshot: snapshot,
+    });
+
+    await this.removeTokenInternal(tokenId);
+  }
+
+  private async removeTokenInternal(tokenId: string): Promise<void> {
     this.tokens.update((curr) => curr.filter((t) => t.id !== tokenId));
     if (this.selectedTokenId() === tokenId) {
       this.selectedTokenId.set(null);
@@ -1051,6 +3072,15 @@ export class VttStore {
     const next = curr.includes(status)
       ? curr.filter((s) => s !== status)
       : [...curr, status];
+    this.pushUndoEntry(
+      token.encounter_id,
+      `Toggle ${status} on ${token.name}`,
+      {
+        kind: 'token_patch',
+        tokenId: token.id,
+        previousTokenPatch: { statuses: [...curr] },
+      }
+    );
     await this.patchToken(token.id, { statuses: next });
   }
 
@@ -1070,6 +3100,14 @@ export class VttStore {
     }
 
     const nextSp = Math.min(token.max_sp, token.current_sp + recoveryAmount);
+    this.pushUndoEntry(token.encounter_id, `Stance Recovery (${token.name})`, {
+      kind: 'token_patch',
+      tokenId: token.id,
+      previousTokenPatch: {
+        current_ap: token.current_ap,
+        current_sp: token.current_sp,
+      },
+    });
     await this.patchToken(token.id, {
       current_ap: Math.max(0, token.current_ap - 1),
       current_sp: nextSp,
@@ -1084,10 +3122,23 @@ export class VttStore {
   async toggleTokenRaiseShield(token: VttTokenModel): Promise<void> {
     if (!this.canControlToken(token)) return;
     if (token.shield_raised) {
+      this.pushUndoEntry(token.encounter_id, `Lower Guard (${token.name})`, {
+        kind: 'token_patch',
+        tokenId: token.id,
+        previousTokenPatch: { shield_raised: true },
+      });
       await this.patchToken(token.id, { shield_raised: false });
       return;
     }
     if (token.current_ap < 1) return;
+    this.pushUndoEntry(token.encounter_id, `Raise Guard (${token.name})`, {
+      kind: 'token_patch',
+      tokenId: token.id,
+      previousTokenPatch: {
+        shield_raised: token.shield_raised,
+        current_ap: token.current_ap,
+      },
+    });
     await this.patchToken(token.id, {
       shield_raised: true,
       current_ap: Math.max(0, token.current_ap - 1),
@@ -1308,7 +3359,11 @@ export class VttStore {
           ...(ch.active_cooldowns ?? {}),
           [action.perkId]: action.cooldownRounds,
         };
-        const updated = { ...ch, current_ap: nextAp, active_cooldowns: nextCooldowns };
+        const updated = {
+          ...ch,
+          current_ap: nextAp,
+          active_cooldowns: nextCooldowns,
+        };
         this.allCharacters.update((list) =>
           list.map((c) => (c.id === ch.id ? updated : c))
         );
@@ -1328,9 +3383,11 @@ export class VttStore {
     const defender = this.sceneTokens().find((t) => t.id === defenderTokenId);
     if (!attacker || !defender || attacker.id === defender.id) return;
 
-    const distFeet = getHexDistanceFeet(
-      { col: attacker.x, row: attacker.y },
-      { col: defender.x, row: defender.y }
+    const distFeet = getTokenDistanceFeet(
+      attacker,
+      defender,
+      this.gridGeometry(),
+      sc.grid_mode
     );
 
     const manual = this.manualRollOverride();
@@ -1619,13 +3676,24 @@ export class VttStore {
       payload: input.payload ?? {},
     });
     if (entry) {
-      this.logs.update((curr) =>
-        curr.some((e) => e.id === entry.id) ? curr : [...curr, entry]
-      );
+      const alreadyPresent = this.logs().some((e) => e.id === entry.id);
+      if (!alreadyPresent) {
+        this.logs.update((curr) => [...curr, entry]);
+        this.triggerLogAudioCue(entry.kind);
+      }
+    }
+  }
+
+  private triggerLogAudioCue(kind: VttLogEntry['kind']): void {
+    if (kind === 'roll' || kind === 'clash' || kind === 'damage') {
+      this.settingsStore.playUiCue('dice');
+    } else if (kind === 'round') {
+      this.settingsStore.playUiCue('turn');
     }
   }
 
   async pingWorldPoint(pt: VttPoint): Promise<void> {
+    this.settingsStore.playUiCue('ping');
     await this.vttService.sendMapPing(this.realtimeChannel, {
       x: Math.round(pt.x),
       y: Math.round(pt.y),

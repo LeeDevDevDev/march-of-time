@@ -28,10 +28,6 @@ export class ThemeStore {
     return val === 'light' || val === 'dark' ? val : fallback;
   }
 
-  /**
-   * Only hydrates from the database profile if the user does not already have
-   * an explicit local theme preference saved in this browser.
-   */
   hydrateFromProfileIfUnset(sheetTheme?: ThemeMode | null, vttTheme?: ThemeMode | null): void {
     const hasLocalSheet = localStorage.getItem(SHEET_THEME_KEY);
     const hasLocalVtt = localStorage.getItem(VTT_THEME_KEY);
@@ -70,6 +66,14 @@ export class ThemeStore {
 
   toggleVttTheme(userId?: string | null): void {
     const next: ThemeMode = this.#state().vttTheme === 'dark' ? 'light' : 'dark';
+    this.setVttTheme(next, userId);
+  }
+
+  setVttTheme(next: ThemeMode, userId?: string | null): void {
+    if (this.#state().vttTheme === next) {
+      localStorage.setItem(VTT_THEME_KEY, next);
+      return;
+    }
     this.#state.update((s) => ({ ...s, vttTheme: next }));
     localStorage.setItem(VTT_THEME_KEY, next);
 

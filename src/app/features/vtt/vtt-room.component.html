@@ -3,14 +3,6 @@
     class="z-30 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-3 text-[#EBF5F3]"
   >
     <div class="flex min-w-0 items-center gap-2.5">
-      <a
-        routerLink="/dashboard"
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:border-[#C4491A] hover:text-white"
-      >
-        <span>&larr;</span>
-        <span class="hidden sm:inline">Games</span>
-      </a>
-
       <div class="min-w-0">
         <div class="flex items-center gap-2">
           <span class="truncate font-display text-sm font-bold text-white">
@@ -28,45 +20,61 @@
         </div>
       </div>
 
-      @if (vttStore.campaign()?.invite_code; as code) {
-        <button
-          type="button"
-          (click)="copyInviteCode()"
-          class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-md border border-[#243B37] bg-[#0D1615] px-2 py-1 font-mono-num text-[11px] font-bold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
-          title="Copy Campaign Invite Code"
-        >
-          {{ copiedInvite() ? 'Copied!' : 'Code: ' + code }}
-        </button>
-      }
-
-      @if (vttStore.scenes().length > 0) {
-        <div class="hidden lg:flex items-center gap-1.5 border-l border-[#243B37] pl-2.5">
-          <select
-            aria-label="Active Scene"
-            [ngModel]="vttStore.activeScene()?.id"
-            (ngModelChange)="onSceneSelectChange($event)"
-            [disabled]="!vttStore.isGm() && vttStore.scenes().length <= 1"
-            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+      <div class="hidden md:flex items-center gap-1.5 border-l border-[#243B37] pl-2.5">
+        @if (vttStore.activeScene(); as currentMap) {
+          <div
+            class="flex items-center gap-1.5 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs"
           >
-            @for (sc of vttStore.scenes(); track sc.id) {
-              <option [value]="sc.id">
-                {{ sc.name }}{{ sc.is_active_scene ? ' ★' : '' }}
-              </option>
+            <span
+              class="h-2.5 w-2.5 shrink-0 rounded-xs border border-white/20"
+              [style.backgroundColor]="currentMap.background_color || '#0E1917'"
+            ></span>
+            <span class="max-w-[180px] truncate font-semibold text-[#EBF5F3]">
+              {{ currentMap.name }}
+            </span>
+            <span class="rounded bg-[#192B28] px-1.5 py-0.5 font-mono-num text-[10px] text-[#8AB0AB]">
+              {{ currentMap.grid_mode === 'gridless' ? 'Gridless · ' + currentMap.grid_size_px + 'px' : currentMap.grid_size_px + 'px Grid' }}
+            </span>
+            @if (currentMap.is_active_scene) {
+              <span
+                class="rounded bg-[#2B1D0E] px-1.5 py-0.5 text-[10px] font-bold text-[#FBBF24]"
+                title="Players are currently on this scene"
+              >
+                &#9733; Party
+              </span>
             }
-          </select>
+          </div>
 
           @if (vttStore.isGm()) {
+            @if (!currentMap.is_active_scene) {
+              <button
+                type="button"
+                (click)="activateMapForParty(currentMap.id)"
+                class="rounded-lg border border-[#784321] bg-[#2B180C] px-2 py-1 text-[11px] font-bold text-[#FBBF24] hover:border-[#FBBF24]"
+                title="Move Players to this Scene"
+              >
+                Activate &#9733;
+              </button>
+            }
             <button
               type="button"
-              (click)="showNewSceneForm.update(v => !v)"
-              class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2 py-1 text-xs font-bold text-[#FB923C] hover:border-[#C4491A]"
-              title="Create New Battlemap Scene"
+              (click)="openEditMapModal(currentMap.id)"
+              class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2 py-1 text-xs font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+              title="Configure Current Scene (Background, Pixel Grid Size & Padding)"
             >
-              + Scene
+              Configure Scene
             </button>
           }
-        </div>
-      }
+        } @else if (vttStore.isGm()) {
+          <button
+            type="button"
+            (click)="openCreateMapModal(null)"
+            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-bold text-[#FB923C] hover:border-[#C4491A]"
+          >
+            + Create Scene
+          </button>
+        }
+      </div>
     </div>
 
     @if (vttStore.activeScene(); as sc) {
@@ -153,15 +161,6 @@
 
       <button
         type="button"
-        (click)="themeStore.toggleVttTheme(authStore.user()?.id)"
-        class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
-        title="Toggle VTT Sidebar Theme"
-      >
-        {{ themeStore.vttTheme() === 'dark' ? 'Dark UI' : 'Light UI' }}
-      </button>
-
-      <button
-        type="button"
         (click)="sidebarOpen.update(v => !v)"
         class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
       >
@@ -170,63 +169,16 @@
     </div>
   </header>
 
-  @if (showNewSceneForm() && vttStore.isGm()) {
-    <form
-      (ngSubmit)="submitNewScene()"
-      class="z-20 flex flex-wrap items-center gap-2.5 border-b border-[#C4491A] bg-[#142220] px-4 py-2 text-xs text-[#EBF5F3]"
-    >
-      <span class="font-display font-bold text-white">New Battlemap Scene:</span>
-      <input
-        type="text"
-        name="newSceneName"
-        required
-        [(ngModel)]="newSceneName"
-        placeholder="e.g., Sunken Reliquary"
-        class="rounded-md border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-xs text-white focus:border-[#C4491A] focus:outline-none"
-      />
-      <label class="flex items-center gap-1 font-mono-num text-[#8AB0AB]">
-        Cols
-        <input
-          type="number"
-          name="newSceneWidth"
-          min="6"
-          max="48"
-          [(ngModel)]="newSceneWidth"
-          class="w-14 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs text-white"
-        />
-      </label>
-      <label class="flex items-center gap-1 font-mono-num text-[#8AB0AB]">
-        Rows
-        <input
-          type="number"
-          name="newSceneHeight"
-          min="6"
-          max="48"
-          [(ngModel)]="newSceneHeight"
-          class="w-14 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs text-white"
-        />
-      </label>
-      <button type="submit" class="btn-copper rounded-md px-3 py-1 font-bold">
-        Create &amp; Switch
-      </button>
-      <button
-        type="button"
-        (click)="showNewSceneForm.set(false)"
-        class="text-[#8AB0AB] hover:text-white"
-      >
-        Cancel
-      </button>
-    </form>
-  }
-
   @if (vttStore.needsMigration() && !migrationBannerDismissed()) {
     <div
       class="z-20 flex items-center justify-between gap-3 border-b border-[#784321] bg-[#3D2314] px-4 py-1.5 text-xs text-[#FDBA74]"
     >
       <span>
         <strong>Schema Upgrade Available:</strong> Run
-        <code class="rounded bg-black/30 px-1.5 py-0.5 font-mono-num">supabase/migrations/0004_vtt.sql</code>
-        in your Supabase SQL Editor to persist multi-scene maps, walls, dynamic lights, and Fog of War.
+        <code class="rounded bg-black/30 px-1.5 py-0.5 font-mono-num">supabase/migrations/0004_vtt.sql</code>,
+        <code class="rounded bg-black/30 px-1.5 py-0.5 font-mono-num">supabase/migrations/0005_vtt_maps_and_folders.sql</code>, and
+        <code class="rounded bg-black/30 px-1.5 py-0.5 font-mono-num">supabase/migrations/0006_vtt_scene_padding.sql</code>
+        in your Supabase SQL Editor to persist folders, scenes, scene padding, gridless mode, walls, dynamic lights, and Fog of War.
       </span>
       <button
         type="button"
@@ -246,14 +198,22 @@
   } @else if (vttStore.error()) {
     <div class="flex flex-1 flex-col items-center justify-center gap-4 bg-[#09100F] p-6 text-center text-[#EBF5F3]">
       <p class="font-display text-lg font-bold text-[#FDA4AF]">{{ vttStore.error() }}</p>
-      <a routerLink="/dashboard" class="btn-copper rounded-lg px-4 py-2 text-xs font-bold no-underline">
-        Return to Dashboard
-      </a>
+      <button
+        type="button"
+        (click)="returnToMainMenu()"
+        class="btn-copper rounded-lg px-4 py-2 text-xs font-bold"
+      >
+        Return to Main Menu
+      </button>
     </div>
   } @else {
     <div class="relative flex flex-1 min-h-0 overflow-hidden">
       <div class="relative flex-1 min-w-0 h-full overflow-hidden">
-        <app-vtt-canvas #vttCanvas class="block h-full w-full" />
+        <app-vtt-canvas
+          #vttCanvas
+          (requestCreateMap)="openCreateMapModal(null)"
+          class="block h-full w-full"
+        />
 
         <div class="pointer-events-none absolute left-3 top-3 z-20 flex items-start gap-2">
           <div
@@ -262,50 +222,71 @@
             <button
               type="button"
               (click)="selectTool('select')"
-              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
               [class.bg-[#C4491A]]="vttStore.activeTool() === 'select'"
               [class.text-white]="vttStore.activeTool() === 'select'"
               [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'select'"
               [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'select'"
-              title="Select & Move Tokens"
+              [title]="'Select & Move Tokens (' + settingsStore.badges().tool_select + ') · Hold Ctrl + Drag to Chain Movement'"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-              </svg>
-              <span>Select</span>
+              <span class="flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+                </svg>
+                <span>Select</span>
+              </span>
+              @if (settingsStore.preferences().showHotkeyBadges) {
+                <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                  {{ settingsStore.badges().tool_select }}
+                </kbd>
+              }
             </button>
 
             <button
               type="button"
               (click)="selectTool('pan')"
-              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
               [class.bg-[#C4491A]]="vttStore.activeTool() === 'pan'"
               [class.text-white]="vttStore.activeTool() === 'pan'"
               [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'pan'"
               [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'pan'"
-              title="Pan Battlemap (or hold Space / Right-Drag)"
+              [title]="'Pan Battlemap (' + settingsStore.badges().tool_pan + ' · or hold Space / Right-Drag)'"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
-              </svg>
-              <span>Pan</span>
+              <span class="flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
+                </svg>
+                <span>Pan</span>
+              </span>
+              @if (settingsStore.preferences().showHotkeyBadges) {
+                <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                  {{ settingsStore.badges().tool_pan }}
+                </kbd>
+              }
             </button>
 
             <button
               type="button"
               (click)="selectTool('ruler')"
-              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
               [class.bg-[#C4491A]]="vttStore.activeTool() === 'ruler'"
               [class.text-white]="vttStore.activeTool() === 'ruler'"
               [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'ruler'"
               [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'ruler'"
-              title="Measure Distance in Feet"
+              [title]="'Measure Distance in Feet (' + settingsStore.badges().tool_ruler + ')'"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z" />
-                <path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2" />
-              </svg>
-              <span>Measure</span>
+              <span class="flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z" />
+                  <path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2" />
+                </svg>
+                <span>Measure</span>
+              </span>
+              @if (settingsStore.preferences().showHotkeyBadges) {
+                <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                  {{ settingsStore.badges().tool_ruler }}
+                </kbd>
+              }
             </button>
 
             @if (vttStore.isGm()) {
@@ -314,52 +295,96 @@
               <button
                 type="button"
                 (click)="selectTool('wall')"
-                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
                 [class.bg-[#C4491A]]="vttStore.activeTool() === 'wall'"
                 [class.text-white]="vttStore.activeTool() === 'wall'"
                 [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'wall'"
                 [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'wall'"
-                title="Draw Dynamic Vision Walls, Doors & Windows"
+                [title]="'Draw Dynamic Vision Walls, Doors & Windows (' + settingsStore.badges().tool_wall + ')'"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <path d="M3 9h18M3 15h18M9 3v6M15 9v6M9 15v6" />
-                </svg>
-                <span>Walls</span>
+                <span class="flex items-center gap-2">
+                  <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M3 15h18M9 3v6M15 9v6M9 15v6" />
+                  </svg>
+                  <span>Walls</span>
+                </span>
+                @if (settingsStore.preferences().showHotkeyBadges) {
+                  <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                    {{ settingsStore.badges().tool_wall }}
+                  </kbd>
+                }
               </button>
 
               <button
                 type="button"
                 (click)="selectTool('light')"
-                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
                 [class.bg-[#C4491A]]="vttStore.activeTool() === 'light'"
                 [class.text-white]="vttStore.activeTool() === 'light'"
                 [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'light'"
                 [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'light'"
-                title="Place Dynamic Torches & Light Sources"
+                [title]="'Place Dynamic Torches & Light Sources (' + settingsStore.badges().tool_light + ')'"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2c1.8 3.2 5 5.7 5 10a5 5 0 0 1-10 0c0-2.5 1.3-4.7 2.7-6.5.4 1.6 1.5 2.5 2.3 2.5.4-2 .2-4.2 0-6z" />
-                </svg>
-                <span>Lights</span>
+                <span class="flex items-center gap-2">
+                  <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2c1.8 3.2 5 5.7 5 10a5 5 0 0 1-10 0c0-2.5 1.3-4.7 2.7-6.5.4 1.6 1.5 2.5 2.3 2.5.4-2 .2-4.2 0-6z" />
+                  </svg>
+                  <span>Lights</span>
+                </span>
+                @if (settingsStore.preferences().showHotkeyBadges) {
+                  <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                    {{ settingsStore.badges().tool_light }}
+                  </kbd>
+                }
               </button>
 
               <button
                 type="button"
                 (click)="selectTool('fog')"
-                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
                 [class.bg-[#C4491A]]="vttStore.activeTool() === 'fog'"
                 [class.text-white]="vttStore.activeTool() === 'fog'"
                 [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'fog'"
                 [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'fog'"
-                title="Fog of War & Global Daylight Settings"
+                [title]="'Fog of War & Global Daylight Settings (' + settingsStore.badges().tool_fog + ')'"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                </svg>
-                <span>Fog</span>
+                <span class="flex items-center gap-2">
+                  <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+                  </svg>
+                  <span>Fog</span>
+                </span>
+                @if (settingsStore.preferences().showHotkeyBadges) {
+                  <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                    {{ settingsStore.badges().tool_fog }}
+                  </kbd>
+                }
               </button>
             }
+
+            <div class="my-0.5 border-t border-[#243B37]"></div>
+
+            <button
+              type="button"
+              (click)="vttStore.undoLastAction()"
+              [disabled]="!vttStore.canUndo()"
+              [title]="vttStore.nextUndoLabel() ? 'Undo: ' + vttStore.nextUndoLabel() + ' (' + settingsStore.badges().undo + ')' : 'Nothing to Undo (' + settingsStore.badges().undo + ')'"
+              class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#8AB0AB] transition-colors hover:bg-[#192B28] hover:text-white disabled:pointer-events-none disabled:opacity-40"
+            >
+              <span class="flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 7v6h6" />
+                  <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                </svg>
+                <span>Undo</span>
+              </span>
+              @if (settingsStore.preferences().showHotkeyBadges) {
+                <kbd class="rounded border border-white/15 bg-black/30 px-1 py-[1px] font-mono-num text-[9px] font-bold opacity-85">
+                  {{ settingsStore.badges().undo }}
+                </kbd>
+              }
+            </button>
           </div>
 
           @if (vttStore.isGm() && vttStore.activeTool() === 'wall') {
@@ -900,6 +925,23 @@
                   </span>
                 }
 
+                @if (vttStore.isGm()) {
+                  <button
+                    type="button"
+                    (click)="vttStore.toggleTokenHidden(tok.id)"
+                    class="rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
+                    [class.border-[#FBBF24]]="tok.is_hidden"
+                    [class.bg-[#2B1D0E]]="tok.is_hidden"
+                    [class.text-[#FDE68A]]="tok.is_hidden"
+                    [class.border-[#243B37]]="!tok.is_hidden"
+                    [class.bg-[#142220]]="!tok.is_hidden"
+                    [class.text-[#8AB0AB]]="!tok.is_hidden"
+                    title="Toggle Token Visibility to Players (Stage invisible tokens in the scene padding)"
+                  >
+                    {{ tok.is_hidden ? 'Invisible (Reveal)' : 'Hide Token' }}
+                  </button>
+                }
+
                 <button
                   type="button"
                   (click)="dockCollapsed.update(v => !v)"
@@ -1059,44 +1101,80 @@
 
       @if (sidebarOpen()) {
         <aside
-          class="z-20 flex h-full w-80 sm:w-88 shrink-0 flex-col border-l border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+          class="z-20 flex h-full w-84 sm:w-92 shrink-0 flex-col border-l border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
         >
-          <div class="grid shrink-0 border-b border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-xs font-bold"
-            [class.grid-cols-3]="vttStore.isGm()"
-            [class.grid-cols-2]="!vttStore.isGm()"
+          <div
+            class="grid shrink-0 gap-1 border-b border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-[11px] font-bold"
+            [class.grid-cols-4]="vttStore.isGm()"
+            [class.grid-cols-3]="!vttStore.isGm()"
           >
             <button
               type="button"
               (click)="sidebarTab.set('log')"
-              class="rounded-lg py-1.5 transition-colors"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'log'"
               [class.text-[var(--mot-text)]]="sidebarTab() === 'log'"
+              [class.shadow-xs]="sidebarTab() === 'log'"
               [class.text-[var(--mot-muted)]]="sidebarTab() !== 'log'"
             >
-              Log &amp; Dice
+              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>Log</span>
             </button>
+
             <button
               type="button"
               (click)="sidebarTab.set('roster')"
-              class="rounded-lg py-1.5 transition-colors"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'roster'"
               [class.text-[var(--mot-text)]]="sidebarTab() === 'roster'"
+              [class.shadow-xs]="sidebarTab() === 'roster'"
               [class.text-[var(--mot-muted)]]="sidebarTab() !== 'roster'"
             >
-              Roster ({{ visibleRosterTokens().length }})
+              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>Roster ({{ visibleRosterTokens().length }})</span>
             </button>
+
             @if (vttStore.isGm()) {
               <button
                 type="button"
-                (click)="sidebarTab.set('map')"
-                class="rounded-lg py-1.5 transition-colors"
-                [class.bg-[var(--mot-surface)]]="sidebarTab() === 'map'"
-                [class.text-[var(--mot-text)]]="sidebarTab() === 'map'"
-                [class.text-[var(--mot-muted)]]="sidebarTab() !== 'map'"
+                (click)="sidebarTab.set('maps')"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+                [class.bg-[var(--mot-surface)]]="sidebarTab() === 'maps'"
+                [class.text-[var(--mot-text)]]="sidebarTab() === 'maps'"
+                [class.shadow-xs]="sidebarTab() === 'maps'"
+                [class.text-[var(--mot-muted)]]="sidebarTab() !== 'maps'"
               >
-                Map &amp; Grid
+                <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                  <line x1="8" y1="2" x2="8" y2="18" />
+                  <line x1="16" y1="6" x2="16" y2="22" />
+                </svg>
+                <span>Scenes ({{ vttStore.scenes().length }})</span>
               </button>
             }
+
+            <button
+              type="button"
+              (click)="sidebarTab.set('settings')"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+              [class.bg-[var(--mot-surface)]]="sidebarTab() === 'settings'"
+              [class.text-[var(--mot-text)]]="sidebarTab() === 'settings'"
+              [class.shadow-xs]="sidebarTab() === 'settings'"
+              [class.text-[var(--mot-muted)]]="sidebarTab() !== 'settings'"
+            >
+              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span>Settings</span>
+            </button>
           </div>
 
           @if (sidebarTab() === 'log') {
@@ -1189,408 +1267,789 @@
           }
 
           @if (sidebarTab() === 'roster') {
-            <div class="flex-1 overflow-y-auto p-3 space-y-5 text-xs">
-              <section class="space-y-2">
-                <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                  Deploy Character
-                </h3>
-                @if (deployableCharacters().length === 0) {
-                  <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-[var(--mot-muted)]">
-                    No characters found yet.
-                    <a routerLink="/characters/new" class="font-bold text-[var(--mot-accent-text)] underline">
-                      Create a Character
-                    </a>
-                  </div>
-                } @else {
-                  <div class="space-y-1.5">
-                    @for (ch of deployableCharacters(); track ch.id) {
-                      @let deployed = isCharacterDeployed(ch.id);
-                      <div
-                        class="flex items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-2"
-                      >
-                        <div class="min-w-0">
-                          <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
-                          <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
-                            HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
-                          </div>
-                        </div>
+            @let rTree = rosterDirectoryTree();
 
-                        <div class="flex shrink-0 items-center gap-1.5">
-                          <a
-                            [routerLink]="['/characters', ch.id]"
-                            target="_blank"
-                            class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[11px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
-                          >
-                            Sheet
-                          </a>
-                          @if (deployed) {
-                            <button
-                              type="button"
-                              (click)="vttStore.selectedTokenId.set(deployed.id)"
-                              class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--mot-jade-text)]"
-                            >
-                              Select
-                            </button>
-                          } @else {
-                            <button
-                              type="button"
-                              (click)="vttStore.deployCharacterToken(ch)"
-                              class="btn-copper rounded-md px-2.5 py-1 text-[11px] font-bold"
-                            >
-                              Deploy
-                            </button>
-                          }
-                        </div>
+            <ng-template #rosterEntryTpl let-actorItem let-indent="indent">
+              @let deployedList = getDeployedTokensForRosterActor(actorItem);
+              @let primaryToken = deployedList.length > 0 ? deployedList[0] : null;
+              <div
+                [attr.draggable]="vttStore.canDeployRosterActor(actorItem) || vttStore.isGm() ? 'true' : 'false'"
+                (dragstart)="onRosterActorDragStart($event, actorItem)"
+                (dragend)="onDirectoryDragEnd()"
+                (dblclick)="vttStore.canManageRosterActor(actorItem) ? openEditRosterActorModal(actorItem.id) : null"
+                (contextmenu)="openRosterActorContextMenu($event, actorItem.id)"
+                [style.marginLeft.px]="indent || 0"
+                class="group flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2 transition-colors select-none active:cursor-grabbing"
+                [class.border-[#C4491A]]="primaryToken && vttStore.selectedTokenId() === primaryToken.id"
+                [class.bg-[var(--mot-surface-raised)]]="primaryToken && vttStore.selectedTokenId() === primaryToken.id"
+                [class.border-[var(--mot-border)]]="!primaryToken || vttStore.selectedTokenId() !== primaryToken.id"
+                [class.bg-[var(--mot-well)]]="!primaryToken || vttStore.selectedTokenId() !== primaryToken.id"
+                [class.hover:border-[#C4491A]]="!primaryToken || vttStore.selectedTokenId() !== primaryToken.id"
+                title="Drag onto battlemap to deploy (hold Shift for free RP placement) · Double-click or Right-click to configure"
+              >
+                <div class="flex min-w-0 items-center gap-2.5">
+                  <div
+                    class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 bg-[#0D1615]"
+                    [style.borderColor]="actorItem.color || '#38B29A'"
+                  >
+                    <app-compendium-icon
+                      [icon]="actorItem.icon"
+                      [color]="actorItem.color || '#38B29A'"
+                      sizeClass="h-4 w-4"
+                    />
+                    <span
+                      class="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#0D1615]"
+                      [class.bg-[#38B29A]]="actorItem.faction === 'ally'"
+                      [class.bg-[#F43F5E]]="actorItem.faction === 'enemy'"
+                      [class.bg-[#F59E0B]]="actorItem.faction === 'neutral'"
+                    ></span>
+                  </div>
+
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-bold text-[var(--mot-text)]">
+                        {{ actorItem.name }}
+                      </span>
+                      @if (!actorItem.is_unique && !actorItem.character_id) {
+                        <span class="shrink-0 rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[var(--mot-muted)]">
+                          NPC
+                        </span>
+                      }
+                      @if (deployedList.length > 0) {
+                        <span class="shrink-0 rounded bg-[var(--mot-jade-bg)] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[var(--mot-jade-text)]">
+                          {{ actorItem.is_unique || actorItem.character_id ? 'On Map' : 'x' + deployedList.length }}
+                        </span>
+                      }
+                    </div>
+                    <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                      HP {{ actorItem.max_hp }} &middot; SP {{ actorItem.max_sp }} &middot; DR {{ actorItem.armor_dr }} &middot; {{ actorItem.move_feet }} ft
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="flex shrink-0 items-center gap-1"
+                  (click)="$event.stopPropagation()"
+                >
+                  @if (actorItem.character_id) {
+                    <a
+                      [routerLink]="['/characters', actorItem.character_id]"
+                      target="_blank"
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
+                      title="Open Character Sheet"
+                    >
+                      Sheet
+                    </a>
+                  }
+                  @if ((actorItem.is_unique || actorItem.character_id) && primaryToken) {
+                    <button
+                      type="button"
+                      (click)="vttStore.selectedTokenId.set(primaryToken.id)"
+                      class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
+                    >
+                      Select
+                    </button>
+                  } @else if (vttStore.canDeployRosterActor(actorItem)) {
+                    <button
+                      type="button"
+                      (click)="vttStore.deployRosterActor(actorItem.id)"
+                      class="btn-copper rounded-md px-2 py-1 text-[10px] font-bold"
+                    >
+                      {{ actorItem.is_unique || actorItem.character_id ? 'Deploy' : '+ Spawn' }}
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    (click)="openRosterActorContextMenu($event, actorItem.id)"
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                    title="Actor Actions"
+                  >
+                    &#8943;
+                  </button>
+                </div>
+              </div>
+            </ng-template>
+
+            <ng-template #rosterFolderTpl let-node>
+              <div class="space-y-1.5" [style.paddingLeft.px]="node.depth * 12">
+                <div
+                  [attr.draggable]="vttStore.isGm() ? 'true' : 'false'"
+                  (dragstart)="onFolderDragStart($event, node.folder.id)"
+                  (dragend)="onDirectoryDragEnd()"
+                  (dragover)="onFolderDragOver($event, node.folder.id)"
+                  (drop)="onFolderDrop($event, node.folder.id)"
+                  (click)="toggleFolderCollapsed(node.folder.id)"
+                  (contextmenu)="openFolderContextMenu($event, node.folder.id)"
+                  class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 transition-colors select-none"
+                  [class.border-[#38B29A]]="dragOverTarget() === 'folder:' + node.folder.id"
+                  [class.bg-[var(--mot-jade-bg)]]="dragOverTarget() === 'folder:' + node.folder.id"
+                  [class.border-[var(--mot-border)]]="dragOverTarget() !== 'folder:' + node.folder.id"
+                  [class.bg-[var(--mot-surface-raised)]]="dragOverTarget() !== 'folder:' + node.folder.id"
+                  title="Click to expand/collapse · Drag actors here · Right-click for Folder options"
+                >
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="w-3 text-center text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ isFolderCollapsed(node.folder.id, 'characters') ? '&#9656;' : '&#9662;' }}
+                    </span>
+                    <svg
+                      class="h-4 w-4 shrink-0"
+                      [style.color]="node.folder.color || '#C4491A'"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                    </svg>
+                    <span class="truncate font-display text-xs font-bold text-[var(--mot-text)]">
+                      {{ node.folder.name }}
+                    </span>
+                    <span class="rounded bg-[var(--mot-well)] px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ node.totalItemCount }}
+                    </span>
+                  </div>
+
+                  @if (vttStore.isGm()) {
+                    <div
+                      class="flex shrink-0 items-center gap-1"
+                      (click)="$event.stopPropagation()"
+                    >
+                      <button
+                        type="button"
+                        (click)="openCreateRosterActorModal(node.folder.id)"
+                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--mot-accent-text)] hover:border-[#C4491A]"
+                        title="Create Actor in Folder"
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        (click)="openFolderContextMenu($event, node.folder.id)"
+                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                        title="Folder Actions"
+                      >
+                        &#8943;
+                      </button>
+                    </div>
+                  }
+                </div>
+
+                @if (!isFolderCollapsed(node.folder.id, 'characters')) {
+                  <div class="space-y-1.5">
+                    @for (sub of node.subfolders; track sub.folder.id) {
+                      <ng-container
+                        *ngTemplateOutlet="rosterFolderTpl; context: { $implicit: sub }"
+                      />
+                    }
+                    @for (item of node.items; track item.id) {
+                      <ng-container
+                        *ngTemplateOutlet="rosterEntryTpl; context: { $implicit: item, indent: 14 }"
+                      />
+                    }
+                    @if (node.subfolders.length === 0 && node.items.length === 0) {
+                      <div class="ml-4 rounded-lg border border-dashed border-[var(--mot-border)] px-2.5 py-1.5 text-[11px] text-[var(--mot-muted)]">
+                        Empty folder &mdash; drag actors here or click <strong>+</strong>.
                       </div>
                     }
                   </div>
                 }
-              </section>
+              </div>
+            </ng-template>
 
-              <section class="space-y-2">
-                <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                  On This Battlemap ({{ visibleRosterTokens().length }})
-                </h3>
-                @if (visibleRosterTokens().length === 0) {
-                  <p class="text-[var(--mot-muted)]">No tokens deployed on this scene yet.</p>
-                } @else {
-                  <div class="space-y-1.5">
-                    @for (tok of visibleRosterTokens(); track tok.id) {
-                      <div
-                        (click)="vttStore.selectedTokenId.set(tok.id)"
-                        class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors"
-                        [class.border-[#C4491A]]="vttStore.selectedTokenId() === tok.id"
-                        [class.bg-[var(--mot-surface-raised)]]="vttStore.selectedTokenId() === tok.id"
-                        [class.border-[var(--mot-border)]]="vttStore.selectedTokenId() !== tok.id"
-                        [class.bg-[var(--mot-well)]]="vttStore.selectedTokenId() !== tok.id"
-                      >
-                        <div class="min-w-0">
-                          <div class="flex items-center gap-1.5">
-                            <span
-                              class="h-2 w-2 shrink-0 rounded-full"
-                              [class.bg-[#38B29A]]="tok.faction === 'ally'"
-                              [class.bg-[#F43F5E]]="tok.faction === 'enemy'"
-                              [class.bg-[#F59E0B]]="tok.faction === 'neutral'"
-                            ></span>
-                            <span class="truncate font-bold text-[var(--mot-text)]">{{ tok.name }}</span>
-                            @if (tok.is_hidden) {
-                              <span class="rounded bg-black/25 px-1 text-[10px] font-bold text-[var(--mot-accent-text)]">
-                                Hidden
-                              </span>
-                            }
-                          </div>
-                          <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
-                            HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }} &middot; AP {{ tok.current_ap }}
-                          </div>
+            <div class="flex flex-1 min-h-0 flex-col text-xs">
+              <div class="shrink-0 space-y-2 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3">
+                <div
+                  class="grid gap-1.5"
+                  [class.grid-cols-3]="vttStore.isGm()"
+                  [class.grid-cols-2]="!vttStore.isGm()"
+                >
+                  <button
+                    type="button"
+                    (click)="openCreateRosterActorModal(null)"
+                    class="btn-copper rounded-lg px-2 py-1.5 text-xs font-bold"
+                  >
+                    + Create
+                  </button>
+                  <button
+                    type="button"
+                    (click)="openRosterImportModal(null)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    Import
+                  </button>
+                  @if (vttStore.isGm()) {
+                    <button
+                      type="button"
+                      (click)="openCreateFolderModal('characters', null)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      + Folder
+                    </button>
+                  }
+                </div>
+
+                <div class="relative">
+                  <input
+                    type="text"
+                    [ngModel]="rosterSearchQuery()"
+                    (ngModelChange)="rosterSearchQuery.set($event)"
+                    placeholder="Search roster or folders..."
+                    class="mot-input w-full px-2.5 py-1.5 pr-7 text-xs"
+                  />
+                  @if (rosterSearchQuery()) {
+                    <button
+                      type="button"
+                      (click)="rosterSearchQuery.set('')"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                      title="Clear Search"
+                    >
+                      &times;
+                    </button>
+                  }
+                </div>
+
+                <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
+                  <span>Drag onto map &middot; Hold <strong class="text-[var(--mot-text)]">Shift</strong> for free RP drop</span>
+                  <button
+                    type="button"
+                    (click)="openCollections()"
+                    class="shrink-0 font-bold text-[var(--mot-accent-text)] hover:underline"
+                  >
+                    Collections &rarr;
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="flex-1 overflow-y-auto p-3 space-y-4"
+                (dragover)="onRosterRootDragOver($event)"
+                (drop)="onRosterRootDrop($event)"
+              >
+                <section class="space-y-2">
+                  @if (rTree.folders.length === 0 && rTree.rootItems.length === 0) {
+                    @if (rosterSearchQuery().trim()) {
+                      <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 text-center text-[var(--mot-muted)]">
+                        No roster actors or folders match &ldquo;{{ rosterSearchQuery() }}&rdquo;.
+                      </div>
+                    } @else {
+                      <div class="rounded-2xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] p-4 text-center space-y-2.5">
+                        <div class="font-display text-sm font-bold text-[var(--mot-text)]">
+                          Campaign Roster Directory
                         </div>
+                        <p class="text-[11px] leading-relaxed text-[var(--mot-muted)]">
+                          Make characters or adversaries from scratch, import from your Character Vault or Collections, organize into folders, and drag directly onto the map.
+                        </p>
+                        <div class="flex flex-wrap items-center justify-center gap-2 pt-0.5">
+                          <button
+                            type="button"
+                            (click)="openCreateRosterActorModal(null)"
+                            class="btn-copper rounded-lg px-3 py-1.5 text-xs font-bold"
+                          >
+                            + Make From Scratch
+                          </button>
+                          <button
+                            type="button"
+                            (click)="openRosterImportModal(null)"
+                            class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                          >
+                            Import Existing
+                          </button>
+                        </div>
+                      </div>
+                    }
+                  } @else {
+                    @if (rTree.folders.length > 0) {
+                      <div class="space-y-1.5">
+                        @for (folderNode of rTree.folders; track folderNode.folder.id) {
+                          <ng-container
+                            *ngTemplateOutlet="rosterFolderTpl; context: { $implicit: folderNode }"
+                          />
+                        }
+                      </div>
+                    }
 
-                        @if (vttStore.canControlToken(tok)) {
+                    @if (rTree.rootItems.length > 0) {
+                      <div class="space-y-1.5">
+                        @if (rTree.folders.length > 0) {
+                          <div class="pt-1 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                            Unfiled Actors ({{ rTree.rootItems.length }})
+                          </div>
+                        }
+                        @for (rootActor of rTree.rootItems; track rootActor.id) {
+                          <ng-container
+                            *ngTemplateOutlet="rosterEntryTpl; context: { $implicit: rootActor, indent: 0 }"
+                          />
+                        }
+                      </div>
+                    }
+
+                    @if (vttStore.isGm() && (draggingRosterActorId() || draggingFolderId())) {
+                      <div
+                        class="rounded-xl border border-dashed px-3 py-2 text-center text-[11px] font-semibold transition-colors"
+                        [class.border-[#38B29A]]="dragOverTarget() === 'roster-root'"
+                        [class.bg-[var(--mot-jade-bg)]]="dragOverTarget() === 'roster-root'"
+                        [class.text-[var(--mot-jade-text)]]="dragOverTarget() === 'roster-root'"
+                        [class.border-[var(--mot-border)]]="dragOverTarget() !== 'roster-root'"
+                        [class.text-[var(--mot-muted)]]="dragOverTarget() !== 'roster-root'"
+                      >
+                        Drop here to move to Root Directory
+                      </div>
+                    }
+                  }
+                </section>
+
+                @if (!rosterSearchQuery().trim() && unimportedDeployableCharacters().length > 0) {
+                  <section class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+                    <div class="flex items-center justify-between">
+                      <h3 class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                        Available Characters ({{ unimportedDeployableCharacters().length }})
+                      </h3>
+                      <a
+                        routerLink="/characters/new"
+                        target="_blank"
+                        class="text-[10px] font-bold text-[var(--mot-accent-text)] hover:underline"
+                      >
+                        + Character Sheet
+                      </a>
+                    </div>
+                    <div class="space-y-1.5">
+                      @for (ch of unimportedDeployableCharacters(); track ch.id) {
+                        @let deployed = isCharacterDeployed(ch.id);
+                        <div
+                          draggable="true"
+                          (dragstart)="onCharacterDragStart($event, ch)"
+                          (dragend)="onDirectoryDragEnd()"
+                          class="flex cursor-grab items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-2 select-none active:cursor-grabbing hover:border-[#C4491A]"
+                          title="Drag onto battlemap to deploy, or click + Roster to organize in folders"
+                        >
+                          <div class="min-w-0">
+                            <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
+                            <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                              HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                            </div>
+                          </div>
+
                           <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
-                            @if (vttStore.isGm()) {
-                              <button
-                                type="button"
-                                (click)="vttStore.patchToken(tok.id, { is_hidden: !tok.is_hidden })"
-                                class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
-                                title="Toggle Hidden from Players"
-                              >
-                                {{ tok.is_hidden ? 'Reveal' : 'Hide' }}
-                              </button>
-                            }
                             <button
                               type="button"
-                              (click)="vttStore.removeToken(tok.id)"
-                              class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
-                              title="Remove Token from Scene"
+                              (click)="importCharacterIntoRoster(ch, false)"
+                              class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                              title="Add to Campaign Roster Directory"
                             >
-                              &times;
+                              + Roster
                             </button>
+                            @if (deployed) {
+                              <button
+                                type="button"
+                                (click)="vttStore.selectedTokenId.set(deployed.id)"
+                                class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
+                              >
+                                Select
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                (click)="vttStore.deployCharacterToken(ch)"
+                                class="btn-copper rounded-md px-2 py-1 text-[10px] font-bold"
+                              >
+                                Deploy
+                              </button>
+                            }
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  </section>
+                }
+
+                <section class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+                  <button
+                    type="button"
+                    (click)="showActiveSceneTokens.update(v => !v)"
+                    class="flex w-full items-center justify-between font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                  >
+                    <span>On This Scene ({{ visibleRosterTokens().length }})</span>
+                    <span>{{ showActiveSceneTokens() ? '&#9662;' : '&#9656;' }}</span>
+                  </button>
+
+                  @if (showActiveSceneTokens()) {
+                    @if (visibleRosterTokens().length === 0) {
+                      <p class="text-[11px] text-[var(--mot-muted)]">
+                        No tokens deployed on this scene yet. Drag any actor onto the map to place them.
+                      </p>
+                    } @else {
+                      <div class="space-y-1.5">
+                        @for (tok of visibleRosterTokens(); track tok.id) {
+                          <div
+                            (click)="vttStore.selectedTokenId.set(tok.id)"
+                            class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors"
+                            [class.border-[#C4491A]]="vttStore.selectedTokenId() === tok.id"
+                            [class.bg-[var(--mot-surface-raised)]]="vttStore.selectedTokenId() === tok.id"
+                            [class.border-[var(--mot-border)]]="vttStore.selectedTokenId() !== tok.id"
+                            [class.bg-[var(--mot-well)]]="vttStore.selectedTokenId() !== tok.id"
+                          >
+                            <div class="min-w-0">
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <span
+                                  class="h-2 w-2 shrink-0 rounded-full"
+                                  [class.bg-[#38B29A]]="tok.faction === 'ally'"
+                                  [class.bg-[#F43F5E]]="tok.faction === 'enemy'"
+                                  [class.bg-[#F59E0B]]="tok.faction === 'neutral'"
+                                ></span>
+                                <span class="truncate font-bold text-[var(--mot-text)]">{{ tok.name }}</span>
+                                @if (tok.npc_stats?.__unsnapped) {
+                                  <span class="rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold text-[var(--mot-muted)]">
+                                    Free RP
+                                  </span>
+                                }
+                                @if (tok.is_hidden) {
+                                  <span class="rounded bg-black/25 px-1 text-[10px] font-bold text-[var(--mot-accent-text)]">
+                                    Hidden
+                                  </span>
+                                }
+                              </div>
+                              <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                                HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }} &middot; AP {{ tok.current_ap }}
+                              </div>
+                            </div>
+
+                            <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
+                              @if (tok.character_id) {
+                                <a
+                                  [routerLink]="['/characters', tok.character_id]"
+                                  target="_blank"
+                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
+                                >
+                                  Sheet
+                                </a>
+                              }
+                              @if (vttStore.canControlToken(tok)) {
+                                @if (vttStore.isGm()) {
+                                  <button
+                                    type="button"
+                                    (click)="vttStore.toggleTokenHidden(tok.id)"
+                                    class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                                    title="Toggle Hidden from Players"
+                                  >
+                                    {{ tok.is_hidden ? 'Reveal' : 'Hide' }}
+                                  </button>
+                                }
+                                <button
+                                  type="button"
+                                  (click)="vttStore.removeToken(tok.id)"
+                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                                  title="Remove Token from Scene"
+                                >
+                                  &times;
+                                </button>
+                              }
+                            </div>
                           </div>
                         }
                       </div>
                     }
-                  </div>
-                }
-              </section>
-
-              @if (vttStore.isGm()) {
-                <section class="space-y-2 border-t border-[var(--mot-border)] pt-4">
-                  <div class="flex items-center justify-between">
-                    <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                      GM Adversary Spawner
-                    </h3>
-                    <button
-                      type="button"
-                      (click)="showCustomNpcForm.update(v => !v)"
-                      class="text-[11px] font-bold text-[var(--mot-accent-text)] hover:underline"
-                    >
-                      {{ showCustomNpcForm() ? 'Close Custom' : '+ Custom Token' }}
-                    </button>
-                  </div>
-
-                  @if (showCustomNpcForm()) {
-                    <form
-                      (ngSubmit)="submitCustomNpc()"
-                      class="space-y-2 rounded-xl border border-[#C4491A] bg-[var(--mot-well)] p-2.5"
-                    >
-                      <div class="grid grid-cols-3 gap-1.5">
-                        <input
-                          type="text"
-                          name="customNpcName"
-                          required
-                          [(ngModel)]="customNpcName"
-                          placeholder="Name"
-                          class="mot-input col-span-2 px-2 py-1 text-xs font-semibold"
-                        />
-                        <select
-                          name="customNpcFaction"
-                          [(ngModel)]="customNpcFaction"
-                          class="mot-input px-1.5 py-1 text-xs font-semibold"
-                        >
-                          <option value="enemy">Enemy</option>
-                          <option value="neutral">Neutral</option>
-                          <option value="ally">Ally</option>
-                        </select>
-                      </div>
-
-                      <div class="grid grid-cols-4 gap-1.5 font-mono-num text-[10px]">
-                        <label>
-                          HP
-                          <input type="number" name="cHp" [(ngModel)]="customNpcHp" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          SP
-                          <input type="number" name="cSp" [(ngModel)]="customNpcSp" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          DR
-                          <input type="number" name="cDr" [(ngModel)]="customNpcDr" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          Move ft
-                          <input type="number" step="5" name="cMove" [(ngModel)]="customNpcMoveFeet" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                      </div>
-
-                      <div class="grid grid-cols-4 gap-1.5 font-mono-num text-[10px]">
-                        <label>
-                          Atk +
-                          <input type="number" name="cAtk" [(ngModel)]="customNpcAttackMod" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          DMG
-                          <input type="number" name="cDmg" [(ngModel)]="customNpcDamage" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          Reach ft
-                          <input type="number" step="5" name="cReach" [(ngModel)]="customNpcReachFeet" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
-                        </label>
-                        <label>
-                          Tag
-                          <select name="cTag" [(ngModel)]="customNpcTag" class="mot-input mt-0.5 px-1 py-1 text-[11px]">
-                            <option value="None">None</option>
-                            <option value="Crushing">Crushing</option>
-                            <option value="Sweeping">Sweeping</option>
-                            <option value="Piercing">Piercing</option>
-                          </select>
-                        </label>
-                      </div>
-
-                      <button type="submit" class="btn-copper w-full rounded-lg py-1.5 text-xs font-bold">
-                        Spawn Custom Combatant
-                      </button>
-                    </form>
                   }
-
-                  <div class="space-y-1.5">
-                    @for (npc of npcPresets; track npc.id) {
-                      <div
-                        class="flex items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-2"
-                      >
-                        <div class="min-w-0">
-                          <div class="flex items-center gap-1.5">
-                            <span class="truncate font-bold text-[var(--mot-text)]">{{ npc.name }}</span>
-                            @if (npc.npc_stats.combat_tag && npc.npc_stats.combat_tag !== 'None') {
-                              <span
-                                class="rounded border px-1 py-[1px] text-[9px] font-bold"
-                                [class]="tagBadgeClass(npc.npc_stats.combat_tag)"
-                              >
-                                {{ npc.npc_stats.combat_tag }}
-                              </span>
-                            }
-                          </div>
-                          <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
-                            HP {{ npc.max_hp }} &middot; SP {{ npc.max_sp }} &middot; DR {{ npc.armor_dr }} &middot; Reach {{ npc.npc_stats.reach_feet }} ft
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          (click)="vttStore.spawnNpcPreset(npc)"
-                          class="shrink-0 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-[11px] font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
-                        >
-                          + Spawn
-                        </button>
-                      </div>
-                    }
-                  </div>
                 </section>
-              }
+              </div>
             </div>
           }
 
-          @if (sidebarTab() === 'map' && vttStore.isGm() && vttStore.activeScene(); as sc) {
-            <div class="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
-              <section class="space-y-2">
-                <label class="block font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                  Scene Name
-                </label>
-                <input
-                  type="text"
-                  [ngModel]="sc.name"
-                  (change)="vttStore.patchScene(sc.id, { name: $any($event.target).value })"
-                  class="mot-input px-2.5 py-1.5 text-xs font-bold"
-                />
-              </section>
+          @if (sidebarTab() === 'maps' && vttStore.isGm()) {
+            @let tree = mapDirectoryTree();
 
-              <section class="space-y-2 border-t border-[var(--mot-border)] pt-3">
-                <div class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                  Background Battlemap Image
+            <ng-template #mapEntryTpl let-mapItem let-indent="indent">
+              <div
+                draggable="true"
+                (dragstart)="onMapDragStart($event, mapItem.id)"
+                (dragend)="onDirectoryDragEnd()"
+                (click)="viewMap(mapItem.id)"
+                (dblclick)="openEditMapModal(mapItem.id)"
+                (contextmenu)="openMapContextMenu($event, mapItem.id)"
+                [style.marginLeft.px]="indent || 0"
+                class="group flex cursor-pointer items-center justify-between gap-2 rounded-xl border p-2 transition-colors select-none"
+                [class.border-[#C4491A]]="vttStore.activeScene()?.id === mapItem.id"
+                [class.bg-[var(--mot-surface-raised)]]="vttStore.activeScene()?.id === mapItem.id"
+                [class.border-[var(--mot-border)]]="vttStore.activeScene()?.id !== mapItem.id"
+                [class.bg-[var(--mot-well)]]="vttStore.activeScene()?.id !== mapItem.id"
+                [class.hover:border-[#C4491A]]="vttStore.activeScene()?.id !== mapItem.id"
+                title="Click to view scene · Double-click or Right-click to Configure, Activate, Duplicate, or Delete"
+              >
+                <div class="flex min-w-0 items-center gap-2.5">
+                  <div
+                    class="relative flex h-9 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-black/30"
+                    [style.backgroundColor]="mapItem.background_color || '#0E1917'"
+                  >
+                    @if (mapItem.map_image_url) {
+                      <img
+                        [src]="mapItem.map_image_url"
+                        alt=""
+                        class="h-full w-full object-cover"
+                      />
+                    } @else if (mapItem.grid_mode === 'gridless') {
+                      <span class="font-mono-num text-[9px] font-bold uppercase tracking-wider text-white/55">
+                        Free
+                      </span>
+                    } @else {
+                      <svg
+                        class="h-4 w-4 text-white/45"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <line x1="12" y1="3" x2="12" y2="21" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                      </svg>
+                    }
+                  </div>
+
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-bold text-[var(--mot-text)]">
+                        {{ mapItem.name }}
+                      </span>
+                      @if (mapItem.is_active_scene) {
+                        <span
+                          class="shrink-0 rounded bg-[#2B1D0E] px-1.5 py-[1px] text-[9px] font-bold text-[#FBBF24]"
+                          title="Active Scene for Players"
+                        >
+                          &#9733; Party
+                        </span>
+                      } @else if (vttStore.activeScene()?.id === mapItem.id) {
+                        <span
+                          class="shrink-0 rounded bg-[var(--mot-jade-bg)] px-1.5 py-[1px] text-[9px] font-bold text-[var(--mot-jade-text)]"
+                        >
+                          Viewing
+                        </span>
+                      }
+                    </div>
+                    <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                      @if (mapItem.grid_mode === 'gridless') {
+                        Gridless ({{ mapItem.grid_size_px }}px / 5 ft)
+                      } @else {
+                        {{ mapItem.grid_size_px }}px Grid
+                      }
+                      &middot; Pad {{ mapItem.padding }}
+                      &middot; {{ mapItem.map_image_url ? 'Image' : 'Blank' }}
+                    </div>
+                  </div>
                 </div>
 
-                <label
-                  class="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] px-3 py-3 text-center font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                <div
+                  class="flex shrink-0 items-center gap-1"
+                  (click)="$event.stopPropagation()"
                 >
-                  <span>Upload Map Image (PNG / JPG / WebP)</span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                    (change)="onMapFileSelected($event)"
-                    class="hidden"
-                  />
-                </label>
-
-                <div class="flex items-center gap-1.5">
-                  <input
-                    type="url"
-                    [(ngModel)]="mapUrlInput"
-                    placeholder="Or paste external map URL..."
-                    class="mot-input px-2.5 py-1.5 text-xs"
-                  />
                   <button
                     type="button"
-                    (click)="applyExternalMapUrl()"
-                    class="btn-copper shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                    (click)="openEditMapModal(mapItem.id)"
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                    title="Configure Scene (Background, Grid Size & Padding)"
                   >
-                    Apply
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    (click)="openMapContextMenu($event, mapItem.id)"
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                    title="More Scene Actions"
+                  >
+                    &#8943;
+                  </button>
+                </div>
+              </div>
+            </ng-template>
+
+            <ng-template #mapFolderTpl let-node>
+              <div class="space-y-1.5" [style.paddingLeft.px]="node.depth * 12">
+                <div
+                  draggable="true"
+                  (dragstart)="onFolderDragStart($event, node.folder.id)"
+                  (dragend)="onDirectoryDragEnd()"
+                  (dragover)="onFolderDragOver($event, node.folder.id)"
+                  (drop)="onFolderDrop($event, node.folder.id)"
+                  (click)="toggleFolderCollapsed(node.folder.id)"
+                  (contextmenu)="openFolderContextMenu($event, node.folder.id)"
+                  class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 transition-colors select-none"
+                  [class.border-[#38B29A]]="dragOverTarget() === 'folder:' + node.folder.id"
+                  [class.bg-[var(--mot-jade-bg)]]="dragOverTarget() === 'folder:' + node.folder.id"
+                  [class.border-[var(--mot-border)]]="dragOverTarget() !== 'folder:' + node.folder.id"
+                  [class.bg-[var(--mot-surface-raised)]]="dragOverTarget() !== 'folder:' + node.folder.id"
+                  title="Click to expand/collapse · Drag scenes here · Right-click for Folder options"
+                >
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="w-3 text-center text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ isFolderCollapsed(node.folder.id) ? '&#9656;' : '&#9662;' }}
+                    </span>
+                    <svg
+                      class="h-4 w-4 shrink-0"
+                      [style.color]="node.folder.color || '#C4491A'"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                    </svg>
+                    <span class="truncate font-display text-xs font-bold text-[var(--mot-text)]">
+                      {{ node.folder.name }}
+                    </span>
+                    <span class="rounded bg-[var(--mot-well)] px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ node.totalItemCount }}
+                    </span>
+                  </div>
+
+                  <div
+                    class="flex shrink-0 items-center gap-1"
+                    (click)="$event.stopPropagation()"
+                  >
+                    <button
+                      type="button"
+                      (click)="openCreateMapModal(node.folder.id)"
+                      class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--mot-accent-text)] hover:border-[#C4491A]"
+                      title="Create Blank Scene in Folder"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      (click)="openFolderContextMenu($event, node.folder.id)"
+                      class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                      title="Folder Actions"
+                    >
+                      &#8943;
+                    </button>
+                  </div>
+                </div>
+
+                @if (!isFolderCollapsed(node.folder.id)) {
+                  <div class="space-y-1.5">
+                    @for (sub of node.subfolders; track sub.folder.id) {
+                      <ng-container
+                        *ngTemplateOutlet="mapFolderTpl; context: { $implicit: sub }"
+                      />
+                    }
+                    @for (item of node.items; track item.id) {
+                      <ng-container
+                        *ngTemplateOutlet="mapEntryTpl; context: { $implicit: item, indent: 14 }"
+                      />
+                    }
+                    @if (node.subfolders.length === 0 && node.items.length === 0) {
+                      <div class="ml-4 rounded-lg border border-dashed border-[var(--mot-border)] px-2.5 py-1.5 text-[11px] text-[var(--mot-muted)]">
+                        Empty folder &mdash; drag scenes here or click <strong>+</strong>.
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            </ng-template>
+
+            <div class="flex flex-1 min-h-0 flex-col text-xs">
+              <div class="shrink-0 space-y-2 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3">
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    (click)="openCreateMapModal(null)"
+                    class="btn-copper rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                  >
+                    + Create Scene
+                  </button>
+                  <button
+                    type="button"
+                    (click)="openCreateFolderModal('maps', null)"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    + New Folder
                   </button>
                 </div>
 
-                @if (sc.map_image_url) {
-                  <div class="flex items-center gap-1.5">
+                <div class="relative">
+                  <input
+                    type="text"
+                    [ngModel]="mapSearchQuery()"
+                    (ngModelChange)="mapSearchQuery.set($event)"
+                    placeholder="Search scenes or folders..."
+                    class="mot-input w-full px-2.5 py-1.5 pr-7 text-xs"
+                  />
+                  @if (mapSearchQuery()) {
                     <button
                       type="button"
-                      (click)="matchGridToMapImage()"
-                      class="flex-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] py-1.5 text-[11px] font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                      (click)="mapSearchQuery.set('')"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                      title="Clear Search"
                     >
-                      Match Grid to Image Size
+                      &times;
                     </button>
-                    <button
-                      type="button"
-                      (click)="clearSceneMapImage()"
-                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                  }
+                </div>
+              </div>
+
+              <div
+                class="flex-1 overflow-y-auto p-3 space-y-2.5"
+                (dragover)="onRootDragOver($event)"
+                (drop)="onRootDrop($event)"
+              >
+                @if (tree.folders.length === 0 && tree.rootItems.length === 0) {
+                  @if (mapSearchQuery().trim()) {
+                    <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 text-center text-[var(--mot-muted)]">
+                      No scenes or folders match &ldquo;{{ mapSearchQuery() }}&rdquo;.
+                    </div>
+                  } @else {
+                    <div class="rounded-2xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] p-4 text-center space-y-2.5">
+                      <div class="font-display text-sm font-bold text-[var(--mot-text)]">
+                        No Scenes Yet
+                      </div>
+                      <p class="text-[11px] leading-relaxed text-[var(--mot-muted)]">
+                        Create blank scenes ({{ defaultSceneWidthPx }}&times;{{ defaultSceneHeightPx }} px, {{ defaultGridSizePx }} px Grid, {{ defaultScenePadding }} Padding), organize them into nested folders, and upload any battlemap image with full auto-calculated grid coverage.
+                      </p>
+                      <button
+                        type="button"
+                        (click)="openCreateMapModal(null)"
+                        class="btn-copper rounded-lg px-3.5 py-1.5 text-xs font-bold"
+                      >
+                        + Create Blank Scene
+                      </button>
+                    </div>
+                  }
+                } @else {
+                  @if (tree.folders.length > 0) {
+                    <div class="space-y-1.5">
+                      @for (folderNode of tree.folders; track folderNode.folder.id) {
+                        <ng-container
+                          *ngTemplateOutlet="mapFolderTpl; context: { $implicit: folderNode }"
+                        />
+                      }
+                    </div>
+                  }
+
+                  @if (tree.rootItems.length > 0) {
+                    <div class="space-y-1.5">
+                      @if (tree.folders.length > 0) {
+                        <div class="pt-1 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                          Unfiled Scenes ({{ tree.rootItems.length }})
+                        </div>
+                      }
+                      @for (rootMap of tree.rootItems; track rootMap.id) {
+                        <ng-container
+                          *ngTemplateOutlet="mapEntryTpl; context: { $implicit: rootMap, indent: 0 }"
+                        />
+                      }
+                    </div>
+                  }
+
+                  @if (draggingMapId() || draggingFolderId()) {
+                    <div
+                      class="rounded-xl border border-dashed px-3 py-2 text-center text-[11px] font-semibold transition-colors"
+                      [class.border-[#38B29A]]="dragOverTarget() === 'root'"
+                      [class.bg-[var(--mot-jade-bg)]]="dragOverTarget() === 'root'"
+                      [class.text-[var(--mot-jade-text)]]="dragOverTarget() === 'root'"
+                      [class.border-[var(--mot-border)]]="dragOverTarget() !== 'root'"
+                      [class.text-[var(--mot-muted)]]="dragOverTarget() !== 'root'"
                     >
-                      Clear
-                    </button>
-                  </div>
+                      Drop here to move to Root Directory
+                    </div>
+                  }
                 }
-              </section>
+              </div>
 
-              <section class="space-y-2.5 border-t border-[var(--mot-border)] pt-3">
-                <div class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                  Hex Battlegrid Alignment (5 ft / space)
-                </div>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="block font-semibold">
-                    Columns
-                    <input
-                      type="number"
-                      min="6"
-                      max="60"
-                      [ngModel]="sc.grid_width"
-                      (ngModelChange)="updateSceneNumberField('grid_width', $event)"
-                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
-                    />
-                  </label>
-                  <label class="block font-semibold">
-                    Rows
-                    <input
-                      type="number"
-                      min="6"
-                      max="60"
-                      [ngModel]="sc.grid_height"
-                      (ngModelChange)="updateSceneNumberField('grid_height', $event)"
-                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
-                    />
-                  </label>
-                </div>
-
-                <label class="block font-semibold">
-                  <div class="flex justify-between">
-                    <span>Hex Scale (px)</span>
-                    <span class="font-mono-num text-[var(--mot-muted)]">{{ sc.grid_size_px }} px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="36"
-                    max="140"
-                    step="2"
-                    [ngModel]="sc.grid_size_px"
-                    (ngModelChange)="updateSceneNumberField('grid_size_px', $event)"
-                    class="mt-1 w-full accent-[#C4491A]"
-                  />
-                </label>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="block font-semibold">
-                    Offset X (px)
-                    <input
-                      type="number"
-                      step="2"
-                      [ngModel]="sc.grid_offset_x"
-                      (ngModelChange)="updateSceneNumberField('grid_offset_x', $event)"
-                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
-                    />
-                  </label>
-                  <label class="block font-semibold">
-                    Offset Y (px)
-                    <input
-                      type="number"
-                      step="2"
-                      [ngModel]="sc.grid_offset_y"
-                      (ngModelChange)="updateSceneNumberField('grid_offset_y', $event)"
-                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
-                    />
-                  </label>
-                </div>
-
-                <label class="block font-semibold">
-                  <div class="flex justify-between">
-                    <span>Grid Line Opacity</span>
-                    <span class="font-mono-num text-[var(--mot-muted)]">{{ sc.grid_opacity }}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="0.9"
-                    step="0.05"
-                    [ngModel]="sc.grid_opacity"
-                    (ngModelChange)="updateSceneNumberField('grid_opacity', $event)"
-                    class="mt-1 w-full accent-[#C4491A]"
-                  />
-                </label>
-
-                <label class="flex items-center gap-2 pt-1 font-semibold">
+              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-3 py-2.5">
+                <label class="flex items-center gap-2 font-semibold text-[var(--mot-text)]">
                   <input
                     type="checkbox"
                     [ngModel]="vttStore.enforceApOnMove()"
@@ -1599,11 +2058,2201 @@
                   />
                   <span>Auto-deduct AP when dragging tokens in Combat</span>
                 </label>
-              </section>
+              </div>
+            </div>
+          }
+
+          @if (sidebarTab() === 'settings') {
+            <div class="flex flex-1 min-h-0 flex-col justify-between text-xs">
+              <div class="overflow-y-auto p-3 space-y-4">
+                <div class="space-y-2">
+                  <div class="px-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                    Configuration
+                  </div>
+
+                  <button
+                    type="button"
+                    (click)="openSettingsModal('general')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-accent-text)]">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <line x1="4" y1="21" x2="4" y2="14" />
+                          <line x1="4" y1="10" x2="4" y2="3" />
+                          <line x1="12" y1="21" x2="12" y2="12" />
+                          <line x1="12" y1="8" x2="12" y2="3" />
+                          <line x1="20" y1="21" x2="20" y2="16" />
+                          <line x1="20" y1="12" x2="20" y2="3" />
+                          <line x1="1" y1="14" x2="7" y2="14" />
+                          <line x1="9" y1="8" x2="15" y2="8" />
+                          <line x1="17" y1="16" x2="23" y2="16" />
+                        </svg>
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          General Settings
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Audio, sound cues, badges &amp; table rules
+                        </div>
+                      </div>
+                    </div>
+                    <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ settingsStore.preferences().muteAudio ? 'Muted' : settingsStore.preferences().masterVolume + '%' }}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="openSettingsModal('controls')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-accent-text)]">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <rect x="2" y="4" width="20" height="16" rx="2" />
+                          <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" />
+                        </svg>
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Controls &amp; Hotkeys
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Customize keyboard shortcuts &amp; movement keys
+                        </div>
+                      </div>
+                    </div>
+                    <span class="shrink-0 font-bold text-[var(--mot-muted)]">&rsaquo;</span>
+                  </button>
+
+                  @if (vttStore.campaign()?.invite_code; as code) {
+                    <button
+                      type="button"
+                      (click)="openSettingsModal('invites')"
+                      class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    >
+                      <div class="flex min-w-0 items-center gap-3">
+                        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-accent-text)]">
+                          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                          </svg>
+                        </span>
+                        <div class="min-w-0">
+                          <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                            Invitation Links
+                          </div>
+                          <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                            Share campaign join link &amp; invite code
+                          </div>
+                        </div>
+                      </div>
+                      <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-text)]">
+                        {{ code }}
+                      </span>
+                    </button>
+                  }
+                </div>
+
+                <div class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+                  <div class="px-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                    Interface Theme
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-1">
+                    <button
+                      type="button"
+                      (click)="setVttThemeMode('light')"
+                      class="flex items-center justify-center gap-1.5 rounded-lg py-2 font-bold transition-colors"
+                      [class.bg-[var(--mot-surface)]]="themeStore.vttTheme() === 'light'"
+                      [class.text-[var(--mot-text)]]="themeStore.vttTheme() === 'light'"
+                      [class.shadow-xs]="themeStore.vttTheme() === 'light'"
+                      [class.text-[var(--mot-muted)]]="themeStore.vttTheme() !== 'light'"
+                    >
+                      <span class="h-2.5 w-2.5 rounded-full border border-[#B9B0A0] bg-[#FAF7F2]"></span>
+                      <span>Light Theme</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      (click)="setVttThemeMode('dark')"
+                      class="flex items-center justify-center gap-1.5 rounded-lg py-2 font-bold transition-colors"
+                      [class.bg-[var(--mot-surface)]]="themeStore.vttTheme() === 'dark'"
+                      [class.text-[var(--mot-text)]]="themeStore.vttTheme() === 'dark'"
+                      [class.shadow-xs]="themeStore.vttTheme() === 'dark'"
+                      [class.text-[var(--mot-muted)]]="themeStore.vttTheme() !== 'dark'"
+                    >
+                      <span class="h-2.5 w-2.5 rounded-full border border-[#2C4641] bg-[#0D1615]"></span>
+                      <span>Dark Theme</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3">
+                <button
+                  type="button"
+                  (click)="openInGameMenu()"
+                  class="flex w-full items-center justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5 text-xs font-bold text-[var(--mot-text)] transition-colors hover:border-[#C4491A]"
+                >
+                  <span>Open Game Menu</span>
+                  <kbd class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] text-[var(--mot-muted)]">
+                    Esc
+                  </kbd>
+                </button>
+              </div>
             </div>
           }
         </aside>
       }
+    </div>
+  }
+
+  @if (directoryContextMenu(); as ctxMenu) {
+    <div
+      class="fixed z-50 w-52 rounded-xl border border-[#243B37] bg-[#0D1615] p-1.5 text-xs text-[#EBF5F3] shadow-2xl"
+      [style.left.px]="ctxMenu.screenX"
+      [style.top.px]="ctxMenu.screenY"
+      (pointerdown)="$event.stopPropagation()"
+      (contextmenu)="$event.preventDefault()"
+    >
+      @if (ctxMenu.kind === 'map' && contextMenuMap(); as menuMap) {
+        <div class="truncate border-b border-[#243B37] px-2.5 py-1.5 font-display text-[11px] font-bold text-white">
+          {{ menuMap.name }}
+        </div>
+        <div class="mt-1 space-y-0.5">
+          <button
+            type="button"
+            (click)="editMapFromMenu(menuMap.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>Configure Scene...</span>
+            <span class="text-[10px] text-[#8AB0AB]">Grid &amp; Pad</span>
+          </button>
+          <button
+            type="button"
+            (click)="viewMapFromMenu(menuMap.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>View Scene</span>
+          </button>
+          <button
+            type="button"
+            (click)="activateMapForParty(menuMap.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDE68A] hover:bg-[#192B28]"
+          >
+            <span>Activate for Party</span>
+            <span>&#9733;</span>
+          </button>
+          <button
+            type="button"
+            (click)="duplicateMapFromMenu(menuMap.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>Duplicate Scene</span>
+          </button>
+          @if (menuMap.folder_id) {
+            <button
+              type="button"
+              (click)="moveMapToRootFromMenu(menuMap.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#8AB0AB] hover:bg-[#192B28] hover:text-white"
+            >
+              <span>Move to Root</span>
+            </button>
+          }
+          <div class="my-1 border-t border-[#243B37]"></div>
+          <button
+            type="button"
+            (click)="deleteMapFromMenu(menuMap.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-bold text-[#FDA4AF] hover:bg-[#3B1822]"
+          >
+            <span>Delete Scene</span>
+          </button>
+        </div>
+      }
+
+      @if (ctxMenu.kind === 'folder' && contextMenuFolder(); as menuFolder) {
+        <div class="flex items-center gap-1.5 truncate border-b border-[#243B37] px-2.5 py-1.5 font-display text-[11px] font-bold text-white">
+          <span
+            class="h-2.5 w-2.5 shrink-0 rounded-full"
+            [style.backgroundColor]="menuFolder.color || '#C4491A'"
+          ></span>
+          <span class="truncate">{{ menuFolder.name }}</span>
+        </div>
+        <div class="mt-1 space-y-0.5">
+          @if (menuFolder.scope === 'maps') {
+            <button
+              type="button"
+              (click)="createMapInFolderFromMenu(menuFolder.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
+            >
+              <span>+ Create Scene Here</span>
+            </button>
+          } @else {
+            <button
+              type="button"
+              (click)="createRosterActorInFolderFromMenu(menuFolder.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
+            >
+              <span>+ Create Actor Here</span>
+            </button>
+            <button
+              type="button"
+              (click)="importRosterInFolderFromMenu(menuFolder.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#5EEAD4] hover:bg-[#192B28]"
+            >
+              <span>Import into Folder...</span>
+            </button>
+          }
+          @if (canFolderHaveSubfolder(menuFolder.id, menuFolder.scope)) {
+            <button
+              type="button"
+              (click)="createSubfolderFromMenu(menuFolder.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+            >
+              <span>+ New Subfolder</span>
+            </button>
+          }
+          <button
+            type="button"
+            (click)="editFolderFromMenu(menuFolder.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>Edit Folder...</span>
+          </button>
+          @if (menuFolder.parent_folder_id) {
+            <button
+              type="button"
+              (click)="moveFolderToRootFromMenu(menuFolder.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#8AB0AB] hover:bg-[#192B28] hover:text-white"
+            >
+              <span>Move Folder to Root</span>
+            </button>
+          }
+          <div class="my-1 border-t border-[#243B37]"></div>
+          <button
+            type="button"
+            (click)="deleteFolderFromMenu(menuFolder.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-bold text-[#FDA4AF] hover:bg-[#3B1822]"
+          >
+            <span>Remove Folder</span>
+          </button>
+        </div>
+      }
+
+      @if (ctxMenu.kind === 'roster-actor' && contextMenuRosterActor(); as menuActor) {
+        <div class="truncate border-b border-[#243B37] px-2.5 py-1.5 font-display text-[11px] font-bold text-white">
+          {{ menuActor.name }}
+        </div>
+        <div class="mt-1 space-y-0.5">
+          @if (vttStore.canDeployRosterActor(menuActor)) {
+            <button
+              type="button"
+              (click)="deployRosterActorFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#5EEAD4] hover:bg-[#192B28]"
+            >
+              <span>
+                {{ menuActor.is_unique || menuActor.character_id ? 'Deploy to Scene' : '+ Spawn on Scene' }}
+              </span>
+            </button>
+          }
+          @if (vttStore.canManageRosterActor(menuActor)) {
+            <button
+              type="button"
+              (click)="editRosterActorFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+            >
+              <span>Edit Actor...</span>
+            </button>
+            <button
+              type="button"
+              (click)="duplicateRosterActorFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+            >
+              <span>Duplicate Actor</span>
+            </button>
+          }
+          <button
+            type="button"
+            (click)="saveRosterActorToCollectionsFromMenu(menuActor.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
+          >
+            <span>Save to Collections</span>
+          </button>
+          @if (vttStore.isGm() && menuActor.folder_id) {
+            <button
+              type="button"
+              (click)="moveRosterActorToRootFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#8AB0AB] hover:bg-[#192B28] hover:text-white"
+            >
+              <span>Move to Root</span>
+            </button>
+          }
+          @if (vttStore.canManageRosterActor(menuActor)) {
+            <div class="my-1 border-t border-[#243B37]"></div>
+            <button
+              type="button"
+              (click)="deleteRosterActorFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-bold text-[#FDA4AF] hover:bg-[#3B1822]"
+            >
+              <span>Remove from Roster</span>
+            </button>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (createMapModal(); as cm) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
+      (click)="createMapModal.set(null)"
+    >
+      <form
+        (ngSubmit)="submitCreateBlankMap()"
+        (click)="$event.stopPropagation()"
+        class="w-full max-w-md rounded-2xl border border-[#243B37] bg-[#0D1615] p-5 text-xs text-[#EBF5F3] shadow-2xl space-y-4"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h2 class="font-display text-base font-bold text-white">
+              Create Blank Scene
+            </h2>
+            <p class="mt-0.5 text-[11px] text-[#8AB0AB]">
+              Creates a blank {{ defaultSceneWidthPx }}&times;{{ defaultSceneHeightPx }} px scene with a {{ defaultGridSizePx }} px Square Grid (5 ft per tile) and {{ defaultScenePadding }} off-scene padding.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="createMapModal.set(null)"
+            class="text-base font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <label class="block space-y-1">
+            <span class="font-semibold text-[#EBF5F3]">Scene Name</span>
+            <input
+              type="text"
+              name="createMapName"
+              [ngModel]="cm.name"
+              (ngModelChange)="updateCreateMapModalField('name', $event)"
+              placeholder="e.g., Sunken Reliquary"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            />
+          </label>
+
+          <label class="block space-y-1">
+            <span class="font-semibold text-[#EBF5F3]">Folder</span>
+            <select
+              name="createMapFolder"
+              [ngModel]="cm.folder_id"
+              (ngModelChange)="updateCreateMapModalField('folder_id', $event)"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+            >
+              <option [ngValue]="null">None (Root Directory)</option>
+              @for (opt of mapDirectoryTree().flatFolderOptions; track opt.id) {
+                <option [ngValue]="opt.id">{{ opt.label }}</option>
+              }
+            </select>
+          </label>
+
+          <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
+            <input
+              type="checkbox"
+              name="createMapActivate"
+              [ngModel]="cm.activateForParty"
+              (ngModelChange)="updateCreateMapModalField('activateForParty', $event)"
+              class="accent-[#C4491A]"
+            />
+            <span>Activate immediately for Players &#9733;</span>
+          </label>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 border-t border-[#243B37] pt-3">
+          <button
+            type="button"
+            (click)="createMapModal.set(null)"
+            class="rounded-lg border border-[#243B37] bg-[#142220] px-3.5 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+          >
+            Create Blank Scene
+          </button>
+        </div>
+      </form>
+    </div>
+  }
+
+  @if (folderModal(); as fm) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
+      (click)="folderModal.set(null)"
+    >
+      <form
+        (ngSubmit)="submitFolderModal()"
+        (click)="$event.stopPropagation()"
+        class="w-full max-w-md rounded-2xl border border-[#243B37] bg-[#0D1615] p-5 text-xs text-[#EBF5F3] shadow-2xl space-y-4"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="font-display text-base font-bold text-white">
+            {{ fm.mode === 'create' ? 'Create Folder' : 'Edit Folder' }}
+          </h2>
+          <button
+            type="button"
+            (click)="folderModal.set(null)"
+            class="text-base font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <label class="block space-y-1">
+            <span class="font-semibold text-[#EBF5F3]">Folder Name</span>
+            <input
+              type="text"
+              name="folderName"
+              [ngModel]="fm.name"
+              (ngModelChange)="updateFolderModalField('name', $event)"
+              placeholder="e.g., Act I: The Iron Wastes"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            />
+          </label>
+
+          <label class="block space-y-1">
+            <span class="font-semibold text-[#EBF5F3]">Parent Folder</span>
+            <select
+              name="folderParent"
+              [ngModel]="fm.parent_folder_id"
+              (ngModelChange)="updateFolderModalField('parent_folder_id', $event)"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+            >
+              <option [ngValue]="null">None (Root Directory)</option>
+              @for (opt of validParentFolderOptions(); track opt.id) {
+                <option [ngValue]="opt.id">{{ opt.label }}</option>
+              }
+            </select>
+          </label>
+
+          <div class="space-y-1.5">
+            <span class="block font-semibold text-[#EBF5F3]">Folder Color</span>
+            <div class="flex flex-wrap items-center gap-2">
+              @for (sw of folderSwatches; track sw) {
+                <button
+                  type="button"
+                  (click)="updateFolderModalField('color', sw)"
+                  class="h-6 w-6 rounded-full border-2 transition-transform"
+                  [style.backgroundColor]="sw"
+                  [class.border-white]="fm.color === sw"
+                  [class.scale-110]="fm.color === sw"
+                  [class.border-transparent]="fm.color !== sw"
+                ></button>
+              }
+              <input
+                type="color"
+                name="folderCustomColor"
+                [ngModel]="fm.color"
+                (ngModelChange)="updateFolderModalField('color', $event)"
+                class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 border-t border-[#243B37] pt-3">
+          <button
+            type="button"
+            (click)="folderModal.set(null)"
+            class="rounded-lg border border-[#243B37] bg-[#142220] px-3.5 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+          >
+            {{ fm.mode === 'create' ? 'Create Folder' : 'Save Folder' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  }
+
+  @if (editingMapDraft(); as em) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+      (click)="editingMapDraft.set(null)"
+    >
+      <form
+        (ngSubmit)="saveEditMapModal()"
+        (click)="$event.stopPropagation()"
+        class="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      >
+        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
+          <div>
+            <h2 class="font-display text-base font-bold text-white">
+              Scene Configuration
+            </h2>
+            <p class="text-[11px] text-[#8AB0AB]">
+              Configure scene dimensions, background image, single-number pixel grid size, and off-scene padding.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="editingMapDraft.set(null)"
+            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-5 space-y-5">
+          <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="block space-y-1">
+              <span class="font-semibold text-[#EBF5F3]">Scene Name</span>
+              <input
+                type="text"
+                name="editMapName"
+                [ngModel]="em.name"
+                (ngModelChange)="updateEditMapField('name', $event)"
+                placeholder="Untitled Scene"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+              />
+            </label>
+
+            <label class="block space-y-1">
+              <span class="font-semibold text-[#EBF5F3]">Folder</span>
+              <select
+                name="editMapFolder"
+                [ngModel]="em.folder_id"
+                (ngModelChange)="updateEditMapField('folder_id', $event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">None (Root Directory)</option>
+                @for (opt of mapDirectoryTree().flatFolderOptions; track opt.id) {
+                  <option [ngValue]="opt.id">{{ opt.label }}</option>
+                }
+              </select>
+            </label>
+          </section>
+
+          <section class="space-y-3 border-t border-[#243B37] pt-4">
+            <div class="flex items-center justify-between">
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Background
+              </span>
+              @if (em.map_image_url) {
+                <span class="font-mono-num text-[10px] text-[#5EEAD4]">
+                  @if (em.imageNaturalWidth && em.imageNaturalHeight) {
+                    Image {{ em.imageNaturalWidth }}&times;{{ em.imageNaturalHeight }} px
+                  } @else {
+                    Battlemap Image Set
+                  }
+                </span>
+              } @else {
+                <span class="font-mono-num text-[10px] text-[#8AB0AB]">
+                  Blank Scene ({{ em.background_color }})
+                </span>
+              }
+            </div>
+
+            <div
+              class="relative flex h-28 w-full items-center justify-center overflow-hidden rounded-xl border border-[#243B37]"
+              [style.backgroundColor]="em.background_color"
+            >
+              @if (em.map_image_url) {
+                <img
+                  [src]="em.map_image_url"
+                  alt=""
+                  class="h-full w-full object-contain"
+                />
+              } @else {
+                <span class="font-display text-xs font-bold text-white/50">
+                  Blank Scene Surface
+                </span>
+              }
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr]">
+              <label
+                class="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#385E58] bg-[#142220] px-3.5 py-2 font-semibold text-white hover:border-[#C4491A]"
+              >
+                <span>
+                  {{ em.isUploadingImage ? 'Uploading...' : 'Upload Image' }}
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  [disabled]="em.isUploadingImage"
+                  (change)="onEditMapFileSelected($event)"
+                  class="hidden"
+                />
+              </label>
+
+              <div class="flex items-center gap-1.5">
+                <input
+                  type="url"
+                  name="editMapUrl"
+                  [ngModel]="em.map_image_url"
+                  (ngModelChange)="onEditMapUrlChange($event)"
+                  placeholder="Or paste background image URL..."
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+                />
+                @if (em.map_image_url) {
+                  <button
+                    type="button"
+                    (click)="clearEditMapBackground()"
+                    class="shrink-0 rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-2 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                    title="Clear Image to Blank Background"
+                  >
+                    Clear
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <span class="block text-[11px] font-semibold text-[#8AB0AB]">
+                Blank Scene / Backdrop Color
+              </span>
+              <div class="flex flex-wrap items-center gap-2">
+                @for (sw of mapBgSwatches; track sw.color) {
+                  <button
+                    type="button"
+                    (click)="updateEditMapField('background_color', sw.color)"
+                    class="flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors"
+                    [class.border-[#C4491A]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                    [class.bg-[#192B28]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                    [class.text-white]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                    [class.border-[#243B37]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                    [class.bg-[#142220]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                    [class.text-[#8AB0AB]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                  >
+                    <span
+                      class="h-3 w-3 rounded-xs border border-white/25"
+                      [style.backgroundColor]="sw.color"
+                    ></span>
+                    <span>{{ sw.label }}</span>
+                  </button>
+                }
+                <input
+                  type="color"
+                  name="editMapBgCustom"
+                  [ngModel]="em.background_color"
+                  (ngModelChange)="updateEditMapField('background_color', $event)"
+                  class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
+                  title="Custom Scene Color"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section class="space-y-3.5 border-t border-[#243B37] pt-4">
+            <div class="flex items-center justify-between">
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Grid, Dimensions &amp; Padding
+              </span>
+              <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                1 tile = 5 ft
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                (click)="updateEditMapField('grid_mode', 'square')"
+                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#C4491A]]="em.grid_mode !== 'gridless'"
+                [class.bg-[#27160E]]="em.grid_mode !== 'gridless'"
+                [class.border-[#243B37]]="em.grid_mode === 'gridless'"
+                [class.bg-[#142220]]="em.grid_mode === 'gridless'"
+              >
+                <span class="font-display text-xs font-bold text-white">
+                  Square Grid
+                </span>
+                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                  Balanced square grid (5 ft per tile) auto-covering the entire scene and padding.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                (click)="updateEditMapField('grid_mode', 'gridless')"
+                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#C4491A]]="em.grid_mode === 'gridless'"
+                [class.bg-[#27160E]]="em.grid_mode === 'gridless'"
+                [class.border-[#243B37]]="em.grid_mode !== 'gridless'"
+                [class.bg-[#142220]]="em.grid_mode !== 'gridless'"
+              >
+                <span class="font-display text-xs font-bold text-white">
+                  Gridless
+                </span>
+                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                  No grid lines. Free continuous token movement with distances measured in feet.
+                </span>
+              </button>
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-semibold text-[#EBF5F3]">
+                  Grid Size (Pixels)
+                </span>
+                <button
+                  type="button"
+                  (click)="resetEditMapDefaultGrid()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                >
+                  Default ({{ defaultGridSizePx }} px)
+                </button>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <input
+                  type="number"
+                  name="editMapSizePxNum"
+                  min="20"
+                  max="400"
+                  step="1"
+                  [ngModel]="em.grid_size_px"
+                  (ngModelChange)="updateEditMapField('grid_size_px', $event)"
+                  class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                />
+                <input
+                  type="range"
+                  name="editMapSizePxRange"
+                  min="30"
+                  max="250"
+                  step="2"
+                  [ngModel]="em.grid_size_px"
+                  (ngModelChange)="updateEditMapField('grid_size_px', $event)"
+                  class="w-full accent-[#C4491A]"
+                />
+              </div>
+
+              <p class="text-[11px] text-[#8AB0AB]">
+                Pixels per 5 ft square tile (default {{ defaultGridSizePx }} px). Grid counts calculate automatically to cover 100% of the scene and padding.
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-semibold text-[#EBF5F3]">
+                  Scene Dimensions (px)
+                </span>
+                @if (em.map_image_url) {
+                  <button
+                    type="button"
+                    [disabled]="!em.imageNaturalWidth"
+                    (click)="matchEditMapToImage()"
+                    class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-0.5 text-[10px] font-semibold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-45"
+                  >
+                    Match Image Dimensions
+                  </button>
+                }
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <label class="block space-y-1">
+                  <span class="text-[11px] text-[#8AB0AB]">Width (px)</span>
+                  <input
+                    type="number"
+                    name="editSceneWidthPx"
+                    min="200"
+                    max="20000"
+                    step="10"
+                    [ngModel]="em.scene_width"
+                    (ngModelChange)="updateEditMapField('scene_width', $event)"
+                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                  />
+                </label>
+
+                <label class="block space-y-1">
+                  <span class="text-[11px] text-[#8AB0AB]">Height (px)</span>
+                  <input
+                    type="number"
+                    name="editSceneHeightPx"
+                    min="200"
+                    max="20000"
+                    step="10"
+                    [ngModel]="em.scene_height"
+                    (ngModelChange)="updateEditMapField('scene_height', $event)"
+                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-semibold text-[#EBF5F3]">
+                  Padding Percentage
+                </span>
+                <button
+                  type="button"
+                  (click)="resetEditMapPadding()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                >
+                  Default ({{ defaultScenePadding }})
+                </button>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <input
+                  type="number"
+                  name="editMapPaddingNum"
+                  min="0"
+                  max="0.5"
+                  step="0.05"
+                  [ngModel]="em.padding"
+                  (ngModelChange)="updateEditMapField('padding', $event)"
+                  class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                />
+                <input
+                  type="range"
+                  name="editMapPaddingRange"
+                  min="0"
+                  max="0.5"
+                  step="0.05"
+                  [ngModel]="em.padding"
+                  (ngModelChange)="updateEditMapField('padding', $event)"
+                  class="w-full accent-[#C4491A]"
+                />
+              </div>
+
+              <p class="text-[11px] text-[#8AB0AB]">
+                Additional usable canvas space around the scene background (default {{ defaultScenePadding }}). Place tokens in the padding border and right-click to hide them until ready.
+              </p>
+            </div>
+
+            @if (editDraftLayout(); as dl) {
+              <div class="rounded-xl border border-[#21423B] bg-[#0D1E1B] px-3 py-2.5 font-mono-num text-[11px] text-[#A7F3D0] space-y-1">
+                <div class="flex flex-wrap items-center justify-between gap-2 font-bold">
+                  <span>
+                    @if (em.grid_mode === 'gridless') {
+                      Gridless Scale: {{ dl.gridSizePx }} px = 5 ft
+                    } @else {
+                      Auto-Calculated Grid: {{ dl.gridCols }} &times; {{ dl.gridRows }} tiles
+                    }
+                  </span>
+                  <span class="text-[#5EEAD4]">
+                    Canvas {{ dl.totalWidth }} &times; {{ dl.totalHeight }} px
+                  </span>
+                </div>
+                <div class="text-[10px] text-[#8AB0AB]">
+                  Scene {{ dl.innerWidth }} &times; {{ dl.innerHeight }} px + Padding {{ dl.sceneX }} px (L/R) &middot; {{ dl.sceneY }} px (T/B)
+                </div>
+              </div>
+            }
+
+            @if (em.grid_mode !== 'gridless') {
+              <div class="grid grid-cols-2 gap-3">
+                <label class="block space-y-1">
+                  <span class="font-semibold text-[#EBF5F3]">Grid Offset X (px)</span>
+                  <input
+                    type="number"
+                    name="editMapOffX"
+                    step="2"
+                    [ngModel]="em.grid_offset_x"
+                    (ngModelChange)="updateEditMapField('grid_offset_x', $event)"
+                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                  />
+                </label>
+
+                <label class="block space-y-1">
+                  <span class="font-semibold text-[#EBF5F3]">Grid Offset Y (px)</span>
+                  <input
+                    type="number"
+                    name="editMapOffY"
+                    step="2"
+                    [ngModel]="em.grid_offset_y"
+                    (ngModelChange)="updateEditMapField('grid_offset_y', $event)"
+                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                  />
+                </label>
+              </div>
+
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-2 font-semibold">
+                  <span>Grid Line Opacity ({{ em.grid_opacity }})</span>
+                  <button
+                    type="button"
+                    (click)="resetEditMapGridOpacity()"
+                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                  >
+                    Default ({{ defaultGridOpacity }})
+                  </button>
+                </div>
+                <input
+                  type="range"
+                  name="editMapOpacity"
+                  min="0"
+                  max="0.9"
+                  step="0.05"
+                  [ngModel]="em.grid_opacity"
+                  (ngModelChange)="updateEditMapField('grid_opacity', $event)"
+                  class="w-full accent-[#C4491A]"
+                />
+              </div>
+            }
+          </section>
+
+          <section class="grid grid-cols-1 gap-2 border-t border-[#243B37] pt-4 sm:grid-cols-2">
+            <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
+              <input
+                type="checkbox"
+                name="editMapFog"
+                [ngModel]="em.fog_enabled"
+                (ngModelChange)="updateEditMapField('fog_enabled', $event)"
+                class="accent-[#C4491A]"
+              />
+              <span>Dynamic Fog of War</span>
+            </label>
+
+            <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
+              <input
+                type="checkbox"
+                name="editMapDaylight"
+                [ngModel]="em.global_illumination"
+                (ngModelChange)="updateEditMapField('global_illumination', $event)"
+                class="accent-[#C4491A]"
+              />
+              <span>Global Daylight</span>
+            </label>
+          </section>
+        </div>
+
+        <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#243B37] bg-[#122220] px-5 py-3">
+          <button
+            type="button"
+            (click)="deleteMapFromEditModal()"
+            class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-3 py-1.5 font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+          >
+            Delete Scene
+          </button>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              (click)="editingMapDraft.set(null)"
+              class="rounded-lg border border-[#243B37] bg-[#142220] px-3.5 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+            >
+              Save Scene
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  }
+
+  @if (activeSettingsModal(); as settingsModal) {
+    <div
+      (click)="closeSettingsModal()"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        (click)="$event.stopPropagation()"
+        class="mot-float flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-xs text-[var(--mot-text)] shadow-2xl"
+        [class.max-w-lg]="settingsModal !== 'invites'"
+        [class.max-w-md]="settingsModal === 'invites'"
+      >
+        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3.5">
+          <div>
+            <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+              @if (settingsModal === 'general') {
+                General Settings
+              } @else if (settingsModal === 'controls') {
+                Controls &amp; Hotkeys
+              } @else {
+                Invitation Links
+              }
+            </h2>
+            <p class="text-[11px] text-[var(--mot-muted)]">
+              @if (settingsModal === 'general') {
+                Configure interface theme, audio volume, sound cues, and table rules.
+              } @else if (settingsModal === 'controls') {
+                Click any shortcut badge to press a new key or key combination.
+              } @else {
+                Share this link or invite code so players can join the campaign.
+              }
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="closeSettingsModal()"
+            class="text-base font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+          >
+            &times;
+          </button>
+        </div>
+
+        @if (settingsModal === 'general') {
+          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
+              <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                Appearance &amp; Theme
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  (click)="setVttThemeMode('light')"
+                  class="flex flex-col items-start gap-1.5 rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="themeStore.vttTheme() === 'light'"
+                  [class.bg-[var(--mot-surface)]]="themeStore.vttTheme() === 'light'"
+                  [class.border-[var(--mot-border)]]="themeStore.vttTheme() !== 'light'"
+                  [class.opacity-80]="themeStore.vttTheme() !== 'light'"
+                >
+                  <div class="flex w-full items-center justify-between">
+                    <span class="flex items-center gap-2 font-bold text-[var(--mot-text)]">
+                      <span class="h-3.5 w-3.5 rounded-full border border-[#B9B0A0] bg-[#FAF7F2]"></span>
+                      <span>Light Theme</span>
+                    </span>
+                    @if (themeStore.vttTheme() === 'light') {
+                      <span class="h-2 w-2 rounded-full bg-[#C4491A]"></span>
+                    }
+                  </div>
+                  <span class="text-[11px] leading-snug text-[var(--mot-muted)]">
+                    Warm parchment panels with crisp ink contrast.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  (click)="setVttThemeMode('dark')"
+                  class="flex flex-col items-start gap-1.5 rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="themeStore.vttTheme() === 'dark'"
+                  [class.bg-[var(--mot-surface)]]="themeStore.vttTheme() === 'dark'"
+                  [class.border-[var(--mot-border)]]="themeStore.vttTheme() !== 'dark'"
+                  [class.opacity-80]="themeStore.vttTheme() !== 'dark'"
+                >
+                  <div class="flex w-full items-center justify-between">
+                    <span class="flex items-center gap-2 font-bold text-[var(--mot-text)]">
+                      <span class="h-3.5 w-3.5 rounded-full border border-[#2C4641] bg-[#0D1615]"></span>
+                      <span>Dark Theme</span>
+                    </span>
+                    @if (themeStore.vttTheme() === 'dark') {
+                      <span class="h-2 w-2 rounded-full bg-[#C4491A]"></span>
+                    }
+                  </div>
+                  <span class="text-[11px] leading-snug text-[var(--mot-muted)]">
+                    Low-glare obsidian slate for dark battlemaps.
+                  </span>
+                </button>
+              </div>
+
+              <label class="flex items-center justify-between gap-3 border-t border-[var(--mot-border)] pt-2.5 font-semibold text-[var(--mot-text)]">
+                <div>
+                  <div>Show Tool Shortcut Badges</div>
+                  <div class="text-[11px] font-normal text-[var(--mot-muted)]">
+                    Display hotkey badges (V, R, Ctrl+Z) next to canvas tools.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  [ngModel]="settingsStore.preferences().showHotkeyBadges"
+                  (ngModelChange)="updatePreference('showHotkeyBadges', $event)"
+                  class="accent-[#C4491A]"
+                />
+              </label>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Audio &amp; Sound Cues
+                </span>
+                <button
+                  type="button"
+                  (click)="testAudioCue()"
+                  [disabled]="settingsStore.preferences().muteAudio || settingsStore.preferences().masterVolume === 0"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-45"
+                >
+                  Test Ping Sound
+                </button>
+              </div>
+
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between font-semibold text-[var(--mot-text)]">
+                  <span>Master Volume</span>
+                  <span class="font-mono-num text-[var(--mot-muted)]">
+                    {{ settingsStore.preferences().muteAudio ? 'Muted' : settingsStore.preferences().masterVolume + '%' }}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  [disabled]="settingsStore.preferences().muteAudio"
+                  [ngModel]="settingsStore.preferences().masterVolume"
+                  (ngModelChange)="updatePreference('masterVolume', $event)"
+                  class="w-full accent-[#C4491A] disabled:opacity-45"
+                />
+              </div>
+
+              <div class="space-y-2.5 border-t border-[var(--mot-border)] pt-2.5">
+                <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                  <span>Mute All VTT Audio</span>
+                  <input
+                    type="checkbox"
+                    [ngModel]="settingsStore.preferences().muteAudio"
+                    (ngModelChange)="updatePreference('muteAudio', $event)"
+                    class="accent-[#C4491A]"
+                  />
+                </label>
+
+                <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                  <span>Dice &amp; Clash Sound Effects</span>
+                  <input
+                    type="checkbox"
+                    [disabled]="settingsStore.preferences().muteAudio"
+                    [ngModel]="settingsStore.preferences().diceSounds"
+                    (ngModelChange)="updatePreference('diceSounds', $event)"
+                    class="accent-[#C4491A]"
+                  />
+                </label>
+
+                <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                  <span>Map Ping &amp; Turn Alerts</span>
+                  <input
+                    type="checkbox"
+                    [disabled]="settingsStore.preferences().muteAudio"
+                    [ngModel]="settingsStore.preferences().pingAndTurnSounds"
+                    (ngModelChange)="updatePreference('pingAndTurnSounds', $event)"
+                    class="accent-[#C4491A]"
+                  />
+                </label>
+              </div>
+            </section>
+
+            @if (vttStore.isGm()) {
+              <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5">
+                <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                  <div>
+                    <div>Auto-deduct AP on Combat Movement</div>
+                    <div class="text-[11px] font-normal text-[var(--mot-muted)]">
+                      Automatically spend AP based on distance moved during active combat.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    [ngModel]="vttStore.enforceApOnMove()"
+                    (ngModelChange)="vttStore.enforceApOnMove.set($event)"
+                    class="accent-[#C4491A]"
+                  />
+                </label>
+              </section>
+            }
+          </div>
+
+          <div class="flex shrink-0 items-center justify-between border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3">
+            <button
+              type="button"
+              (click)="resetGeneralPreferences()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+            >
+              Reset Defaults
+            </button>
+            <button
+              type="button"
+              (click)="closeSettingsModal()"
+              class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+            >
+              Done
+            </button>
+          </div>
+        } @else if (settingsModal === 'controls') {
+          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+            <div class="space-y-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5">
+              <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-jade-text)]">
+                Chained Movement &amp; Mouse Controls
+              </div>
+              <div class="grid grid-cols-1 gap-1.5 text-[11px] text-[var(--mot-muted)]">
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Hold Shift + Drag / Drop Token</span>
+                  <span class="text-right">Free RP placement without snapping to tiles</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Hold Ctrl + Left-Drag Token</span>
+                  <span class="text-right">Stage waypoint &amp; measure; drag again to chain legs</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Release Ctrl</span>
+                  <span class="text-right">Commit chained movement path</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Right-Click (while moving)</span>
+                  <span class="text-right">Cancel active drag or chained movement</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Alt + Left-Click</span>
+                  <span class="text-right">Broadcast map ping &amp; chime to party</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Hold Space / Right-Drag</span>
+                  <span class="text-right">Pan battlemap camera</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Escape</span>
+                  <span class="text-right">Close active popup or open Game Menu</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Customizable Keyboard Shortcuts
+                </span>
+                <button
+                  type="button"
+                  (click)="resetAllHotkeys()"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1 text-[11px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                >
+                  Reset All Defaults
+                </button>
+              </div>
+
+              <div class="space-y-1.5">
+                @for (item of visibleHotkeyBindings(); track item.action) {
+                  <div
+                    class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[var(--mot-text)]">{{ item.label }}</span>
+                        @if (item.gmOnly) {
+                          <span class="rounded bg-[#C4491A]/20 px-1.5 py-[1px] text-[9px] font-bold uppercase text-[var(--mot-accent-text)]">
+                            GM
+                          </span>
+                        }
+                      </div>
+                      <p class="text-[11px] text-[var(--mot-muted)]">{{ item.description }}</p>
+                    </div>
+
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (!isDefaultHotkey(item.action)) {
+                        <button
+                          type="button"
+                          (click)="resetSingleHotkey(item.action)"
+                          class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                          title="Restore default shortcut"
+                        >
+                          Reset
+                        </button>
+                      }
+
+                      <button
+                        type="button"
+                        (click)="startRecordingHotkey(item.action)"
+                        class="min-w-[84px] rounded-lg border px-3 py-1.5 text-center font-mono-num text-xs font-bold transition-colors"
+                        [class.border-[#38B29A]]="recordingHotkeyAction() === item.action"
+                        [class.bg-[var(--mot-jade-bg)]]="recordingHotkeyAction() === item.action"
+                        [class.text-[var(--mot-jade-text)]]="recordingHotkeyAction() === item.action"
+                        [class.animate-pulse]="recordingHotkeyAction() === item.action"
+                        [class.border-[var(--mot-border)]]="recordingHotkeyAction() !== item.action"
+                        [class.bg-[var(--mot-surface)]]="recordingHotkeyAction() !== item.action"
+                        [class.text-[var(--mot-text)]]="recordingHotkeyAction() !== item.action"
+                        [class.hover:border-[#C4491A]]="recordingHotkeyAction() !== item.action"
+                      >
+                        {{
+                          recordingHotkeyAction() === item.action
+                            ? 'Press key...'
+                            : formatBadge(settingsStore.hotkeys()[item.action])
+                        }}
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 items-center justify-between border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3">
+            <span class="text-[11px] text-[var(--mot-muted)]">
+              Saved automatically to your browser settings.
+            </span>
+            <button
+              type="button"
+              (click)="closeSettingsModal()"
+              class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+            >
+              Done
+            </button>
+          </div>
+        } @else {
+          <div class="space-y-4 p-5">
+            @if (vttStore.campaign()?.invite_code; as code) {
+              <div class="space-y-1.5">
+                <span class="block font-semibold text-[var(--mot-text)]">
+                  Shareable Invite Link
+                </span>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readonly
+                    [value]="campaignInviteLink()"
+                    class="mot-input min-w-0 flex-1 px-3 py-2 font-mono-num text-xs"
+                  />
+                  <button
+                    type="button"
+                    (click)="copyInviteLink()"
+                    class="btn-copper shrink-0 rounded-lg px-3.5 py-2 text-xs font-bold"
+                  >
+                    {{ copiedInviteLink() ? 'Copied!' : 'Copy Link' }}
+                  </button>
+                </div>
+                <p class="text-[11px] text-[var(--mot-muted)]">
+                  Opening this link takes players to the Dashboard with the Join Game drawer already prefilled.
+                </p>
+              </div>
+
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5">
+                <div>
+                  <div class="text-[11px] font-semibold text-[var(--mot-muted)]">
+                    Campaign Invite Code
+                  </div>
+                  <div class="font-mono-num text-base font-bold tracking-wider text-[var(--mot-text)]">
+                    {{ code }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  (click)="copyInviteCode()"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  {{ copiedInvite() ? 'Copied!' : 'Copy Code' }}
+                </button>
+              </div>
+            }
+          </div>
+
+          <div class="flex shrink-0 items-center justify-end border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3">
+            <button
+              type="button"
+              (click)="closeSettingsModal()"
+              class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+            >
+              Done
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  @if (inGameMenuOpen()) {
+    <div
+      (click)="closeInGameMenu()"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="In-Game Menu"
+        (click)="$event.stopPropagation()"
+        class="mot-float flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      >
+        <div class="flex items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-5 py-4">
+          <div class="min-w-0">
+            <div class="font-mono-num text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+              Game Menu
+            </div>
+            <h2 class="truncate font-display text-base font-bold text-white">
+              {{ vttStore.campaign()?.name || 'March of Time' }}
+            </h2>
+          </div>
+          <kbd class="shrink-0 rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            Esc
+          </kbd>
+        </div>
+
+        <div class="space-y-2 p-4">
+          <button
+            type="button"
+            (click)="closeInGameMenu()"
+            class="btn-copper flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-xs font-bold"
+          >
+            <span>Resume Game</span>
+            <span class="font-mono-num text-[10px] opacity-85">Esc</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="reloadApplication()"
+            class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
+          >
+            <span class="flex items-center gap-2.5">
+              <svg class="h-4 w-4 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+              <span>Reload Application</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            (click)="openCollections()"
+            class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
+          >
+            <span class="flex items-center gap-2.5">
+              <svg class="h-4 w-4 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>Open Collections</span>
+            </span>
+          </button>
+
+          @if (authStore.isAdmin()) {
+            <button
+              type="button"
+              (click)="openContentManager()"
+              class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
+            >
+              <span class="flex items-center gap-2.5">
+                <svg class="h-4 w-4 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
+                </svg>
+                <span>Open Content Manager</span>
+              </span>
+              <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
+                Admin
+              </span>
+            </button>
+          }
+
+          <div class="my-1 border-t border-[#243B37]"></div>
+
+          <button
+            type="button"
+            (click)="returnToMainMenu()"
+            class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#09100F] px-4 py-2.5 text-left font-semibold text-[#8AB0AB] transition-colors hover:border-[#C4491A] hover:text-white"
+          >
+            <span class="flex items-center gap-2.5">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>Return to Main Menu</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (rosterActorModal(); as ram) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+      (click)="rosterActorModal.set(null)"
+    >
+      <form
+        (ngSubmit)="submitRosterActorModal()"
+        (click)="$event.stopPropagation()"
+        class="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      >
+        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
+          <div>
+            <h2 class="font-display text-base font-bold text-white">
+              {{ ram.mode === 'create' ? 'Create Roster Actor' : 'Edit Roster Actor' }}
+            </h2>
+            <p class="text-[11px] text-[#8AB0AB]">
+              Configure combat stats, token icon, and deployment behavior. Drag onto any scene to place.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="rosterActorModal.set(null)"
+            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+          @if (vttStore.isGm()) {
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                (click)="setRosterActorModalKind('character')"
+                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#C4491A]]="ram.actor_kind === 'character'"
+                [class.bg-[#27160E]]="ram.actor_kind === 'character'"
+                [class.border-[#243B37]]="ram.actor_kind !== 'character'"
+                [class.bg-[#142220]]="ram.actor_kind !== 'character'"
+              >
+                <span class="font-display text-xs font-bold text-white">
+                  Unique Character / Persona
+                </span>
+                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                  One active token per scene; dragging moves or deploys them.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                (click)="setRosterActorModalKind('npc')"
+                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                [class.border-[#C4491A]]="ram.actor_kind === 'npc'"
+                [class.bg-[#27160E]]="ram.actor_kind === 'npc'"
+                [class.border-[#243B37]]="ram.actor_kind !== 'npc'"
+                [class.bg-[#142220]]="ram.actor_kind !== 'npc'"
+              >
+                <span class="font-display text-xs font-bold text-white">
+                  Adversary / Multi-Spawn NPC
+                </span>
+                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                  Drag onto the map repeatedly to spawn numbered copies.
+                </span>
+              </button>
+            </div>
+          }
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="block space-y-1">
+              <span class="font-semibold text-[#EBF5F3]">Actor Name</span>
+              <input
+                type="text"
+                name="rosterActorName"
+                required
+                [ngModel]="ram.name"
+                (ngModelChange)="updateRosterActorModalField('name', $event)"
+                placeholder="e.g., Captain Valen or Ash Stalker"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+              />
+            </label>
+
+            @if (vttStore.isGm()) {
+              <label class="block space-y-1">
+                <span class="font-semibold text-[#EBF5F3]">Folder</span>
+                <select
+                  name="rosterActorFolder"
+                  [ngModel]="ram.folder_id"
+                  (ngModelChange)="updateRosterActorModalField('folder_id', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+                >
+                  <option [ngValue]="null">None (Root Directory)</option>
+                  @for (opt of rosterDirectoryTree().flatFolderOptions; track opt.id) {
+                    <option [ngValue]="opt.id">{{ opt.label }}</option>
+                  }
+                </select>
+              </label>
+            }
+          </div>
+
+          @if (vttStore.isGm()) {
+            <div class="grid grid-cols-2 gap-3">
+              <label class="block space-y-1">
+                <span class="font-semibold text-[#EBF5F3]">Faction</span>
+                <select
+                  name="rosterActorFaction"
+                  [ngModel]="ram.faction"
+                  (ngModelChange)="updateRosterActorModalField('faction', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+                >
+                  <option value="ally">Ally (Party / Companion)</option>
+                  <option value="neutral">Neutral (Townsfolk / Envoy)</option>
+                  <option value="enemy">Enemy (Adversary)</option>
+                </select>
+              </label>
+
+              <label class="flex items-center gap-2 self-end rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
+                <input
+                  type="checkbox"
+                  name="rosterActorUnique"
+                  [ngModel]="ram.is_unique"
+                  (ngModelChange)="updateRosterActorModalField('is_unique', $event)"
+                  class="accent-[#C4491A]"
+                />
+                <span>Unique on Scene</span>
+              </label>
+            </div>
+          }
+
+          <div class="space-y-2 border-t border-[#243B37] pt-3">
+            <div class="flex items-center justify-between">
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Token Emblem &amp; Color
+              </span>
+              <div class="flex items-center gap-1.5">
+                @for (sw of actorColorSwatches; track sw) {
+                  <button
+                    type="button"
+                    (click)="updateRosterActorModalField('color', sw)"
+                    class="h-5 w-5 rounded-full border-2 transition-transform"
+                    [style.backgroundColor]="sw"
+                    [class.border-white]="ram.color.toUpperCase() === sw.toUpperCase()"
+                    [class.scale-110]="ram.color.toUpperCase() === sw.toUpperCase()"
+                    [class.border-transparent]="ram.color.toUpperCase() !== sw.toUpperCase()"
+                  ></button>
+                }
+                <input
+                  type="color"
+                  name="rosterActorCustomColor"
+                  [ngModel]="ram.color"
+                  (ngModelChange)="updateRosterActorModalField('color', $event)"
+                  class="h-6 w-8 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
+                />
+              </div>
+            </div>
+
+            <div class="grid max-h-28 grid-cols-8 gap-1.5 overflow-y-auto rounded-xl border border-[#243B37] bg-[#09100F] p-2 sm:grid-cols-10">
+              @for (preset of iconPresets; track preset.id) {
+                <button
+                  type="button"
+                  (click)="updateRosterActorModalField('icon', preset.id)"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg border transition-colors"
+                  [class.border-[#C4491A]]="ram.icon === preset.id"
+                  [class.bg-[#27160E]]="ram.icon === preset.id"
+                  [class.border-[#243B37]]="ram.icon !== preset.id"
+                  [class.bg-[#142220]]="ram.icon !== preset.id"
+                  [title]="preset.label"
+                >
+                  <app-compendium-icon
+                    [icon]="preset.id"
+                    [color]="ram.icon === preset.id ? ram.color : '#8AB0AB'"
+                    sizeClass="h-4 w-4"
+                  />
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="space-y-2.5 border-t border-[#243B37] pt-3">
+            <span class="block font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+              Vitality &amp; Movement
+            </span>
+            <div class="grid grid-cols-3 gap-2.5 font-mono-num sm:grid-cols-6">
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Max HP</span>
+                <input
+                  type="number"
+                  name="ramHp"
+                  min="1"
+                  [ngModel]="ram.max_hp"
+                  (ngModelChange)="updateRosterActorModalField('max_hp', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Max SP</span>
+                <input
+                  type="number"
+                  name="ramSp"
+                  min="0"
+                  [ngModel]="ram.max_sp"
+                  (ngModelChange)="updateRosterActorModalField('max_sp', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Max AP</span>
+                <input
+                  type="number"
+                  name="ramAp"
+                  min="1"
+                  [ngModel]="ram.max_ap"
+                  (ngModelChange)="updateRosterActorModalField('max_ap', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Armor DR</span>
+                <input
+                  type="number"
+                  name="ramDr"
+                  min="0"
+                  [ngModel]="ram.armor_dr"
+                  (ngModelChange)="updateRosterActorModalField('armor_dr', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Move (ft)</span>
+                <input
+                  type="number"
+                  name="ramMove"
+                  step="5"
+                  min="0"
+                  [ngModel]="ram.move_feet"
+                  (ngModelChange)="updateRosterActorModalField('move_feet', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Vision (ft)</span>
+                <input
+                  type="number"
+                  name="ramVision"
+                  step="5"
+                  min="0"
+                  [ngModel]="ram.vision_feet"
+                  (ngModelChange)="updateRosterActorModalField('vision_feet', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div class="space-y-2.5 border-t border-[#243B37] pt-3">
+            <span class="block font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+              Signature Strike &amp; Defense
+            </span>
+            <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+              <label class="col-span-2 space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Weapon / Attack Name</span>
+                <input
+                  type="text"
+                  name="ramWep"
+                  [ngModel]="ram.weapon_name"
+                  (ngModelChange)="updateRosterActorModalField('weapon_name', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white"
+                />
+              </label>
+              <label class="space-y-1 font-mono-num">
+                <span class="text-[10px] text-[#8AB0AB]">Attack Mod</span>
+                <input
+                  type="number"
+                  name="ramAtkMod"
+                  [ngModel]="ram.attack_mod"
+                  (ngModelChange)="updateRosterActorModalField('attack_mod', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1 font-mono-num">
+                <span class="text-[10px] text-[#8AB0AB]">Flat Damage</span>
+                <input
+                  type="number"
+                  name="ramDmg"
+                  min="0"
+                  [ngModel]="ram.flat_damage"
+                  (ngModelChange)="updateRosterActorModalField('flat_damage', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2.5 font-mono-num sm:grid-cols-4">
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Reach (ft)</span>
+                <input
+                  type="number"
+                  name="ramReach"
+                  step="5"
+                  min="5"
+                  [ngModel]="ram.reach_feet"
+                  (ngModelChange)="updateRosterActorModalField('reach_feet', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Combat Tag</span>
+                <select
+                  name="ramTag"
+                  [ngModel]="ram.combat_tag"
+                  (ngModelChange)="updateRosterActorModalField('combat_tag', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 text-xs font-semibold text-white"
+                >
+                  <option value="None">None</option>
+                  <option value="Crushing">Crushing</option>
+                  <option value="Sweeping">Sweeping</option>
+                  <option value="Piercing">Piercing</option>
+                </select>
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Parry Mod</span>
+                <input
+                  type="number"
+                  name="ramParry"
+                  [ngModel]="ram.parry_mod"
+                  (ngModelChange)="updateRosterActorModalField('parry_mod', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-[#8AB0AB]">Dodge Mod</span>
+                <input
+                  type="number"
+                  name="ramDodge"
+                  [ngModel]="ram.dodge_mod"
+                  (ngModelChange)="updateRosterActorModalField('dodge_mod', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+              </label>
+            </div>
+          </div>
+
+          <label class="block space-y-1 border-t border-[#243B37] pt-3">
+            <span class="font-semibold text-[#EBF5F3]">RP / Tactical Notes</span>
+            <textarea
+              name="ramNotes"
+              rows="2"
+              [ngModel]="ram.notes"
+              (ngModelChange)="updateRosterActorModalField('notes', $event)"
+              placeholder="Voice cues, motives, loot, or special tactics..."
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            ></textarea>
+          </label>
+
+          <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
+            <input
+              type="checkbox"
+              name="ramSaveCollection"
+              [ngModel]="ram.saveToCollections"
+              (ngModelChange)="updateRosterActorModalField('saveToCollections', $event)"
+              class="accent-[#C4491A]"
+            />
+            <span>Also save a reusable copy to Collections</span>
+          </label>
+        </div>
+
+        <div class="flex shrink-0 items-center justify-end gap-2 border-t border-[#243B37] bg-[#122220] px-5 py-3">
+          <button
+            type="button"
+            (click)="rosterActorModal.set(null)"
+            class="rounded-lg border border-[#243B37] bg-[#142220] px-3.5 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+          >
+            {{ ram.mode === 'create' ? 'Create Roster Actor' : 'Save Actor' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  }
+
+  @if (rosterImportModalOpen()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+      (click)="closeRosterImportModal()"
+    >
+      <div
+        (click)="$event.stopPropagation()"
+        class="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      >
+        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
+          <div>
+            <h2 class="font-display text-base font-bold text-white">
+              Import into Campaign Roster
+            </h2>
+            <p class="text-[11px] text-[#8AB0AB]">
+              Load characters you created, import reusable templates from Collections, or pull starter adversaries.
+            </p>
+          </div>
+          <button
+            type="button"
+            (click)="closeRosterImportModal()"
+            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-5 py-3">
+          <div
+            class="grid gap-1.5"
+            [class.grid-cols-4]="vttStore.isGm()"
+            [class.grid-cols-2]="!vttStore.isGm()"
+          >
+            <button
+              type="button"
+              (click)="rosterImportTab.set('my-characters')"
+              class="rounded-lg border px-2.5 py-1.5 font-bold transition-colors"
+              [class.border-[#C4491A]]="rosterImportTab() === 'my-characters'"
+              [class.bg-[#27160E]]="rosterImportTab() === 'my-characters'"
+              [class.text-white]="rosterImportTab() === 'my-characters'"
+              [class.border-[#243B37]]="rosterImportTab() !== 'my-characters'"
+              [class.bg-[#142220]]="rosterImportTab() !== 'my-characters'"
+              [class.text-[#8AB0AB]]="rosterImportTab() !== 'my-characters'"
+            >
+              My Characters ({{ filteredImportMyCharacters().length }})
+            </button>
+
+            <button
+              type="button"
+              (click)="rosterImportTab.set('collections')"
+              class="rounded-lg border px-2.5 py-1.5 font-bold transition-colors"
+              [class.border-[#C4491A]]="rosterImportTab() === 'collections'"
+              [class.bg-[#27160E]]="rosterImportTab() === 'collections'"
+              [class.text-white]="rosterImportTab() === 'collections'"
+              [class.border-[#243B37]]="rosterImportTab() !== 'collections'"
+              [class.bg-[#142220]]="rosterImportTab() !== 'collections'"
+              [class.text-[#8AB0AB]]="rosterImportTab() !== 'collections'"
+            >
+              Collections ({{ filteredImportCollectionActors().length }})
+            </button>
+
+            @if (vttStore.isGm()) {
+              <button
+                type="button"
+                (click)="rosterImportTab.set('party')"
+                class="rounded-lg border px-2.5 py-1.5 font-bold transition-colors"
+                [class.border-[#C4491A]]="rosterImportTab() === 'party'"
+                [class.bg-[#27160E]]="rosterImportTab() === 'party'"
+                [class.text-white]="rosterImportTab() === 'party'"
+                [class.border-[#243B37]]="rosterImportTab() !== 'party'"
+                [class.bg-[#142220]]="rosterImportTab() !== 'party'"
+                [class.text-[#8AB0AB]]="rosterImportTab() !== 'party'"
+              >
+                Party ({{ filteredImportPartyCharacters().length }})
+              </button>
+
+              <button
+                type="button"
+                (click)="rosterImportTab.set('presets')"
+                class="rounded-lg border px-2.5 py-1.5 font-bold transition-colors"
+                [class.border-[#C4491A]]="rosterImportTab() === 'presets'"
+                [class.bg-[#27160E]]="rosterImportTab() === 'presets'"
+                [class.text-white]="rosterImportTab() === 'presets'"
+                [class.border-[#243B37]]="rosterImportTab() !== 'presets'"
+                [class.bg-[#142220]]="rosterImportTab() !== 'presets'"
+                [class.text-[#8AB0AB]]="rosterImportTab() !== 'presets'"
+              >
+                Adversaries ({{ filteredImportPresets().length }})
+              </button>
+            }
+          </div>
+
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              type="text"
+              [ngModel]="rosterImportSearch()"
+              (ngModelChange)="rosterImportSearch.set($event)"
+              placeholder="Filter by name..."
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            />
+
+            @if (vttStore.isGm()) {
+              <select
+                [ngModel]="rosterImportFolderId()"
+                (ngModelChange)="rosterImportFolderId.set($event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">Destination: Root Directory</option>
+                @for (opt of rosterDirectoryTree().flatFolderOptions; track opt.id) {
+                  <option [ngValue]="opt.id">Folder: {{ opt.label }}</option>
+                }
+              </select>
+            }
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-5 space-y-2">
+          @if (rosterImportTab() === 'my-characters') {
+            @if (filteredImportMyCharacters().length === 0) {
+              <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB] space-y-2">
+                <div>No characters found in your Character Vault yet.</div>
+                <a
+                  routerLink="/characters/new"
+                  target="_blank"
+                  class="inline-block rounded-lg border border-[#C4491A] bg-[#27160E] px-3 py-1.5 font-bold text-white no-underline"
+                >
+                  + Create a Character Sheet
+                </a>
+              </div>
+            } @else {
+              @for (ch of filteredImportMyCharacters(); track ch.id) {
+                @let inRoster = isCharacterInRoster(ch.id);
+                <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
+                  <div class="min-w-0">
+                    <div class="truncate font-bold text-white">{{ ch.name }}</div>
+                    <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                      HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                    </div>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    @if (inRoster) {
+                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
+                        In Roster
+                      </span>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="importCharacterIntoRoster(ch, false)"
+                        class="rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-bold text-[#EBF5F3] hover:border-[#C4491A]"
+                      >
+                        + Import
+                      </button>
+                      <button
+                        type="button"
+                        (click)="importCharacterIntoRoster(ch, true)"
+                        class="btn-copper rounded-lg px-3 py-1.5 font-bold"
+                      >
+                        Import &amp; Deploy
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+            }
+          } @else if (rosterImportTab() === 'collections') {
+            @if (filteredImportCollectionActors().length === 0) {
+              <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB] space-y-2">
+                <div>Your Collections library has no saved actors yet.</div>
+                <button
+                  type="button"
+                  (click)="openCollections()"
+                  class="btn-copper rounded-lg px-3.5 py-1.5 font-bold"
+                >
+                  Open Collections Manager
+                </button>
+              </div>
+            } @else {
+              @for (colActor of filteredImportCollectionActors(); track colActor.id) {
+                @let inRoster = isCollectionActorInRoster(colActor.id);
+                <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
+                  <div class="flex min-w-0 items-center gap-2.5">
+                    <div
+                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 bg-[#09100F]"
+                      [style.borderColor]="colActor.color || '#38B29A'"
+                    >
+                      <app-compendium-icon
+                        [icon]="colActor.icon"
+                        [color]="colActor.color || '#38B29A'"
+                        sizeClass="h-4 w-4"
+                      />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5">
+                        <span class="truncate font-bold text-white">{{ colActor.name }}</span>
+                        <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
+                          {{ colActor.actor_kind === 'npc' ? 'NPC' : 'Char' }}
+                        </span>
+                      </div>
+                      <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                        HP {{ colActor.max_hp }} &middot; SP {{ colActor.max_sp }} &middot; DR {{ colActor.armor_dr }} &middot; {{ colActor.move_feet }} ft
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    @if (inRoster) {
+                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2 py-1 text-[10px] font-bold text-[#5EEAD4]">
+                        Loaded
+                      </span>
+                    }
+                    <button
+                      type="button"
+                      (click)="importCollectionActorIntoRoster(colActor)"
+                      class="btn-copper rounded-lg px-3 py-1.5 font-bold"
+                    >
+                      + Import
+                    </button>
+                  </div>
+                </div>
+              }
+            }
+          } @else if (rosterImportTab() === 'party') {
+            @if (filteredImportPartyCharacters().length === 0) {
+              <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+                No campaign member characters found yet.
+              </div>
+            } @else {
+              @for (ch of filteredImportPartyCharacters(); track ch.id) {
+                @let inRoster = isCharacterInRoster(ch.id);
+                <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
+                  <div class="min-w-0">
+                    <div class="truncate font-bold text-white">{{ ch.name }}</div>
+                    <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                      HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                    </div>
+                  </div>
+                  <div>
+                    @if (inRoster) {
+                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
+                        In Roster
+                      </span>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="importCharacterIntoRoster(ch, false)"
+                        class="btn-copper rounded-lg px-3 py-1.5 font-bold"
+                      >
+                        + Import
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+            }
+          } @else {
+            @for (npc of filteredImportPresets(); track npc.id) {
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
+                <div class="flex min-w-0 items-center gap-2.5">
+                  <div
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 bg-[#09100F]"
+                    [style.borderColor]="npc.color"
+                  >
+                    <app-compendium-icon
+                      [icon]="npc.icon"
+                      [color]="npc.color"
+                      sizeClass="h-4 w-4"
+                    />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="truncate font-bold text-white">{{ npc.name }}</div>
+                    <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                      HP {{ npc.max_hp }} &middot; SP {{ npc.max_sp }} &middot; DR {{ npc.armor_dr }} &middot; Reach {{ npc.npc_stats.reach_feet }} ft
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  (click)="importPresetIntoRoster(npc)"
+                  class="btn-copper shrink-0 rounded-lg px-3 py-1.5 font-bold"
+                >
+                  + Import to Roster
+                </button>
+              </div>
+            }
+          }
+        </div>
+
+        <div class="flex shrink-0 items-center justify-between border-t border-[#243B37] bg-[#122220] px-5 py-3">
+          <button
+            type="button"
+            (click)="openCollections()"
+            class="rounded-lg border border-[#243B37] bg-[#142220] px-3 py-1.5 font-semibold text-[#5EEAD4] hover:border-[#38B29A]"
+          >
+            Manage Collections &rarr;
+          </button>
+          <button
+            type="button"
+            (click)="closeRosterImportModal()"
+            class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+          >
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   }
 </div>

@@ -39,6 +39,14 @@
               Characters
             </a>
 
+            <a
+              routerLink="/collections"
+              routerLinkActive="border-[#C4491A] bg-[#0D1615] text-white"
+              class="rounded-lg border border-transparent px-3.5 py-1.5 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:text-white"
+            >
+              Collections
+            </a>
+
             @if (authStore.isAdmin()) {
               <a
                 routerLink="/content-manager"
@@ -126,7 +134,7 @@
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  Profile &amp; Handle
+                  Profile &amp; Settings
                 </button>
 
                 <button

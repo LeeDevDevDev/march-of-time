@@ -7,10 +7,10 @@
     >
       <div>
         <h1 class="font-display text-xl font-bold text-white">
-          Profile &amp; Handle
+          Profile &amp; Settings
         </h1>
         <p class="mt-0.5 text-xs text-[#8AB0AB]">
-          Update how other players and Game Masters see you.
+          Update your identity and customize VTT controls &amp; shortcuts.
         </p>
       </div>
 
@@ -105,6 +105,93 @@
           }
         </button>
       </form>
+    </div>
+  </section>
+
+  <section
+    class="overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+  >
+    <div
+      class="flex flex-wrap items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-6 py-4 sm:px-8"
+    >
+      <div>
+        <h2 class="font-display text-base font-bold text-white">
+          VTT Controls &amp; Hotkeys
+        </h2>
+        <p class="mt-0.5 text-xs text-[#8AB0AB]">
+          Click any shortcut badge to record a new key or key combination.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        (click)="resetAllHotkeys()"
+        class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-1.5 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+      >
+        Reset Defaults
+      </button>
+    </div>
+
+    <div class="p-6 sm:p-8 space-y-4">
+      <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 text-xs space-y-1.5">
+        <div class="font-display font-bold text-[var(--mot-text)]">
+          Chained Token Movement
+        </div>
+        <p class="text-[var(--mot-muted)] leading-relaxed">
+          Hold <strong>Ctrl</strong> + <strong>Left-Drag</strong> a token to move and stage a waypoint while measuring feet, then hold <strong>Left-Drag</strong> again to chain additional legs. Release <strong>Ctrl</strong> to commit the full path, or press <strong>Right-Click</strong> to cancel.
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        @for (item of hotkeyMeta; track item.action) {
+          <div
+            class="flex items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5 text-xs"
+          >
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-[var(--mot-text)]">{{ item.label }}</span>
+                @if (item.gmOnly) {
+                  <span class="rounded bg-[#C4491A]/20 px-1.5 py-[1px] text-[10px] font-bold uppercase text-[#C4491A]">
+                    GM
+                  </span>
+                }
+              </div>
+              <p class="text-[var(--mot-muted)]">{{ item.description }}</p>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-1.5">
+              @if (!isDefaultHotkey(item.action)) {
+                <button
+                  type="button"
+                  (click)="resetSingleHotkey(item.action)"
+                  class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                >
+                  Reset
+                </button>
+              }
+
+              <button
+                type="button"
+                (click)="startRecordingHotkey(item.action)"
+                class="min-w-[84px] rounded-lg border px-3 py-1.5 text-center font-mono-num text-xs font-bold transition-colors"
+                [class.border-[#38B29A]]="recordingAction() === item.action"
+                [class.bg-[#102B26]]="recordingAction() === item.action"
+                [class.text-[#5EEAD4]]="recordingAction() === item.action"
+                [class.border-[var(--mot-border)]]="recordingAction() !== item.action"
+                [class.bg-[var(--mot-surface)]]="recordingAction() !== item.action"
+                [class.text-[var(--mot-text)]]="recordingAction() !== item.action"
+                [class.hover:border-[#C4491A]]="recordingAction() !== item.action"
+              >
+                {{
+                  recordingAction() === item.action
+                    ? 'Press key...'
+                    : formatBadge(settingsStore.hotkeys()[item.action])
+                }}
+              </button>
+            </div>
+          </div>
+        }
+      </div>
     </div>
   </section>
 
