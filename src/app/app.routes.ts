@@ -35,6 +35,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'vtt/:campaignId',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/vtt/vtt-room.component').then(
+        (m) => m.VttRoomComponent
+      ),
+  },
+  {
     path: 'characters',
     canActivate: [authGuard],
     loadComponent: () =>

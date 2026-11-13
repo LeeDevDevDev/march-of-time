@@ -1,0 +1,475 @@
+<div
+  #viewportEl
+  (wheel)="onWheel($event)"
+  (pointerdown)="onViewportPointerDown($event)"
+  (contextmenu)="onContextMenu($event)"
+  class="relative h-full w-full overflow-hidden select-none bg-[#060B0A]"
+  [class.cursor-grabbing]="isPanning()"
+  [class.cursor-grab]="!isPanning() && (spacePressed() || vttStore.activeTool() === 'pan')"
+  [class.cursor-crosshair]="
+    !isPanning() &&
+    !spacePressed() &&
+    (vttStore.activeTool() === 'ruler' ||
+      vttStore.activeTool() === 'wall' ||
+      vttStore.activeTool() === 'light' ||
+      vttStore.pendingTargetAction() !== null)
+  "
+>
+  <canvas #battleCanvas class="block h-full w-full"></canvas>
+
+  <div
+    class="pointer-events-none absolute left-0 top-0 origin-top-left"
+    [style.transform]="'translate(' + panX() + 'px, ' + panY() + 'px) scale(' + zoom() + ')'"
+  >
+    @for (door of visibleDoorHandles(); track door.wall.id) {
+      <button
+        type="button"
+        (pointerdown)="$event.stopPropagation()"
+        (click)="onDoorButtonClick($event, door.wall.id)"
+        [style.left.px]="door.x"
+        [style.top.px]="door.y"
+        [title]="door.wall.open ? 'Close Door (Blocks Vision & Movement)' : 'Open Door'"
+        class="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold shadow-lg transition-transform hover:scale-110"
+        [class.border-[#38B29A]]="door.wall.open"
+        [class.bg-[#0D1E1B]]="door.wall.open"
+        [class.text-[#5EEAD4]]="door.wall.open"
+        [class.border-[#F59E0B]]="!door.wall.open"
+        [class.bg-[#271709]]="!door.wall.open"
+        [class.text-[#FCD34D]]="!door.wall.open"
+      >
+        @if (door.wall.open) {
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 21h18" />
+            <path d="M5 21V5a2 2 0 0 1 2-2h7l5 3v15" />
+          </svg>
+        } @else {
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="5" y="3" width="14" height="18" rx="2" />
+            <circle cx="15" cy="12" r="1.25" fill="currentColor" />
+          </svg>
+        }
+      </button>
+    }
+
+    @for (wh of editableWallHandles(); track wh.wall.id) {
+      <button
+        type="button"
+        (pointerdown)="$event.stopPropagation()"
+        (click)="onDeleteWallClick($event, wh.wall.id)"
+        [style.left.px]="wh.mx + (wh.wall.kind === 'door' ? 20 : 0)"
+        [style.top.px]="wh.my - (wh.wall.kind === 'door' ? 16 : 0)"
+        title="Delete Segment"
+        class="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full border border-[#F43F5E] bg-[#2B1016] text-[11px] font-bold text-[#FDA4AF] shadow hover:bg-[#E11D48] hover:text-white"
+      >
+        &times;
+      </button>
+    }
+
+    @for (light of editableLightHandles(); track light.id) {
+      <div
+        (pointerdown)="onLightHandlePointerDown($event, light)"
+        (contextmenu)="onLightHandleContextMenu($event, light)"
+        (dblclick)="onLightHandleDoubleClick($event, light)"
+        [style.left.px]="light.x"
+        [style.top.px]="light.y"
+        title="Drag to move · Right-click to Edit or Delete"
+        class="pointer-events-auto absolute z-30 -translate-x-1/2 -translate-y-1/2 cursor-move flex flex-col items-center"
+        [class.opacity-55]="light.enabled === false"
+      >
+        <div
+          class="flex h-8 w-8 items-center justify-center rounded-full border-2 bg-[#0D1615]/95 shadow-lg transition-transform hover:scale-110"
+          [style.border-color]="light.enabled === false ? '#64748B' : (light.color || '#FF9B42')"
+          [class.ring-2]="vttStore.selectedLightId() === light.id"
+          [class.ring-white]="vttStore.selectedLightId() === light.id"
+        >
+          <svg
+            class="h-4 w-4"
+            [style.color]="light.enabled === false ? '#94A3B8' : (light.color || '#FF9B42')"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M9 18h6" />
+            <path d="M10 22h4" />
+            <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14" />
+          </svg>
+        </div>
+        <div
+          class="mt-0.5 whitespace-nowrap rounded bg-[#09100F]/95 px-1.5 py-0.5 text-center font-mono-num text-[10px] font-bold"
+          [class.text-[#94A3B8]]="light.enabled === false"
+          [class.text-[#FDE68A]]="light.enabled !== false"
+        >
+          @if (light.enabled === false) {
+            OFF ({{ light.dim_feet }} ft)
+          } @else {
+            {{ light.bright_feet }}/{{ light.dim_feet }} ft
+          }
+        </div>
+      </div>
+    }
+
+    @for (item of renderableTokens(); track item.token.id) {
+      <div
+        (pointerdown)="onTokenPointerDown($event, item)"
+        [style.left.px]="item.center.x"
+        [style.top.px]="item.center.y"
+        class="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 select-none group"
+        [class.z-20]="item.isSelected || item.isTurnActive"
+        [class.z-10]="!item.isSelected && !item.isTurnActive"
+        [class.opacity-55]="item.token.is_hidden"
+      >
+        @if (item.isTurnActive) {
+          <div
+            [style.width.px]="item.radiusPx * 2 + 14"
+            [style.height.px]="item.radiusPx * 2 + 14"
+            class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#FBBF24] animate-pulse shadow-[0_0_20px_rgba(251,191,36,0.55)]"
+          ></div>
+        }
+
+        @if (item.isTargetable) {
+          <div
+            [style.width.px]="item.radiusPx * 2 + 12"
+            [style.height.px]="item.radiusPx * 2 + 12"
+            class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed transition-transform group-hover:scale-110"
+            [class.border-[#FB923C]]="item.inTargetReach"
+            [class.border-[#94A3B8]]="!item.inTargetReach"
+          ></div>
+        }
+
+        <div
+          [style.width.px]="item.radiusPx * 2"
+          [style.height.px]="item.radiusPx * 2"
+          class="relative flex items-center justify-center rounded-full border-[3px] bg-[#0D1715] shadow-[0_6px_16px_rgba(0,0,0,0.75)] transition-transform"
+          [class.border-[#38B29A]]="item.token.faction === 'ally'"
+          [class.border-[#F43F5E]]="item.token.faction === 'enemy'"
+          [class.border-[#F59E0B]]="item.token.faction === 'neutral'"
+          [class.border-dashed]="item.token.is_hidden"
+          [class.ring-2]="item.isSelected"
+          [class.ring-white]="item.isSelected"
+          [class.grayscale]="item.token.current_hp <= 0"
+          [class.cursor-pointer]="item.isTargetable || item.isControllable"
+        >
+          <app-compendium-icon
+            [icon]="item.token.icon || 'greatsword'"
+            [color]="item.token.color || (item.token.faction === 'ally' ? '#5EEAD4' : '#FDA4AF')"
+            sizeClass="h-6 w-6"
+          />
+
+          @if (item.token.current_hp <= 0) {
+            <div
+              class="absolute inset-0 flex items-center justify-center rounded-full bg-black/70 text-xs font-extrabold text-[#FDA4AF]"
+            >
+              KO
+            </div>
+          }
+
+          @if (item.token.shield_raised) {
+            <span
+              title="Shield / Guard Raised"
+              class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[#7DD3FC] bg-[#0C2530] text-[10px] font-bold text-[#7DD3FC] shadow"
+            >
+              🛡
+            </span>
+          }
+
+          @if (item.token.is_hidden) {
+            <span
+              title="Hidden from Players"
+              class="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[#FCD34D] bg-[#261909] text-[9px] font-bold text-[#FDE68A]"
+            >
+              H
+            </span>
+          }
+        </div>
+
+        @if (item.isTargetable && item.distanceFromAttackerFeet !== null) {
+          <div
+            class="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border px-1.5 py-0.5 font-mono-num text-[10px] font-bold shadow"
+            [class.border-[#FB923C]]="item.inTargetReach"
+            [class.bg-[#2B160B]]="item.inTargetReach"
+            [class.text-[#FDBA74]]="item.inTargetReach"
+            [class.border-[#475569]]="!item.inTargetReach"
+            [class.bg-[#0F172A]]="!item.inTargetReach"
+            [class.text-[#94A3B8]]="!item.inTargetReach"
+          >
+            {{ item.distanceFromAttackerFeet }} ft{{ item.inTargetReach ? ' · Click' : ' · Out of Reach' }}
+          </div>
+        }
+
+        <div
+          class="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 flex flex-col items-center gap-0.5"
+        >
+          <div class="flex w-12 flex-col gap-[2px] rounded bg-black/80 p-[2px]">
+            <div class="h-1.5 w-full overflow-hidden rounded-xs bg-[#2A1016]">
+              <div
+                class="h-full bg-[#E11D48] transition-all duration-200"
+                [style.width.%]="item.hpPct"
+              ></div>
+            </div>
+            @if (item.token.max_sp > 0) {
+              <div class="h-1 w-full overflow-hidden rounded-xs bg-[#0D2530]">
+                <div
+                  class="h-full bg-[#38BDF8] transition-all duration-200"
+                  [style.width.%]="item.spPct"
+                ></div>
+              </div>
+            }
+          </div>
+
+          <div class="flex items-center gap-0.5">
+            @for (pip of item.apPips; track pip) {
+              <span
+                class="h-1.5 w-1.5 rounded-full border border-black/60"
+                [class.bg-[#FBBF24]]="pip < item.token.current_ap"
+                [class.bg-[#1F2E2C]]="pip >= item.token.current_ap"
+              ></span>
+            }
+          </div>
+
+          <span
+            class="max-w-[96px] truncate rounded bg-[#070D0C]/90 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[#EBF5F3] shadow"
+          >
+            {{ item.token.name }}
+          </span>
+
+          @if (item.token.statuses.length > 0) {
+            <div class="flex flex-wrap justify-center gap-0.5">
+              @for (st of item.token.statuses; track st) {
+                <span
+                  class="rounded border border-[#FDA4AF]/50 bg-[#3B1822]/95 px-1 py-[1px] text-[8px] font-bold uppercase text-[#FDA4AF]"
+                >
+                  {{ st }}
+                </span>
+              }
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  @if (lightContextMenu(); as menu) {
+    @if (contextMenuLight(); as menuLight) {
+      <div
+        (pointerdown)="$event.stopPropagation()"
+        (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+        [style.left.px]="menu.screenX"
+        [style.top.px]="menu.screenY"
+        class="mot-float absolute z-40 w-44 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+      >
+        <div class="flex items-center justify-between border-b border-[#243B37] px-2.5 py-1.5">
+          <span class="font-display text-[11px] font-bold text-white">Light Source</span>
+          <span class="font-mono-num text-[10px] text-[#FDE68A]">
+            {{ menuLight.bright_feet }}/{{ menuLight.dim_feet }} ft
+          </span>
+        </div>
+
+        <div class="mt-1 space-y-0.5">
+          <button
+            type="button"
+            (click)="openEditLightModal(menuLight.id)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <svg class="h-3.5 w-3.5 text-[#FB923C]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            <span>Edit Light...</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="toggleLightEnabledFromMenu(menuLight)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#8AB0AB] hover:bg-[#192B28] hover:text-white"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+              <line x1="12" y1="2" x2="12" y2="12" />
+            </svg>
+            <span>{{ menuLight.enabled === false ? 'Turn Light On' : 'Turn Light Off' }}</span>
+          </button>
+
+          <div class="my-0.5 border-t border-[#243B37]"></div>
+
+          <button
+            type="button"
+            (click)="deleteLightFromMenu(menuLight.id)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDA4AF] hover:bg-[#3B1822] hover:text-white"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            <span>Delete Light</span>
+          </button>
+        </div>
+      </div>
+    }
+  }
+
+  @if (editingLightDraft(); as draft) {
+    <div
+      (pointerdown)="$event.stopPropagation()"
+      (wheel)="$event.stopPropagation()"
+      (contextmenu)="$event.stopPropagation()"
+      class="mot-float absolute left-1/2 top-1/2 z-50 w-[min(92vw,340px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[#C4491A] bg-[#0D1615]/98 p-4 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-3.5"
+    >
+      <div class="flex items-center justify-between border-b border-[#243B37] pb-2.5">
+        <div class="flex items-center gap-2">
+          <span
+            class="h-3 w-3 rounded-full border border-white/30"
+            [style.background-color]="draft.color"
+          ></span>
+          <h3 class="font-display text-sm font-bold text-white">Edit Light Source</h3>
+        </div>
+        <button
+          type="button"
+          (click)="cancelEditingLight()"
+          class="text-sm font-bold text-[#8AB0AB] hover:text-white"
+        >
+          &times;
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block space-y-1">
+          <span class="font-bold text-white">Dim Range (ft)</span>
+          <input
+            type="number"
+            min="0"
+            max="300"
+            step="5"
+            [ngModel]="draft.dim_feet"
+            (ngModelChange)="updateEditLightDimFeet($event)"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
+          />
+          <span class="block text-[10px] text-[#8AB0AB]">Total emitted radius</span>
+        </label>
+
+        <label class="block space-y-1">
+          <span class="font-bold text-white">Bright Range (ft)</span>
+          <input
+            type="number"
+            min="0"
+            max="300"
+            step="5"
+            [ngModel]="draft.bright_feet"
+            (ngModelChange)="updateEditLightBrightFeet($event)"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
+          />
+          <span class="block text-[10px] text-[#8AB0AB]">Inner bright core</span>
+        </label>
+      </div>
+
+      <div class="space-y-1.5">
+        <span class="block font-bold text-white">Light Color</span>
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5">
+            @for (swatch of lightColorSwatches; track swatch) {
+              <button
+                type="button"
+                (click)="updateEditLightColor(swatch)"
+                [style.background-color]="swatch"
+                class="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110"
+                [class.border-white]="draft.color.toUpperCase() === swatch"
+                [class.border-black/40]="draft.color.toUpperCase() !== swatch"
+              ></button>
+            }
+          </div>
+
+          <input
+            type="color"
+            [ngModel]="draft.color"
+            (ngModelChange)="updateEditLightColor($event)"
+            class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
+            title="Custom Color"
+          />
+        </div>
+      </div>
+
+      <label class="flex cursor-pointer items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold">
+        <span>Emit Illumination</span>
+        <input
+          type="checkbox"
+          [ngModel]="draft.enabled"
+          (ngModelChange)="updateEditLightEnabled($event)"
+          class="h-4 w-4 accent-[#C4491A]"
+        />
+      </label>
+
+      <div class="flex items-center justify-between gap-2 border-t border-[#243B37] pt-2.5">
+        <button
+          type="button"
+          (click)="deleteLightFromMenu(draft.lightId)"
+          class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-1.5 font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+        >
+          Delete
+        </button>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            (click)="cancelEditingLight()"
+            class="rounded-lg border border-[#243B37] bg-[#142220] px-3 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            (click)="saveEditingLight()"
+            class="btn-copper rounded-lg px-3.5 py-1.5 font-bold"
+          >
+            Save Light
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div
+    (pointerdown)="$event.stopPropagation()"
+    class="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-xl border border-[#243B37] bg-[#0D1615]/92 px-2.5 py-1.5 text-xs text-[#EBF5F3] shadow-lg backdrop-blur-xs"
+  >
+    @if (hoveredHex(); as h) {
+      <span class="hidden sm:inline-block border-r border-[#243B37] pr-2 font-mono-num text-[11px] text-[#8AB0AB]">
+        Hex ({{ h.col }}, {{ h.row }})
+      </span>
+    }
+
+    <span class="hidden md:inline-block border-r border-[#243B37] pr-2 text-[11px] text-[#8AB0AB]">
+      Alt+Click: Ping
+    </span>
+
+    <button
+      type="button"
+      (click)="zoomByStep(-0.15)"
+      class="flex h-6 w-6 items-center justify-center rounded-md border border-[#243B37] bg-[#142220] font-mono-num font-bold text-[#EBF5F3] hover:border-[#C4491A]"
+      title="Zoom Out"
+    >
+      &minus;
+    </button>
+
+    <span class="min-w-[44px] text-center font-mono-num text-[11px] font-bold text-white">
+      {{ zoomPercent() }}%
+    </span>
+
+    <button
+      type="button"
+      (click)="zoomByStep(0.15)"
+      class="flex h-6 w-6 items-center justify-center rounded-md border border-[#243B37] bg-[#142220] font-mono-num font-bold text-[#EBF5F3] hover:border-[#C4491A]"
+      title="Zoom In"
+    >
+      +
+    </button>
+
+    <button
+      type="button"
+      (click)="fitMapToViewport()"
+      class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+      title="Fit Battlemap to Viewport"
+    >
+      Fit
+    </button>
+  </div>
+</div>

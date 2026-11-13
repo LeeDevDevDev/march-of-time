@@ -47,6 +47,29 @@ import {
 } from './features/content-manager/content-manager.component';
 import { CampaignService } from './features/dashboard/services/campaign.service';
 import {
+  getLegalDefenderReactions,
+  resolveClashReaction,
+  roll2d10Check,
+} from './features/vtt/engine/clash.engine';
+import {
+  HexGridGeometry,
+  findHexPath,
+  getHexDistanceFeet,
+  hexToWorldCenter,
+  worldPointToHex,
+} from './features/vtt/engine/hex-grid.engine';
+import {
+  buildLightPolygons,
+  buildObserverVisions,
+  collectNewlyExploredHexKeys,
+  isWorldPointVisibleToObservers,
+} from './features/vtt/engine/visibility.engine';
+import {
+  VttPendingClash,
+  VttTokenModel,
+  VttWallSegment,
+} from './features/vtt/models/vtt.model';
+import {
   KeywordTooltipService,
   computeKeywordTooltipPosition,
 } from './shared/keyword-text/keyword-tooltip.service';
@@ -1192,5 +1215,312 @@ describe('App', () => {
     expect(artWhenLightActive.meetsWeaponRequirement).toBe(true);
     expect(artWhenLightActive.weaponRequirementUnmetReason).toBeNull();
     expect(artWhenLightActive.alternateSlotSatisfiesWeaponReq).toBe(false);
+  });
+
+  it('should round-trip flat-top hex coordinates in feet and route A* movement around closed doors and walls', () => {
+    const geom: HexGridGeometry = {
+      gridWidth: 12,
+      gridHeight: 10,
+      gridSizePx: 64,
+      offsetX: 16,
+      offsetY: 20,
+    };
+
+    for (const sample of [
+      { col: 0, row: 0 },
+      { col: 1, row: 0 },
+      { col: 4, row: 5 },
+      { col: 7, row: 3 },
+      { col: 11, row: 9 },
+    ]) {
+      const worldPt = hexToWorldCenter(sample, geom);
+      const back = worldPointToHex(worldPt, geom);
+      expect(back).toEqual(sample);
+    }
+
+    expect(getHexDistanceFeet({ col: 2, row: 2 }, { col: 2, row: 2 })).toBe(0);
+    expect(getHexDistanceFeet({ col: 2, row: 2 }, { col: 2, row: 5 })).toBe(15);
+
+    const startCenter = hexToWorldCenter({ col: 2, row: 3 }, geom);
+    const nextCenter = hexToWorldCenter({ col: 4, row: 3 }, geom);
+    const midX = (startCenter.x + nextCenter.x) / 2;
+
+    const closedDoor: VttWallSegment = {
+      id: 'door-1',
+      x1: midX,
+      y1: startCenter.y - 45,
+      x2: midX,
+      y2: startCenter.y + 45,
+      kind: 'door',
+      open: false,
+    };
+
+    const detoured = findHexPath(
+      { col: 2, row: 3 },
+      { col: 4, row: 3 },
+      geom,
+      [closedDoor]
+    );
+    expect(detoured.reachable).toBe(true);
+    expect(detoured.feet).toBeGreaterThan(10);
+
+    const openedDoor: VttWallSegment = { ...closedDoor, open: true };
+    const direct = findHexPath(
+      { col: 2, row: 3 },
+      { col: 4, row: 3 },
+      geom,
+      [openedDoor]
+    );
+    expect(direct.reachable).toBe(true);
+    expect(direct.feet).toBe(10);
+  });
+
+  it('should compute raycasted VTT visibility across darkness, dynamic torches, windows, and doors', () => {
+    const geom: HexGridGeometry = {
+      gridWidth: 14,
+      gridHeight: 8,
+      gridSizePx: 64,
+      offsetX: 0,
+      offsetY: 0,
+    };
+
+    const observer: VttTokenModel = {
+      id: 'tok-hero',
+      encounter_id: 'enc-1',
+      character_id: 'char-1',
+      owner_id: 'user-1',
+      name: 'Vanguard',
+      faction: 'ally',
+      x: 1,
+      y: 3,
+      q: 1,
+      r: 3,
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      current_hp: 10,
+      max_hp: 10,
+      current_sp: 6,
+      max_sp: 6,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 15,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {},
+    };
+
+    const distantTargetPt = hexToWorldCenter({ col: 9, row: 3 }, geom);
+    const darkVisions = buildObserverVisions([observer], [], geom, false, 1600);
+    expect(
+      isWorldPointVisibleToObservers(distantTargetPt, darkVisions, [], [], false)
+    ).toBe(false);
+
+    const distantTorch = {
+      id: 'light-torch-1',
+      x: distantTargetPt.x,
+      y: distantTargetPt.y,
+      bright_feet: 15,
+      dim_feet: 30,
+      color: '#FF9B42',
+      enabled: true,
+    };
+    const openLights = buildLightPolygons([distantTorch], [observer], [], geom);
+    expect(
+      isWorldPointVisibleToObservers(
+        distantTargetPt,
+        darkVisions,
+        openLights,
+        [],
+        false
+      )
+    ).toBe(true);
+
+    const midPt = hexToWorldCenter({ col: 5, row: 3 }, geom);
+    const closedDoor: VttWallSegment = {
+      id: 'door-hall',
+      x1: midPt.x,
+      y1: midPt.y - 120,
+      x2: midPt.x,
+      y2: midPt.y + 120,
+      kind: 'door',
+      open: false,
+    };
+    const blockedVisions = buildObserverVisions(
+      [observer],
+      [closedDoor],
+      geom,
+      false,
+      1600
+    );
+    const blockedLights = buildLightPolygons(
+      [distantTorch],
+      [observer],
+      [closedDoor],
+      geom
+    );
+    expect(
+      isWorldPointVisibleToObservers(
+        distantTargetPt,
+        blockedVisions,
+        blockedLights,
+        [closedDoor],
+        false
+      )
+    ).toBe(false);
+
+    const windowSeg: VttWallSegment = { ...closedDoor, kind: 'window' };
+    const windowVisions = buildObserverVisions(
+      [observer],
+      [windowSeg],
+      geom,
+      false,
+      1600
+    );
+    expect(
+      isWorldPointVisibleToObservers(
+        distantTargetPt,
+        windowVisions,
+        openLights,
+        [windowSeg],
+        false
+      )
+    ).toBe(true);
+
+    const explored = collectNewlyExploredHexKeys(
+      new Set(),
+      windowVisions,
+      openLights,
+      [windowSeg],
+      geom,
+      false
+    );
+    expect(explored).toContain('1,3');
+    expect(explored).toContain('9,3');
+
+    const outerHexPt = hexToWorldCenter({ col: 6, row: 3 }, geom);
+    const shortRangeLights = buildLightPolygons(
+      [{ ...distantTorch, bright_feet: 5, dim_feet: 10 }],
+      [observer],
+      [],
+      geom
+    );
+    expect(
+      isWorldPointVisibleToObservers(outerHexPt, darkVisions, shortRangeLights, [], false)
+    ).toBe(false);
+
+    const editedWideLights = buildLightPolygons(
+      [{ ...distantTorch, bright_feet: 20, dim_feet: 40 }],
+      [observer],
+      [],
+      geom
+    );
+    expect(
+      isWorldPointVisibleToObservers(outerHexPt, darkVisions, editedWideLights, [], false)
+    ).toBe(true);
+
+    const toggledOffLights = buildLightPolygons(
+      [{ ...distantTorch, bright_feet: 20, dim_feet: 40, enabled: false }],
+      [observer],
+      [],
+      geom
+    );
+    expect(
+      isWorldPointVisibleToObservers(outerHexPt, darkVisions, toggledOffLights, [], false)
+    ).toBe(false);
+  });
+
+  it('should enforce Defense Triangle clash reactions, Flawless Parry Counter SP, Flawless Dodge AP refund, and SP-to-HP overflow math', () => {
+    const baseClash: VttPendingClash = {
+      id: 'clash-1',
+      attackerTokenId: 'att-1',
+      attackerName: 'Oathbreaker',
+      defenderTokenId: 'def-1',
+      defenderName: 'Duelist',
+      actionName: 'Colossal Cleave',
+      actionKind: 'combat_art',
+      apSpent: 2,
+      cooldownRounds: 2,
+      distanceFeet: 5,
+      reachFeet: 5,
+      combatTags: ['Crushing', 'Piercing'],
+      disallowedDefenses: ['Parry', 'Block'],
+      attackRoll: roll2d10Check(4, 'normal', [6, 5]),
+      rawFlatDamage: 8,
+      bonusSpDamage: 0,
+      ignoreArmorDr: 0,
+      defendedSpChip: 0,
+      pushFeet: 5,
+      selfShiftFeet: 0,
+      inflictStatuses: ['Staggered'],
+      createdAt: '2026-11-12T00:00:00Z',
+    };
+
+    const defenderCaps = {
+      currentSp: 3,
+      currentHp: 10,
+      currentAp: 2,
+      armorDr: 2,
+      shieldBlock: 4,
+      shieldRaised: true,
+      parryMod: 4,
+      dodgeMod: 4,
+      canDodge: true,
+      enablesMartialParry: true,
+      flawlessCounterSp: 6,
+    };
+
+    const legal = getLegalDefenderReactions(baseClash, defenderCaps);
+    expect(legal.canParry).toBe(false);
+    expect(legal.parryDisabledReason).toContain('Crushing');
+    expect(legal.canDodge).toBe(true);
+    expect(legal.blockActive).toBe(false);
+    expect(legal.blockDisabledByPiercing).toBe(true);
+
+    const directHit = resolveClashReaction(baseClash, 'take_hit', defenderCaps);
+    expect(directHit.hitLanded).toBe(true);
+    expect(directHit.shieldMitigated).toBe(0);
+    expect(directHit.spDamageToDefender).toBe(3);
+    expect(directHit.armorMitigated).toBe(2);
+    expect(directHit.hpDamageToDefender).toBe(3);
+    expect(directHit.inflictedStatuses).toEqual(['Staggered']);
+
+    const flawlessDodge = resolveClashReaction(
+      baseClash,
+      'dodge',
+      defenderCaps,
+      roll2d10Check(4, 'normal', [9, 8])
+    );
+    expect(flawlessDodge.hitLanded).toBe(false);
+    expect(flawlessDodge.flawlessDefense).toBe(true);
+    expect(flawlessDodge.defenderApSpent).toBe(0);
+    expect(flawlessDodge.shiftDefenderFeet).toBe(5);
+
+    const parryableClash: VttPendingClash = {
+      ...baseClash,
+      combatTags: ['Sweeping'],
+      disallowedDefenses: ['Dodge'],
+    };
+    const sweepLegal = getLegalDefenderReactions(parryableClash, defenderCaps);
+    expect(sweepLegal.canParry).toBe(true);
+    expect(sweepLegal.canDodge).toBe(false);
+
+    const flawlessParry = resolveClashReaction(
+      parryableClash,
+      'parry',
+      defenderCaps,
+      roll2d10Check(4, 'normal', [9, 9])
+    );
+    expect(flawlessParry.hitLanded).toBe(false);
+    expect(flawlessParry.flawlessDefense).toBe(true);
+    expect(flawlessParry.defenderApSpent).toBe(1);
+    expect(flawlessParry.counterSpToAttacker).toBe(6);
   });
 });

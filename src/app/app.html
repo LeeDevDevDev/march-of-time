@@ -1,8 +1,9 @@
 <div
   class="min-h-screen transition-colors duration-200 bg-[var(--mot-bg)] text-[var(--mot-text)]"
-  [class.theme-light]="themeStore.sheetTheme() === 'light'"
-  [class.theme-dark]="themeStore.sheetTheme() === 'dark'"
+  [class.theme-light]="activeTheme() === 'light'"
+  [class.theme-dark]="activeTheme() === 'dark'"
 >
+  @if (!isVttRoute()) {
   <header class="sticky top-0 z-40 border-b border-[#243B37] bg-[#122220] text-[#EBF5F3]">
     <div
       class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8"
@@ -171,6 +172,7 @@
       }
     </div>
   </header>
+  }
 
   <main>
     <router-outlet />

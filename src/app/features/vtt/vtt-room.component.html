@@ -1,0 +1,1609 @@
+<div class="flex h-screen w-screen flex-col overflow-hidden bg-[var(--mot-bg)] text-[var(--mot-text)]">
+  <header
+    class="z-30 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-3 text-[#EBF5F3]"
+  >
+    <div class="flex min-w-0 items-center gap-2.5">
+      <a
+        routerLink="/dashboard"
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#8AB0AB] no-underline transition-colors hover:border-[#C4491A] hover:text-white"
+      >
+        <span>&larr;</span>
+        <span class="hidden sm:inline">Games</span>
+      </a>
+
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="truncate font-display text-sm font-bold text-white">
+            {{ vttStore.campaign()?.name || 'Battlegrid' }}
+          </span>
+          <span
+            class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase"
+            [class.bg-[#C4491A]]="vttStore.isGm()"
+            [class.text-white]="vttStore.isGm()"
+            [class.bg-[#102A36]]="!vttStore.isGm()"
+            [class.text-[#7DD3FC]]="!vttStore.isGm()"
+          >
+            {{ vttStore.isGm() ? 'GM' : 'Player' }}
+          </span>
+        </div>
+      </div>
+
+      @if (vttStore.campaign()?.invite_code; as code) {
+        <button
+          type="button"
+          (click)="copyInviteCode()"
+          class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-md border border-[#243B37] bg-[#0D1615] px-2 py-1 font-mono-num text-[11px] font-bold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+          title="Copy Campaign Invite Code"
+        >
+          {{ copiedInvite() ? 'Copied!' : 'Code: ' + code }}
+        </button>
+      }
+
+      @if (vttStore.scenes().length > 0) {
+        <div class="hidden lg:flex items-center gap-1.5 border-l border-[#243B37] pl-2.5">
+          <select
+            aria-label="Active Scene"
+            [ngModel]="vttStore.activeScene()?.id"
+            (ngModelChange)="onSceneSelectChange($event)"
+            [disabled]="!vttStore.isGm() && vttStore.scenes().length <= 1"
+            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+          >
+            @for (sc of vttStore.scenes(); track sc.id) {
+              <option [value]="sc.id">
+                {{ sc.name }}{{ sc.is_active_scene ? ' ★' : '' }}
+              </option>
+            }
+          </select>
+
+          @if (vttStore.isGm()) {
+            <button
+              type="button"
+              (click)="showNewSceneForm.update(v => !v)"
+              class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2 py-1 text-xs font-bold text-[#FB923C] hover:border-[#C4491A]"
+              title="Create New Battlemap Scene"
+            >
+              + Scene
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    @if (vttStore.activeScene(); as sc) {
+      <div class="flex items-center gap-2 overflow-x-auto">
+        @if (!sc.combat_active) {
+          <span
+            class="hidden sm:inline-block rounded-md border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB]"
+          >
+            Exploration
+          </span>
+          @if (vttStore.isGm()) {
+            <button
+              type="button"
+              (click)="vttStore.startCombatEncounter()"
+              [disabled]="vttStore.sceneTokens().length === 0"
+              class="btn-copper rounded-lg px-3 py-1 text-xs font-bold disabled:opacity-45"
+            >
+              Start Combat
+            </button>
+          }
+        } @else {
+          <span
+            class="shrink-0 rounded-md border border-[#784321] bg-[#3D2314] px-2 py-1 font-mono-num text-xs font-bold text-[#FDBA74]"
+          >
+            Round {{ sc.round_number }}
+          </span>
+
+          <div class="hidden md:flex items-center gap-1 max-w-[340px] overflow-x-auto py-0.5">
+            @for (tok of vttStore.initiativeTokens(); track tok.id) {
+              <button
+                type="button"
+                (click)="vttStore.selectedTokenId.set(tok.id)"
+                class="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
+                [class.border-[#FBBF24]]="sc.active_turn_token_id === tok.id"
+                [class.bg-[#3D280A]]="sc.active_turn_token_id === tok.id"
+                [class.text-[#FDE68A]]="sc.active_turn_token_id === tok.id"
+                [class.border-[#243B37]]="sc.active_turn_token_id !== tok.id"
+                [class.bg-[#0D1615]]="sc.active_turn_token_id !== tok.id"
+                [class.text-[#8AB0AB]]="sc.active_turn_token_id !== tok.id"
+                [class.line-through]="tok.current_hp <= 0"
+              >
+                {{ tok.name }}
+              </button>
+            }
+          </div>
+
+          @if (vttStore.isGm()) {
+            <button
+              type="button"
+              (click)="vttStore.advanceTurn()"
+              class="btn-copper shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold"
+            >
+              Next Turn &rarr;
+            </button>
+            <button
+              type="button"
+              (click)="vttStore.endCombatEncounter()"
+              class="shrink-0 rounded-lg border border-[#243B37] bg-[#0D1615] px-2 py-1 text-[11px] font-semibold text-[#FDA4AF] hover:border-[#E11D48]"
+            >
+              End
+            </button>
+          }
+        }
+      </div>
+    }
+
+    <div class="flex shrink-0 items-center gap-1.5">
+      @if (vttStore.isGm()) {
+        <button
+          type="button"
+          (click)="vttStore.previewPlayerVision.update(v => !v)"
+          class="rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors"
+          [class.border-[#38B29A]]="vttStore.previewPlayerVision()"
+          [class.bg-[#102B26]]="vttStore.previewPlayerVision()"
+          [class.text-[#5EEAD4]]="vttStore.previewPlayerVision()"
+          [class.border-[#243B37]]="!vttStore.previewPlayerVision()"
+          [class.bg-[#0D1615]]="!vttStore.previewPlayerVision()"
+          [class.text-[#8AB0AB]]="!vttStore.previewPlayerVision()"
+          title="Preview exact Line-of-Sight & Fog of War as seen by Players"
+        >
+          {{ vttStore.previewPlayerVision() ? 'Player LoS: ON' : 'Preview LoS' }}
+        </button>
+      }
+
+      <button
+        type="button"
+        (click)="themeStore.toggleVttTheme(authStore.user()?.id)"
+        class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+        title="Toggle VTT Sidebar Theme"
+      >
+        {{ themeStore.vttTheme() === 'dark' ? 'Dark UI' : 'Light UI' }}
+      </button>
+
+      <button
+        type="button"
+        (click)="sidebarOpen.update(v => !v)"
+        class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+      >
+        {{ sidebarOpen() ? 'Hide Panel' : 'Open Panel' }}
+      </button>
+    </div>
+  </header>
+
+  @if (showNewSceneForm() && vttStore.isGm()) {
+    <form
+      (ngSubmit)="submitNewScene()"
+      class="z-20 flex flex-wrap items-center gap-2.5 border-b border-[#C4491A] bg-[#142220] px-4 py-2 text-xs text-[#EBF5F3]"
+    >
+      <span class="font-display font-bold text-white">New Battlemap Scene:</span>
+      <input
+        type="text"
+        name="newSceneName"
+        required
+        [(ngModel)]="newSceneName"
+        placeholder="e.g., Sunken Reliquary"
+        class="rounded-md border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-xs text-white focus:border-[#C4491A] focus:outline-none"
+      />
+      <label class="flex items-center gap-1 font-mono-num text-[#8AB0AB]">
+        Cols
+        <input
+          type="number"
+          name="newSceneWidth"
+          min="6"
+          max="48"
+          [(ngModel)]="newSceneWidth"
+          class="w-14 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs text-white"
+        />
+      </label>
+      <label class="flex items-center gap-1 font-mono-num text-[#8AB0AB]">
+        Rows
+        <input
+          type="number"
+          name="newSceneHeight"
+          min="6"
+          max="48"
+          [(ngModel)]="newSceneHeight"
+          class="w-14 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs text-white"
+        />
+      </label>
+      <button type="submit" class="btn-copper rounded-md px-3 py-1 font-bold">
+        Create &amp; Switch
+      </button>
+      <button
+        type="button"
+        (click)="showNewSceneForm.set(false)"
+        class="text-[#8AB0AB] hover:text-white"
+      >
+        Cancel
+      </button>
+    </form>
+  }
+
+  @if (vttStore.needsMigration() && !migrationBannerDismissed()) {
+    <div
+      class="z-20 flex items-center justify-between gap-3 border-b border-[#784321] bg-[#3D2314] px-4 py-1.5 text-xs text-[#FDBA74]"
+    >
+      <span>
+        <strong>Schema Upgrade Available:</strong> Run
+        <code class="rounded bg-black/30 px-1.5 py-0.5 font-mono-num">supabase/migrations/0004_vtt.sql</code>
+        in your Supabase SQL Editor to persist multi-scene maps, walls, dynamic lights, and Fog of War.
+      </span>
+      <button
+        type="button"
+        (click)="migrationBannerDismissed.set(true)"
+        class="shrink-0 font-bold text-white hover:underline"
+      >
+        Dismiss
+      </button>
+    </div>
+  }
+
+  @if (vttStore.isLoading()) {
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 bg-[#09100F] text-[#EBF5F3]">
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-[#C4491A] border-t-transparent"></div>
+      <p class="font-display text-sm font-bold">Preparing Tactical Battlegrid...</p>
+    </div>
+  } @else if (vttStore.error()) {
+    <div class="flex flex-1 flex-col items-center justify-center gap-4 bg-[#09100F] p-6 text-center text-[#EBF5F3]">
+      <p class="font-display text-lg font-bold text-[#FDA4AF]">{{ vttStore.error() }}</p>
+      <a routerLink="/dashboard" class="btn-copper rounded-lg px-4 py-2 text-xs font-bold no-underline">
+        Return to Dashboard
+      </a>
+    </div>
+  } @else {
+    <div class="relative flex flex-1 min-h-0 overflow-hidden">
+      <div class="relative flex-1 min-w-0 h-full overflow-hidden">
+        <app-vtt-canvas #vttCanvas class="block h-full w-full" />
+
+        <div class="pointer-events-none absolute left-3 top-3 z-20 flex items-start gap-2">
+          <div
+            class="pointer-events-auto flex flex-col gap-1 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-1.5 text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+          >
+            <button
+              type="button"
+              (click)="selectTool('select')"
+              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              [class.bg-[#C4491A]]="vttStore.activeTool() === 'select'"
+              [class.text-white]="vttStore.activeTool() === 'select'"
+              [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'select'"
+              [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'select'"
+              title="Select & Move Tokens"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+              </svg>
+              <span>Select</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="selectTool('pan')"
+              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              [class.bg-[#C4491A]]="vttStore.activeTool() === 'pan'"
+              [class.text-white]="vttStore.activeTool() === 'pan'"
+              [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'pan'"
+              [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'pan'"
+              title="Pan Battlemap (or hold Space / Right-Drag)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
+              </svg>
+              <span>Pan</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="selectTool('ruler')"
+              class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              [class.bg-[#C4491A]]="vttStore.activeTool() === 'ruler'"
+              [class.text-white]="vttStore.activeTool() === 'ruler'"
+              [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'ruler'"
+              [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'ruler'"
+              title="Measure Distance in Feet"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z" />
+                <path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2" />
+              </svg>
+              <span>Measure</span>
+            </button>
+
+            @if (vttStore.isGm()) {
+              <div class="my-0.5 border-t border-[#243B37]"></div>
+
+              <button
+                type="button"
+                (click)="selectTool('wall')"
+                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                [class.bg-[#C4491A]]="vttStore.activeTool() === 'wall'"
+                [class.text-white]="vttStore.activeTool() === 'wall'"
+                [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'wall'"
+                [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'wall'"
+                title="Draw Dynamic Vision Walls, Doors & Windows"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M3 9h18M3 15h18M9 3v6M15 9v6M9 15v6" />
+                </svg>
+                <span>Walls</span>
+              </button>
+
+              <button
+                type="button"
+                (click)="selectTool('light')"
+                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                [class.bg-[#C4491A]]="vttStore.activeTool() === 'light'"
+                [class.text-white]="vttStore.activeTool() === 'light'"
+                [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'light'"
+                [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'light'"
+                title="Place Dynamic Torches & Light Sources"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2c1.8 3.2 5 5.7 5 10a5 5 0 0 1-10 0c0-2.5 1.3-4.7 2.7-6.5.4 1.6 1.5 2.5 2.3 2.5.4-2 .2-4.2 0-6z" />
+                </svg>
+                <span>Lights</span>
+              </button>
+
+              <button
+                type="button"
+                (click)="selectTool('fog')"
+                class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                [class.bg-[#C4491A]]="vttStore.activeTool() === 'fog'"
+                [class.text-white]="vttStore.activeTool() === 'fog'"
+                [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'fog'"
+                [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'fog'"
+                title="Fog of War & Global Daylight Settings"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+                </svg>
+                <span>Fog</span>
+              </button>
+            }
+          </div>
+
+          @if (vttStore.isGm() && vttStore.activeTool() === 'wall') {
+            <div
+              class="pointer-events-auto w-56 space-y-2.5 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+            >
+              <div class="font-display font-bold text-white">Walls &amp; Doors</div>
+              <div class="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  (click)="selectWallKind('wall')"
+                  class="rounded-md border px-2 py-1 font-semibold"
+                  [class.border-[#F59E0B]]="vttStore.activeWallKind() === 'wall'"
+                  [class.bg-[#271907]]="vttStore.activeWallKind() === 'wall'"
+                  [class.text-[#FDE68A]]="vttStore.activeWallKind() === 'wall'"
+                  [class.border-[#243B37]]="vttStore.activeWallKind() !== 'wall'"
+                  [class.text-[#8AB0AB]]="vttStore.activeWallKind() !== 'wall'"
+                >
+                  Wall
+                </button>
+                <button
+                  type="button"
+                  (click)="selectWallKind('door')"
+                  class="rounded-md border px-2 py-1 font-semibold"
+                  [class.border-[#EA580C]]="vttStore.activeWallKind() === 'door'"
+                  [class.bg-[#2B1408]]="vttStore.activeWallKind() === 'door'"
+                  [class.text-[#FDBA74]]="vttStore.activeWallKind() === 'door'"
+                  [class.border-[#243B37]]="vttStore.activeWallKind() !== 'door'"
+                  [class.text-[#8AB0AB]]="vttStore.activeWallKind() !== 'door'"
+                >
+                  Door
+                </button>
+                <button
+                  type="button"
+                  (click)="selectWallKind('window')"
+                  class="rounded-md border px-2 py-1 font-semibold"
+                  [class.border-[#38BDF8]]="vttStore.activeWallKind() === 'window'"
+                  [class.bg-[#0C2530]]="vttStore.activeWallKind() === 'window'"
+                  [class.text-[#7DD3FC]]="vttStore.activeWallKind() === 'window'"
+                  [class.border-[#243B37]]="vttStore.activeWallKind() !== 'window'"
+                  [class.text-[#8AB0AB]]="vttStore.activeWallKind() !== 'window'"
+                >
+                  Window
+                </button>
+              </div>
+              <p class="text-[11px] leading-relaxed text-[#8AB0AB]">
+                Drag on the map to draw segments. Endpoints snap automatically; hold
+                <strong class="text-white">Shift</strong> for free placement. Click
+                <strong class="text-[#FDA4AF]">&times;</strong> on any segment to remove.
+              </p>
+              @if ((vttStore.activeScene()?.walls?.length ?? 0) > 0) {
+                <button
+                  type="button"
+                  (click)="vttStore.clearAllWalls()"
+                  class="w-full rounded-md border border-[#6E293B] bg-[#3B1822] px-2.5 py-1 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                >
+                  Clear All Walls ({{ vttStore.activeScene()?.walls?.length }})
+                </button>
+              }
+            </div>
+          }
+
+          @if (vttStore.isGm() && vttStore.activeTool() === 'light') {
+            <div
+              class="pointer-events-auto w-60 space-y-2.5 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+            >
+              <div class="font-display font-bold text-white">Ambient Lights</div>
+              <p class="text-[11px] leading-relaxed text-[#8AB0AB]">
+                Click on the map to place a light object, or click and drag to size its radius.
+                Drag any light to move it, or
+                <strong class="text-white">right-click</strong> it to
+                <strong class="text-[#FDE68A]">Edit</strong> its range (<strong class="text-white">ft</strong>) or
+                <strong class="text-[#FDA4AF]">Delete</strong> it.
+              </p>
+              @if ((vttStore.activeScene()?.lights?.length ?? 0) > 0) {
+                <button
+                  type="button"
+                  (click)="vttStore.clearAllLights()"
+                  class="w-full rounded-md border border-[#6E293B] bg-[#3B1822] px-2.5 py-1 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                >
+                  Clear All Lights ({{ vttStore.activeScene()?.lights?.length }})
+                </button>
+              }
+            </div>
+          }
+
+          @if (vttStore.isGm() && vttStore.activeTool() === 'fog' && vttStore.activeScene(); as sc) {
+            <div
+              class="pointer-events-auto w-60 space-y-2.5 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+            >
+              <div class="font-display font-bold text-white">Fog &amp; Illumination</div>
+
+              <button
+                type="button"
+                (click)="toggleSceneBoolean('fog_enabled')"
+                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold"
+              >
+                <span>Dynamic Fog of War</span>
+                <span
+                  class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#38B29A]]="sc.fog_enabled"
+                  [class.text-[#061412]]="sc.fog_enabled"
+                  [class.bg-[#243B37]]="!sc.fog_enabled"
+                  [class.text-[#8AB0AB]]="!sc.fog_enabled"
+                >
+                  {{ sc.fog_enabled ? 'ON' : 'OFF' }}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                (click)="toggleSceneBoolean('global_illumination')"
+                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold"
+              >
+                <span>Global Daylight</span>
+                <span
+                  class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#FBBF24]]="sc.global_illumination"
+                  [class.text-[#1E1303]]="sc.global_illumination"
+                  [class.bg-[#243B37]]="!sc.global_illumination"
+                  [class.text-[#8AB0AB]]="!sc.global_illumination"
+                >
+                  {{ sc.global_illumination ? 'DAYLIGHT' : 'DARKNESS' }}
+                </span>
+              </button>
+
+              <div class="grid grid-cols-2 gap-1.5 pt-1">
+                <button
+                  type="button"
+                  (click)="vttStore.revealEntireMapFog()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1.5 text-[11px] font-semibold text-[#5EEAD4] hover:border-[#38B29A]"
+                >
+                  Reveal Shroud
+                </button>
+                <button
+                  type="button"
+                  (click)="vttStore.resetExploredFog()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1.5 text-[11px] font-semibold text-[#FDA4AF] hover:border-[#F43F5E]"
+                >
+                  Reset Fog
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+
+        @if (vttStore.pendingTargetAction(); as targetAct) {
+          <div
+            class="absolute left-1/2 top-3 z-30 w-[min(92vw,580px)] -translate-x-1/2 rounded-2xl border border-[#C4491A] bg-[#0D1615]/96 p-3.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-2.5"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded bg-[#C4491A] px-2 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
+                  Select Target
+                </span>
+                <span class="font-display text-sm font-bold text-white">
+                  {{ targetAct.actionName }}
+                </span>
+                <span class="font-mono-num text-[#8AB0AB]">
+                  {{ targetAct.apCost }} AP &middot; Reach {{ targetAct.reachFeet }} ft &middot; +{{ targetAct.attackMod }} &middot; {{ targetAct.flatDamage }} DMG
+                </span>
+              </div>
+
+              <div class="flex items-center gap-1">
+                @for (tag of targetAct.combatTags; track tag) {
+                  <span
+                    class="rounded border px-1.5 py-0.5 text-[10px] font-bold"
+                    [class]="tagBadgeClass(tag)"
+                  >
+                    {{ tag }}
+                  </span>
+                }
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-[#243B37] pt-2">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  (click)="vttStore.attackRollMode.set('normal')"
+                  class="rounded-md border px-2 py-1 text-[11px] font-semibold"
+                  [class.border-[#C4491A]]="vttStore.attackRollMode() === 'normal'"
+                  [class.bg-[#27160E]]="vttStore.attackRollMode() === 'normal'"
+                  [class.text-white]="vttStore.attackRollMode() === 'normal'"
+                  [class.border-[#243B37]]="vttStore.attackRollMode() !== 'normal'"
+                  [class.text-[#8AB0AB]]="vttStore.attackRollMode() !== 'normal'"
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  (click)="vttStore.attackRollMode.set('advantage')"
+                  class="rounded-md border px-2 py-1 text-[11px] font-semibold"
+                  [class.border-[#38B29A]]="vttStore.attackRollMode() === 'advantage'"
+                  [class.bg-[#102B26]]="vttStore.attackRollMode() === 'advantage'"
+                  [class.text-[#5EEAD4]]="vttStore.attackRollMode() === 'advantage'"
+                  [class.border-[#243B37]]="vttStore.attackRollMode() !== 'advantage'"
+                  [class.text-[#8AB0AB]]="vttStore.attackRollMode() !== 'advantage'"
+                >
+                  Advantage
+                </button>
+                <button
+                  type="button"
+                  (click)="vttStore.attackRollMode.set('disadvantage')"
+                  class="rounded-md border px-2 py-1 text-[11px] font-semibold"
+                  [class.border-[#F43F5E]]="vttStore.attackRollMode() === 'disadvantage'"
+                  [class.bg-[#3B1822]]="vttStore.attackRollMode() === 'disadvantage'"
+                  [class.text-[#FDA4AF]]="vttStore.attackRollMode() === 'disadvantage'"
+                  [class.border-[#243B37]]="vttStore.attackRollMode() !== 'disadvantage'"
+                  [class.text-[#8AB0AB]]="vttStore.attackRollMode() !== 'disadvantage'"
+                >
+                  Disadvantage
+                </button>
+
+                <input
+                  type="number"
+                  placeholder="Manual Total"
+                  [ngModel]="manualAttackTotalInput"
+                  (ngModelChange)="onManualAttackInputChange($event)"
+                  class="w-28 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[11px] text-white placeholder-[#8AB0AB]/60"
+                  title="Optional: Enter physical dice total override instead of auto-rolling 2d10"
+                />
+              </div>
+
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  (click)="vttStore.rollPendingActionFreeform()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+                >
+                  Roll Freeform
+                </button>
+                <button
+                  type="button"
+                  (click)="vttStore.cancelTargetSelection()"
+                  class="rounded-md border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+
+        @if (vttStore.pendingClash(); as clash) {
+          <div
+            class="absolute left-1/2 top-3 z-30 w-[min(94vw,640px)] -translate-x-1/2 rounded-2xl border-2 border-[#C4491A] bg-[#0D1615]/97 p-4 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded bg-[#C4491A] px-2 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
+                    Active Clash
+                  </span>
+                  <span class="font-display text-sm font-bold text-white">
+                    {{ clash.attackerName }} &rarr; {{ clash.defenderName }}
+                  </span>
+                  <span class="font-semibold text-[#FDBA74]">
+                    {{ clash.actionName }}
+                  </span>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 font-mono-num text-[11px] text-[#8AB0AB]">
+                  <span>Distance {{ clash.distanceFeet }} ft (Reach {{ clash.reachFeet }} ft)</span>
+                  @if (clash.distanceFeet > clash.reachFeet) {
+                    <span class="rounded bg-[#3B1822] px-1.5 py-0.5 text-[10px] font-bold text-[#FDA4AF]">
+                      Beyond Reach
+                    </span>
+                  }
+                  <span>&middot; Raw DMG {{ clash.rawFlatDamage }}</span>
+                  @if (clash.ignoreArmorDr > 0) {
+                    <span>&middot; Ignore {{ clash.ignoreArmorDr }} DR</span>
+                  }
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <div class="rounded-xl border border-[#784321] bg-[#2B160B] px-3 py-1.5 text-right">
+                  <div class="text-[10px] uppercase text-[#FDBA74]">Attack Roll</div>
+                  <div class="font-mono-num text-base font-extrabold text-white">
+                    {{ clash.attackRoll.total }}
+                  </div>
+                  <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+                    ({{ clash.attackRoll.d1 }}+{{ clash.attackRoll.d2 }}){{ clash.attackRoll.modifier >= 0 ? '+' : '' }}{{ clash.attackRoll.modifier }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            @if (clash.combatTags.length > 0 || clash.inflictStatuses.length > 0) {
+              <div class="flex flex-wrap items-center gap-1.5">
+                @for (tag of clash.combatTags; track tag) {
+                  <span
+                    class="rounded border px-2 py-0.5 text-[10px] font-bold"
+                    [class]="tagBadgeClass(tag)"
+                  >
+                    {{ tag }}
+                    @if (tag === 'Crushing') { &middot; Cannot Parry }
+                    @if (tag === 'Sweeping') { &middot; Cannot Dodge }
+                    @if (tag === 'Piercing') { &middot; Cannot Block }
+                  </span>
+                }
+                @for (st of clash.inflictStatuses; track st) {
+                  <span class="rounded border border-[#FDA4AF]/40 bg-[#3B1822] px-2 py-0.5 text-[10px] font-bold text-[#FDA4AF]">
+                    On Hit: {{ st }}
+                  </span>
+                }
+              </div>
+            }
+
+            @if (!clash.resolution) {
+              @if (canRespondToClash() && vttStore.pendingClashLegalReactions(); as legal) {
+                <div class="space-y-2 border-t border-[#243B37] pt-2.5">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-semibold text-white">
+                      Choose {{ clash.defenderName }}&rsquo;s Reaction:
+                    </span>
+                    <input
+                      type="number"
+                      placeholder="Manual Def Total"
+                      [(ngModel)]="manualDefenseTotalInput"
+                      class="w-32 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[11px] text-white placeholder-[#8AB0AB]/60"
+                    />
+                  </div>
+
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      [disabled]="!legal.canParry"
+                      (click)="chooseClashReaction('parry')"
+                      class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#38BDF8] disabled:opacity-45 disabled:cursor-not-allowed"
+                    >
+                      <span class="font-bold text-white">
+                        1 AP: Parry (+{{ vttStore.pendingClashCapabilities()?.parryMod ?? 0 }})
+                      </span>
+                      <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
+                        {{ legal.parryDisabledReason || 'Beat roll to negate; +5 Flawless Counter SP' }}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      [disabled]="!legal.canDodge"
+                      (click)="chooseClashReaction('dodge')"
+                      class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#38B29A] disabled:opacity-45 disabled:cursor-not-allowed"
+                    >
+                      <span class="font-bold text-white">
+                        1 AP: Dodge (+{{ vttStore.pendingClashCapabilities()?.dodgeMod ?? 0 }})
+                      </span>
+                      <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
+                        {{ legal.dodgeDisabledReason || 'Shift 5 ft; +5 Flawless refunds 1 AP' }}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      (click)="chooseClashReaction('take_hit')"
+                      class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#F59E0B]"
+                    >
+                      <span class="font-bold text-white">0 AP: Take Hit</span>
+                      <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
+                        @if (legal.blockActive) {
+                          Shield Block &minus;{{ legal.effectiveBlockMitigation }} DMG active
+                        } @else if (legal.blockDisabledByPiercing) {
+                          Piercing bypasses Shield Block!
+                        } @else {
+                          Absorb via Poise (SP) &rarr; Armor DR &rarr; HP
+                        }
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              } @else {
+                <div class="border-t border-[#243B37] pt-2 text-[#8AB0AB]">
+                  Awaiting <strong class="text-white">{{ clash.defenderName }}</strong> to declare a reaction...
+                </div>
+              }
+
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  (click)="vttStore.cancelPendingClash()"
+                  class="text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                >
+                  Cancel Clash
+                </button>
+              </div>
+            } @else if (clash.resolution; as res) {
+              <div class="space-y-2.5 border-t border-[#243B37] pt-2.5">
+                <div
+                  class="rounded-xl border px-3 py-2 font-semibold"
+                  [class.border-[#225C50]]="!res.hitLanded"
+                  [class.bg-[#102B26]]="!res.hitLanded"
+                  [class.text-[#5EEAD4]]="!res.hitLanded"
+                  [class.border-[#6E293B]]="res.hitLanded"
+                  [class.bg-[#3B1822]]="res.hitLanded"
+                  [class.text-[#FDA4AF]]="res.hitLanded"
+                >
+                  {{ res.summary }}
+                </div>
+
+                @if (canRespondToClash() || vttStore.isGm()) {
+                  <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    <label class="flex items-center gap-2 rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold text-white">
+                      <input
+                        type="checkbox"
+                        [(ngModel)]="overrideHitLanded"
+                        class="accent-[#C4491A]"
+                      />
+                      <span>Hit Landed</span>
+                    </label>
+
+                    <label class="block text-[10px] text-[#8AB0AB]">
+                      SP DMG
+                      <input
+                        type="number"
+                        min="0"
+                        [(ngModel)]="overrideSpDmg"
+                        class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white"
+                      />
+                    </label>
+
+                    <label class="block text-[10px] text-[#8AB0AB]">
+                      HP DMG
+                      <input
+                        type="number"
+                        min="0"
+                        [(ngModel)]="overrideHpDmg"
+                        class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white"
+                      />
+                    </label>
+
+                    <label class="block text-[10px] text-[#8AB0AB]">
+                      Counter SP
+                      <input
+                        type="number"
+                        min="0"
+                        [(ngModel)]="overrideCounterSp"
+                        class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white"
+                      />
+                    </label>
+
+                    <label class="block text-[10px] text-[#8AB0AB]">
+                      Def AP Spent
+                      <input
+                        type="number"
+                        min="0"
+                        [(ngModel)]="overrideDefAp"
+                        class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white"
+                      />
+                    </label>
+                  </div>
+
+                  <div class="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      (click)="rechooseClashReaction()"
+                      class="rounded-lg border border-[#243B37] bg-[#142220] px-3 py-1.5 text-xs font-semibold text-[#8AB0AB] hover:text-white"
+                    >
+                      Re-choose Reaction
+                    </button>
+                    <button
+                      type="button"
+                      (click)="vttStore.cancelPendingClash()"
+                      class="rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 text-xs font-semibold text-[#8AB0AB] hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      (click)="confirmApplyClashOutcome()"
+                      class="btn-copper rounded-lg px-4 py-1.5 text-xs font-bold"
+                    >
+                      Apply Outcome
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        @if (vttStore.selectedToken(); as tok) {
+          <div
+            class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 bg-[#142220]"
+                  [class.border-[#38B29A]]="tok.faction === 'ally'"
+                  [class.border-[#F43F5E]]="tok.faction === 'enemy'"
+                  [class.border-[#F59E0B]]="tok.faction === 'neutral'"
+                >
+                  <app-compendium-icon
+                    [icon]="tok.icon || 'greatsword'"
+                    [color]="tok.color || '#5EEAD4'"
+                    sizeClass="h-4 w-4"
+                  />
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-display text-sm font-bold text-white">{{ tok.name }}</span>
+                    <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                      Move {{ tok.move_feet }} ft &middot; DR {{ tok.armor_dr }}
+                      @if (tok.shield_block > 0) {
+                        &middot; Block {{ tok.shield_block }}
+                      }
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                @if (vttStore.canControlToken(tok)) {
+                  <div class="flex items-center gap-1 rounded-lg border border-[#6E293B] bg-[#251018] px-2 py-0.5 font-mono-num">
+                    <span class="text-[10px] font-bold text-[#FDA4AF]">HP</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_hp', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
+                    <span class="font-bold text-white">{{ tok.current_hp }}/{{ tok.max_hp }}</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_hp', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
+                  </div>
+
+                  <div class="flex items-center gap-1 rounded-lg border border-[#1E5263] bg-[#0D222B] px-2 py-0.5 font-mono-num">
+                    <span class="text-[10px] font-bold text-[#7DD3FC]">SP</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_sp', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
+                    <span class="font-bold text-white">{{ tok.current_sp }}/{{ tok.max_sp }}</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_sp', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
+                  </div>
+
+                  <div class="flex items-center gap-1 rounded-lg border border-[#784321] bg-[#27180B] px-2 py-0.5 font-mono-num">
+                    <span class="text-[10px] font-bold text-[#FDBA74]">AP</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_ap', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
+                    <span class="font-bold text-white">{{ tok.current_ap }}/{{ tok.max_ap }}</span>
+                    <button type="button" (click)="adjustTokenStat(tok, 'current_ap', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
+                  </div>
+                } @else {
+                  <span class="font-mono-num text-[#8AB0AB]">
+                    HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }}
+                  </span>
+                }
+
+                <button
+                  type="button"
+                  (click)="dockCollapsed.update(v => !v)"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                >
+                  {{ dockCollapsed() ? 'Expand' : 'Minimize' }}
+                </button>
+              </div>
+            </div>
+
+            @if (!dockCollapsed() && vttStore.canControlToken(tok)) {
+              <div class="mt-2.5 space-y-2 border-t border-[#243B37] pt-2.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    [disabled]="tok.current_ap < 1 || tok.current_sp >= tok.max_sp"
+                    (click)="vttStore.performStanceRecovery(tok)"
+                    class="rounded-lg border border-[#1E5263] bg-[#112E38] px-2.5 py-1 text-[11px] font-bold text-[#7DD3FC] hover:border-[#38BDF8] disabled:opacity-45"
+                  >
+                    1 AP: Stance Recovery
+                  </button>
+
+                  @if (tok.shield_block > 0) {
+                    <button
+                      type="button"
+                      [disabled]="!tok.shield_raised && tok.current_ap < 1"
+                      (click)="vttStore.toggleTokenRaiseShield(tok)"
+                      class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:opacity-45"
+                      [class.border-[#38BDF8]]="tok.shield_raised"
+                      [class.bg-[#0E3342]]="tok.shield_raised"
+                      [class.text-white]="tok.shield_raised"
+                      [class.border-[#243B37]]="!tok.shield_raised"
+                      [class.bg-[#142220]]="!tok.shield_raised"
+                      [class.text-[#BAE6FD]]="!tok.shield_raised"
+                    >
+                      {{ tok.shield_raised ? 'Guard Raised (Lower)' : '1 AP: Raise Guard' }}
+                    </button>
+                  }
+
+                  @if (vttStore.selectedTokenDerived(); as stats) {
+                    <button
+                      type="button"
+                      [disabled]="tok.current_ap < 1"
+                      (click)="vttStore.switchCharacterWeaponSlotInVtt(tok)"
+                      class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-45"
+                    >
+                      1 AP: Switch Slot
+                    </button>
+
+                    <button
+                      type="button"
+                      [disabled]="tok.current_ap < (stats.activeWeapon?.ap_cost ?? 1)"
+                      (click)="vttStore.beginWeaponTargetSelection(tok, stats.activeWeapon, stats)"
+                      class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
+                    >
+                      {{ stats.activeWeapon?.ap_cost ?? 1 }} AP: {{ stats.activeWeapon?.name || 'Unarmed' }} (+{{ stats.attackRollMod }} &middot; {{ stats.flatWeaponDamage }} DMG)
+                    </button>
+
+                    @for (art of stats.resolvedCombatArts; track art.baseNode.id) {
+                      @let cd = vttStore.getPerkCooldown(vttStore.selectedTokenCharacter(), art.baseNode.id);
+                      <button
+                        type="button"
+                        [disabled]="cd > 0 || tok.current_ap < art.apCost || !art.meetsWeaponRequirement"
+                        (click)="triggerArtFromDock(tok, art)"
+                        [title]="!art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description"
+                        class="flex items-center gap-1.5 rounded-lg border border-[#784321] bg-[#2B180C] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] hover:border-[#FB923C] disabled:opacity-40"
+                      >
+                        <span>{{ art.apCost }} AP: {{ art.baseNode.name }}</span>
+                        @if (art.appliedUpgrades.length > 0) {
+                          <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
+                        }
+                        @if (cd > 0) {
+                          <span class="rounded bg-black/50 px-1 font-mono-num text-[10px] text-[#FDA4AF]">
+                            CD {{ cd }}
+                          </span>
+                        } @else if (!art.meetsWeaponRequirement) {
+                          <span class="rounded bg-black/50 px-1 text-[10px] text-[#FDA4AF]">
+                            Req Weapon
+                          </span>
+                        }
+                      </button>
+                    }
+                  } @else {
+                    <button
+                      type="button"
+                      [disabled]="tok.current_ap < (tok.npc_stats.attack_ap ?? 1)"
+                      (click)="vttStore.beginWeaponTargetSelection(tok)"
+                      class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
+                    >
+                      {{ tok.npc_stats.attack_ap ?? 1 }} AP: {{ tok.npc_stats.weapon_name || 'Melee Strike' }} (+{{ tok.npc_stats.attack_mod ?? 3 }} &middot; {{ tok.npc_stats.flat_damage ?? 4 }} DMG)
+                    </button>
+                  }
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div class="flex flex-wrap items-center gap-1">
+                    <span class="text-[#8AB0AB]">Statuses:</span>
+                    @for (st of statusOptions; track st) {
+                      <button
+                        type="button"
+                        (click)="vttStore.toggleTokenStatus(tok, st)"
+                        class="rounded border px-1.5 py-0.5 text-[10px] font-bold transition-colors"
+                        [class.border-[#F43F5E]]="tok.statuses.includes(st)"
+                        [class.bg-[#3B1822]]="tok.statuses.includes(st)"
+                        [class.text-[#FDA4AF]]="tok.statuses.includes(st)"
+                        [class.border-[#243B37]]="!tok.statuses.includes(st)"
+                        [class.bg-[#142220]]="!tok.statuses.includes(st)"
+                        [class.text-[#8AB0AB]]="!tok.statuses.includes(st)"
+                      >
+                        {{ st }}
+                      </button>
+                    }
+                  </div>
+
+                  <div class="flex items-center gap-1">
+                    <span class="text-[#8AB0AB]">Carried Light:</span>
+                    <button
+                      type="button"
+                      (click)="setTokenTorchPreset(tok, 'off')"
+                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
+                      [class.border-[#C4491A]]="tok.light_dim_feet === 0"
+                      [class.text-white]="tok.light_dim_feet === 0"
+                      [class.border-[#243B37]]="tok.light_dim_feet !== 0"
+                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 0"
+                    >
+                      None
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setTokenTorchPreset(tok, 'lantern')"
+                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
+                      [class.border-[#FBBF24]]="tok.light_dim_feet === 30"
+                      [class.text-[#FDE68A]]="tok.light_dim_feet === 30"
+                      [class.border-[#243B37]]="tok.light_dim_feet !== 30"
+                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 30"
+                    >
+                      Lantern 30ft
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setTokenTorchPreset(tok, 'torch')"
+                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
+                      [class.border-[#FB923C]]="tok.light_dim_feet === 40"
+                      [class.text-[#FDBA74]]="tok.light_dim_feet === 40"
+                      [class.border-[#243B37]]="tok.light_dim_feet !== 40"
+                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 40"
+                    >
+                      Torch 40ft
+                    </button>
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      @if (sidebarOpen()) {
+        <aside
+          class="z-20 flex h-full w-80 sm:w-88 shrink-0 flex-col border-l border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
+        >
+          <div class="grid shrink-0 border-b border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-xs font-bold"
+            [class.grid-cols-3]="vttStore.isGm()"
+            [class.grid-cols-2]="!vttStore.isGm()"
+          >
+            <button
+              type="button"
+              (click)="sidebarTab.set('log')"
+              class="rounded-lg py-1.5 transition-colors"
+              [class.bg-[var(--mot-surface)]]="sidebarTab() === 'log'"
+              [class.text-[var(--mot-text)]]="sidebarTab() === 'log'"
+              [class.text-[var(--mot-muted)]]="sidebarTab() !== 'log'"
+            >
+              Log &amp; Dice
+            </button>
+            <button
+              type="button"
+              (click)="sidebarTab.set('roster')"
+              class="rounded-lg py-1.5 transition-colors"
+              [class.bg-[var(--mot-surface)]]="sidebarTab() === 'roster'"
+              [class.text-[var(--mot-text)]]="sidebarTab() === 'roster'"
+              [class.text-[var(--mot-muted)]]="sidebarTab() !== 'roster'"
+            >
+              Roster ({{ visibleRosterTokens().length }})
+            </button>
+            @if (vttStore.isGm()) {
+              <button
+                type="button"
+                (click)="sidebarTab.set('map')"
+                class="rounded-lg py-1.5 transition-colors"
+                [class.bg-[var(--mot-surface)]]="sidebarTab() === 'map'"
+                [class.text-[var(--mot-text)]]="sidebarTab() === 'map'"
+                [class.text-[var(--mot-muted)]]="sidebarTab() !== 'map'"
+              >
+                Map &amp; Grid
+              </button>
+            }
+          </div>
+
+          @if (sidebarTab() === 'log') {
+            <div class="flex flex-1 min-h-0 flex-col">
+              <div
+                #logScroll
+                class="flex-1 overflow-y-auto p-3 space-y-2 text-xs"
+              >
+                @if (vttStore.logs().length === 0) {
+                  <p class="py-8 text-center text-xs text-[var(--mot-muted)]">
+                    No rolls or clashes logged yet. Roll 2d10 or attack a target on the grid!
+                  </p>
+                } @else {
+                  @for (entry of vttStore.logs(); track entry.id) {
+                    <div
+                      class="rounded-xl border p-2.5 space-y-1"
+                      [class.border-[#C4491A]]="entry.kind === 'clash'"
+                      [class.bg-[var(--mot-warn-bg)]]="entry.kind === 'clash'"
+                      [class.border-[var(--mot-hp)]]="entry.kind === 'damage'"
+                      [class.bg-[var(--mot-hp-bg)]]="entry.kind === 'damage'"
+                      [class.border-[var(--mot-jade-border)]]="entry.kind === 'round'"
+                      [class.bg-[var(--mot-jade-bg)]]="entry.kind === 'round'"
+                      [class.border-[var(--mot-border)]]="entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
+                      [class.bg-[var(--mot-well)]]="entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
+                    >
+                      <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
+                        <span class="font-bold uppercase">{{ entry.sender_name }}</span>
+                        <span class="font-mono-num">{{ entry.created_at | date: 'shortTime' }}</span>
+                      </div>
+                      <div class="font-bold text-[var(--mot-text)]">
+                        {{ entry.title }}
+                      </div>
+                      @if (entry.detail) {
+                        <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                          {{ entry.detail }}
+                        </div>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+
+              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3 space-y-2.5 text-xs">
+                <div class="flex items-center gap-1.5">
+                  <select
+                    aria-label="Roll Mode"
+                    [(ngModel)]="quickDiceMode"
+                    class="mot-input px-2 py-1.5 text-xs font-semibold"
+                  >
+                    <option value="normal">2d10 Normal</option>
+                    <option value="advantage">Advantage</option>
+                    <option value="disadvantage">Disadvantage</option>
+                  </select>
+
+                  <label class="flex items-center gap-1 shrink-0 font-mono-num text-xs">
+                    <span>Mod</span>
+                    <input
+                      type="number"
+                      [(ngModel)]="quickDiceMod"
+                      class="mot-input w-14 px-2 py-1.5 text-center font-mono-num text-xs font-bold"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    (click)="triggerQuickDiceRoll()"
+                    class="btn-copper shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
+                  >
+                    Roll
+                  </button>
+                </div>
+
+                <form (ngSubmit)="sendChatMessage()" class="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    name="chatText"
+                    [(ngModel)]="chatText"
+                    placeholder="Send table note or RP message..."
+                    class="mot-input px-2.5 py-1.5 text-xs"
+                  />
+                  <button
+                    type="submit"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    Send
+                  </button>
+                </form>
+              </div>
+            </div>
+          }
+
+          @if (sidebarTab() === 'roster') {
+            <div class="flex-1 overflow-y-auto p-3 space-y-5 text-xs">
+              <section class="space-y-2">
+                <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Deploy Character
+                </h3>
+                @if (deployableCharacters().length === 0) {
+                  <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-[var(--mot-muted)]">
+                    No characters found yet.
+                    <a routerLink="/characters/new" class="font-bold text-[var(--mot-accent-text)] underline">
+                      Create a Character
+                    </a>
+                  </div>
+                } @else {
+                  <div class="space-y-1.5">
+                    @for (ch of deployableCharacters(); track ch.id) {
+                      @let deployed = isCharacterDeployed(ch.id);
+                      <div
+                        class="flex items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-2"
+                      >
+                        <div class="min-w-0">
+                          <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
+                          <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                            HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                          </div>
+                        </div>
+
+                        <div class="flex shrink-0 items-center gap-1.5">
+                          <a
+                            [routerLink]="['/characters', ch.id]"
+                            target="_blank"
+                            class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[11px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
+                          >
+                            Sheet
+                          </a>
+                          @if (deployed) {
+                            <button
+                              type="button"
+                              (click)="vttStore.selectedTokenId.set(deployed.id)"
+                              class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2.5 py-1 text-[11px] font-bold text-[var(--mot-jade-text)]"
+                            >
+                              Select
+                            </button>
+                          } @else {
+                            <button
+                              type="button"
+                              (click)="vttStore.deployCharacterToken(ch)"
+                              class="btn-copper rounded-md px-2.5 py-1 text-[11px] font-bold"
+                            >
+                              Deploy
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </section>
+
+              <section class="space-y-2">
+                <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  On This Battlemap ({{ visibleRosterTokens().length }})
+                </h3>
+                @if (visibleRosterTokens().length === 0) {
+                  <p class="text-[var(--mot-muted)]">No tokens deployed on this scene yet.</p>
+                } @else {
+                  <div class="space-y-1.5">
+                    @for (tok of visibleRosterTokens(); track tok.id) {
+                      <div
+                        (click)="vttStore.selectedTokenId.set(tok.id)"
+                        class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors"
+                        [class.border-[#C4491A]]="vttStore.selectedTokenId() === tok.id"
+                        [class.bg-[var(--mot-surface-raised)]]="vttStore.selectedTokenId() === tok.id"
+                        [class.border-[var(--mot-border)]]="vttStore.selectedTokenId() !== tok.id"
+                        [class.bg-[var(--mot-well)]]="vttStore.selectedTokenId() !== tok.id"
+                      >
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-1.5">
+                            <span
+                              class="h-2 w-2 shrink-0 rounded-full"
+                              [class.bg-[#38B29A]]="tok.faction === 'ally'"
+                              [class.bg-[#F43F5E]]="tok.faction === 'enemy'"
+                              [class.bg-[#F59E0B]]="tok.faction === 'neutral'"
+                            ></span>
+                            <span class="truncate font-bold text-[var(--mot-text)]">{{ tok.name }}</span>
+                            @if (tok.is_hidden) {
+                              <span class="rounded bg-black/25 px-1 text-[10px] font-bold text-[var(--mot-accent-text)]">
+                                Hidden
+                              </span>
+                            }
+                          </div>
+                          <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                            HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }} &middot; AP {{ tok.current_ap }}
+                          </div>
+                        </div>
+
+                        @if (vttStore.canControlToken(tok)) {
+                          <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
+                            @if (vttStore.isGm()) {
+                              <button
+                                type="button"
+                                (click)="vttStore.patchToken(tok.id, { is_hidden: !tok.is_hidden })"
+                                class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                                title="Toggle Hidden from Players"
+                              >
+                                {{ tok.is_hidden ? 'Reveal' : 'Hide' }}
+                              </button>
+                            }
+                            <button
+                              type="button"
+                              (click)="vttStore.removeToken(tok.id)"
+                              class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                              title="Remove Token from Scene"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </section>
+
+              @if (vttStore.isGm()) {
+                <section class="space-y-2 border-t border-[var(--mot-border)] pt-4">
+                  <div class="flex items-center justify-between">
+                    <h3 class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                      GM Adversary Spawner
+                    </h3>
+                    <button
+                      type="button"
+                      (click)="showCustomNpcForm.update(v => !v)"
+                      class="text-[11px] font-bold text-[var(--mot-accent-text)] hover:underline"
+                    >
+                      {{ showCustomNpcForm() ? 'Close Custom' : '+ Custom Token' }}
+                    </button>
+                  </div>
+
+                  @if (showCustomNpcForm()) {
+                    <form
+                      (ngSubmit)="submitCustomNpc()"
+                      class="space-y-2 rounded-xl border border-[#C4491A] bg-[var(--mot-well)] p-2.5"
+                    >
+                      <div class="grid grid-cols-3 gap-1.5">
+                        <input
+                          type="text"
+                          name="customNpcName"
+                          required
+                          [(ngModel)]="customNpcName"
+                          placeholder="Name"
+                          class="mot-input col-span-2 px-2 py-1 text-xs font-semibold"
+                        />
+                        <select
+                          name="customNpcFaction"
+                          [(ngModel)]="customNpcFaction"
+                          class="mot-input px-1.5 py-1 text-xs font-semibold"
+                        >
+                          <option value="enemy">Enemy</option>
+                          <option value="neutral">Neutral</option>
+                          <option value="ally">Ally</option>
+                        </select>
+                      </div>
+
+                      <div class="grid grid-cols-4 gap-1.5 font-mono-num text-[10px]">
+                        <label>
+                          HP
+                          <input type="number" name="cHp" [(ngModel)]="customNpcHp" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          SP
+                          <input type="number" name="cSp" [(ngModel)]="customNpcSp" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          DR
+                          <input type="number" name="cDr" [(ngModel)]="customNpcDr" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          Move ft
+                          <input type="number" step="5" name="cMove" [(ngModel)]="customNpcMoveFeet" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                      </div>
+
+                      <div class="grid grid-cols-4 gap-1.5 font-mono-num text-[10px]">
+                        <label>
+                          Atk +
+                          <input type="number" name="cAtk" [(ngModel)]="customNpcAttackMod" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          DMG
+                          <input type="number" name="cDmg" [(ngModel)]="customNpcDamage" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          Reach ft
+                          <input type="number" step="5" name="cReach" [(ngModel)]="customNpcReachFeet" class="mot-input mt-0.5 px-1.5 py-1 text-xs" />
+                        </label>
+                        <label>
+                          Tag
+                          <select name="cTag" [(ngModel)]="customNpcTag" class="mot-input mt-0.5 px-1 py-1 text-[11px]">
+                            <option value="None">None</option>
+                            <option value="Crushing">Crushing</option>
+                            <option value="Sweeping">Sweeping</option>
+                            <option value="Piercing">Piercing</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <button type="submit" class="btn-copper w-full rounded-lg py-1.5 text-xs font-bold">
+                        Spawn Custom Combatant
+                      </button>
+                    </form>
+                  }
+
+                  <div class="space-y-1.5">
+                    @for (npc of npcPresets; track npc.id) {
+                      <div
+                        class="flex items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-2"
+                      >
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-1.5">
+                            <span class="truncate font-bold text-[var(--mot-text)]">{{ npc.name }}</span>
+                            @if (npc.npc_stats.combat_tag && npc.npc_stats.combat_tag !== 'None') {
+                              <span
+                                class="rounded border px-1 py-[1px] text-[9px] font-bold"
+                                [class]="tagBadgeClass(npc.npc_stats.combat_tag)"
+                              >
+                                {{ npc.npc_stats.combat_tag }}
+                              </span>
+                            }
+                          </div>
+                          <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                            HP {{ npc.max_hp }} &middot; SP {{ npc.max_sp }} &middot; DR {{ npc.armor_dr }} &middot; Reach {{ npc.npc_stats.reach_feet }} ft
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          (click)="vttStore.spawnNpcPreset(npc)"
+                          class="shrink-0 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-[11px] font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                        >
+                          + Spawn
+                        </button>
+                      </div>
+                    }
+                  </div>
+                </section>
+              }
+            </div>
+          }
+
+          @if (sidebarTab() === 'map' && vttStore.isGm() && vttStore.activeScene(); as sc) {
+            <div class="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+              <section class="space-y-2">
+                <label class="block font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Scene Name
+                </label>
+                <input
+                  type="text"
+                  [ngModel]="sc.name"
+                  (change)="vttStore.patchScene(sc.id, { name: $any($event.target).value })"
+                  class="mot-input px-2.5 py-1.5 text-xs font-bold"
+                />
+              </section>
+
+              <section class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+                <div class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Background Battlemap Image
+                </div>
+
+                <label
+                  class="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] px-3 py-3 text-center font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  <span>Upload Map Image (PNG / JPG / WebP)</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    (change)="onMapFileSelected($event)"
+                    class="hidden"
+                  />
+                </label>
+
+                <div class="flex items-center gap-1.5">
+                  <input
+                    type="url"
+                    [(ngModel)]="mapUrlInput"
+                    placeholder="Or paste external map URL..."
+                    class="mot-input px-2.5 py-1.5 text-xs"
+                  />
+                  <button
+                    type="button"
+                    (click)="applyExternalMapUrl()"
+                    class="btn-copper shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                  >
+                    Apply
+                  </button>
+                </div>
+
+                @if (sc.map_image_url) {
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="matchGridToMapImage()"
+                      class="flex-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] py-1.5 text-[11px] font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Match Grid to Image Size
+                    </button>
+                    <button
+                      type="button"
+                      (click)="clearSceneMapImage()"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--mot-hp-text)] hover:border-[var(--mot-hp)]"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                }
+              </section>
+
+              <section class="space-y-2.5 border-t border-[var(--mot-border)] pt-3">
+                <div class="font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Hex Battlegrid Alignment (5 ft / space)
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block font-semibold">
+                    Columns
+                    <input
+                      type="number"
+                      min="6"
+                      max="60"
+                      [ngModel]="sc.grid_width"
+                      (ngModelChange)="updateSceneNumberField('grid_width', $event)"
+                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
+                    />
+                  </label>
+                  <label class="block font-semibold">
+                    Rows
+                    <input
+                      type="number"
+                      min="6"
+                      max="60"
+                      [ngModel]="sc.grid_height"
+                      (ngModelChange)="updateSceneNumberField('grid_height', $event)"
+                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
+                    />
+                  </label>
+                </div>
+
+                <label class="block font-semibold">
+                  <div class="flex justify-between">
+                    <span>Hex Scale (px)</span>
+                    <span class="font-mono-num text-[var(--mot-muted)]">{{ sc.grid_size_px }} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="36"
+                    max="140"
+                    step="2"
+                    [ngModel]="sc.grid_size_px"
+                    (ngModelChange)="updateSceneNumberField('grid_size_px', $event)"
+                    class="mt-1 w-full accent-[#C4491A]"
+                  />
+                </label>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block font-semibold">
+                    Offset X (px)
+                    <input
+                      type="number"
+                      step="2"
+                      [ngModel]="sc.grid_offset_x"
+                      (ngModelChange)="updateSceneNumberField('grid_offset_x', $event)"
+                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
+                    />
+                  </label>
+                  <label class="block font-semibold">
+                    Offset Y (px)
+                    <input
+                      type="number"
+                      step="2"
+                      [ngModel]="sc.grid_offset_y"
+                      (ngModelChange)="updateSceneNumberField('grid_offset_y', $event)"
+                      class="mot-input mt-1 px-2 py-1 font-mono-num text-xs"
+                    />
+                  </label>
+                </div>
+
+                <label class="block font-semibold">
+                  <div class="flex justify-between">
+                    <span>Grid Line Opacity</span>
+                    <span class="font-mono-num text-[var(--mot-muted)]">{{ sc.grid_opacity }}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.9"
+                    step="0.05"
+                    [ngModel]="sc.grid_opacity"
+                    (ngModelChange)="updateSceneNumberField('grid_opacity', $event)"
+                    class="mt-1 w-full accent-[#C4491A]"
+                  />
+                </label>
+
+                <label class="flex items-center gap-2 pt-1 font-semibold">
+                  <input
+                    type="checkbox"
+                    [ngModel]="vttStore.enforceApOnMove()"
+                    (ngModelChange)="vttStore.enforceApOnMove.set($event)"
+                    class="accent-[#C4491A]"
+                  />
+                  <span>Auto-deduct AP when dragging tokens in Combat</span>
+                </label>
+              </section>
+            </div>
+          }
+        </aside>
+      }
+    </div>
+  }
+</div>

@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
 import { CampaignStore } from './store/campaign.store';
 
@@ -13,6 +14,7 @@ import { CampaignStore } from './store/campaign.store';
 export class DashboardComponent {
   readonly authStore = inject(AuthStore);
   readonly campaignStore = inject(CampaignStore);
+  private readonly router = inject(Router);
 
   readonly showCreateForm = signal(false);
   readonly showJoinForm = signal(false);
@@ -61,5 +63,10 @@ export class DashboardComponent {
       this.joinCode = '';
       this.showJoinForm.set(false);
     }
+  }
+
+  launchGame(gameId: string): void {
+    void this.campaignStore.markGamePlayed(gameId);
+    void this.router.navigate(['/vtt', gameId]);
   }
 }

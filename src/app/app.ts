@@ -1,10 +1,12 @@
-import { Component, HostListener, inject, signal } from '@angular/core';
+import { Component, DestroyRef, HostListener, computed, inject, signal } from '@angular/core';
 import {
+  NavigationEnd,
   Router,
   RouterLink,
   RouterLinkActive,
   RouterOutlet,
 } from '@angular/router';
+import { filter } from 'rxjs';
 import { AuthStore } from './core/auth/auth.store';
 import { ThemeStore } from './core/theme/theme.store';
 import { KeywordTooltipOverlayComponent } from './shared/keyword-text/keyword-tooltip-overlay.component';
@@ -29,8 +31,23 @@ export class App {
   readonly themeStore = inject(ThemeStore);
   private readonly keywordTooltip = inject(KeywordTooltipService);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly userMenuOpen = signal(false);
+  readonly isVttRoute = signal(this.router.url.startsWith('/vtt/'));
+
+  readonly activeTheme = computed(() =>
+    this.isVttRoute() ? this.themeStore.vttTheme() : this.themeStore.sheetTheme()
+  );
+
+  constructor() {
+    const sub = this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe((ev) => {
+        this.isVttRoute.set(ev.urlAfterRedirects.startsWith('/vtt/'));
+      });
+    this.destroyRef.onDestroy(() => sub.unsubscribe());
+  }
 
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
