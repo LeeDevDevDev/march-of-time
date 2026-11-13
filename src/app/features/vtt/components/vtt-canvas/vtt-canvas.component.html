@@ -456,28 +456,14 @@
 
       <div class="space-y-1.5">
         <span class="block font-bold text-white">Light Color</span>
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-1.5">
-            @for (swatch of lightColorSwatches; track swatch) {
-              <button
-                type="button"
-                (click)="updateEditLightColor(swatch)"
-                [style.background-color]="swatch"
-                class="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110"
-                [class.border-white]="draft.color.toUpperCase() === swatch"
-                [class.border-black/40]="draft.color.toUpperCase() !== swatch"
-              ></button>
-            }
-          </div>
-
-          <input
-            type="color"
-            [ngModel]="draft.color"
-            (ngModelChange)="updateEditLightColor($event)"
-            class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
-            title="Custom Color"
-          />
-        </div>
+        <app-color-picker
+          [color]="draft.color"
+          [presets]="lightColorSwatches"
+          mode="popover"
+          popoverAlign="right"
+          surfaceTheme="dark"
+          (colorChange)="updateEditLightColor($event)"
+        />
       </div>
 
       <label class="flex cursor-pointer items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold">

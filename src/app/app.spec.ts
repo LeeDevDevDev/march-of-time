@@ -36,6 +36,13 @@ import { CompendiumService } from './core/compendium/compendium.service';
 import { CompendiumStore } from './core/compendium/compendium.store';
 import { NotificationStore } from './core/notifications/notification.store';
 import {
+  ColorPickerComponent,
+  hexToHsv,
+  hsvToHex,
+  isValidHexColor,
+  normalizeHexColor,
+} from './shared/color-picker/color-picker.component';
+import {
   DEFAULT_VTT_HOTKEYS,
   DEFAULT_VTT_PREFERENCES,
   VttSettingsStore,
@@ -2748,5 +2755,46 @@ describe('App', () => {
     await vttStore.deleteDirectoryFolder(patronsFolder!.id);
     expect(vttStore.folders().filter((f) => f.scope === 'characters').length).toBe(0);
     expect(vttStore.rosterActors()[0].folder_id).toBeNull();
+  });
+
+  it('should support full HSV spectrum, hex input, and arbitrary custom folder colors via ColorPickerComponent', async () => {
+    expect(isValidHexColor('#4F9DA6')).toBe(true);
+    expect(isValidHexColor('4f9da6')).toBe(true);
+    expect(isValidHexColor('#3af')).toBe(true);
+    expect(isValidHexColor('#ZZZZZZ')).toBe(false);
+
+    expect(normalizeHexColor('#3af')).toBe('#33AAFF');
+    expect(normalizeHexColor('ff6b4a')).toBe('#FF6B4A');
+
+    const hsv = hexToHsv('#38B29A');
+    expect(hsv.h).toBeGreaterThan(160);
+    expect(hsv.h).toBeLessThan(175);
+    expect(hsvToHex(hsv.h, hsv.s, hsv.v)).toBe('#38B29A');
+
+    await TestBed.configureTestingModule({
+      imports: [ColorPickerComponent],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(ColorPickerComponent);
+    const emitted: string[] = [];
+    fixture.componentInstance.colorChange.subscribe((val) => emitted.push(val));
+    fixture.componentRef.setInput('color', '#C4491A');
+    fixture.componentRef.setInput('presets', ['#C4491A', '#38B29A']);
+    fixture.componentRef.setInput('mode', 'inline');
+    fixture.detectChanges();
+
+    fixture.componentInstance.onHexFocus();
+    fixture.componentInstance.onHexInput('#5B8DEE');
+    fixture.componentInstance.commitHexDraft();
+    fixture.detectChanges();
+
+    expect(emitted[emitted.length - 1]).toBe('#5B8DEE');
+
+    fixture.componentInstance.onHexFocus();
+    fixture.componentInstance.onHexInput('#9c3');
+    fixture.componentInstance.commitHexDraft();
+    fixture.detectChanges();
+
+    expect(emitted[emitted.length - 1]).toBe('#99CC33');
   });
 });

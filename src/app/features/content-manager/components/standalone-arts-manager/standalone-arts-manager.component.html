@@ -23,7 +23,7 @@
         type="text"
         [ngModel]="standaloneSearch()"
         (ngModelChange)="standaloneSearch.set($event)"
-        placeholder="Search standalone arts..."
+        placeholder="Search"
         class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
       />
       <button
@@ -433,7 +433,7 @@
                   type="search"
                   [ngModel]="characterSearch()"
                   (ngModelChange)="characterSearch.set($event)"
-                  placeholder="Filter character or NPC sheets..."
+                  placeholder="Filter"
                   aria-label="Filter character or NPC sheets"
                   class="w-full rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-xs text-[#EBF5F3] placeholder-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
                 />

@@ -44,7 +44,7 @@
               name="nodeName"
               required
               [(ngModel)]="nodeForm.name"
-              placeholder="Node Name"
+              placeholder="Node"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
             />
           </div>
@@ -246,7 +246,7 @@
               [value]="nodeForm.description"
               (valueChange)="nodeForm.description = $event"
               (requestCreateKeyword)="requestCreateKeyword.emit($event)"
-              placeholder="Type [ to search keywords (e.g. [Crushing], [Piercing], [Sundered])..."
+              placeholder="Description"
             />
           </div>
 

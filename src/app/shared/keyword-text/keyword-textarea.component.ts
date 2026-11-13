@@ -26,9 +26,7 @@ export class KeywordTextareaComponent {
   readonly inputId = input<string>('motKeywordTextarea');
   readonly label = input<string>('Rules Description');
   readonly value = input<string>('');
-  readonly placeholder = input<string>(
-    'Type [ to search keywords (e.g. [Crushing], [Parry], [Sundered])...'
-  );
+  readonly placeholder = input<string>('Description');
   readonly rows = input<number>(3);
   readonly required = input<boolean>(true);
   readonly excludeTerm = input<string>('');

@@ -34,6 +34,7 @@ import {
   normalizeKeyComboFromEvent,
 } from '../../core/settings/vtt-settings.store';
 import { ThemeMode, ThemeStore } from '../../core/theme/theme.store';
+import { ColorPickerComponent } from '../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
 import {
   CharacterModel,
@@ -80,7 +81,7 @@ import {
 } from './models/vtt.model';
 import { VttStore } from './store/vtt.store';
 
-export type VttSidebarTab = 'log' | 'roster' | 'maps' | 'settings';
+export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
 export type VttSettingsModalKind = 'general' | 'controls' | 'invites';
 export type VttRosterImportTab =
   | 'my-characters'
@@ -173,6 +174,7 @@ export interface EditingMapDraft {
     RouterLink,
     DatePipe,
     NgTemplateOutlet,
+    ColorPickerComponent,
     CompendiumIconComponent,
     VttCanvasComponent,
   ],
@@ -484,7 +486,7 @@ export class VttRoomComponent {
     });
 
     effect(() => {
-      if (this.sidebarTab() === 'roster') {
+      if (this.sidebarTab() === 'actors') {
         void this.characterStore.ensureUserCharactersLoaded();
       }
     });

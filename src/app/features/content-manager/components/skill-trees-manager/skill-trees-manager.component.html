@@ -59,7 +59,7 @@
           type="text"
           [ngModel]="treeSearch()"
           (ngModelChange)="treeSearch.set($event)"
-          placeholder="Search skill trees..."
+          placeholder="Search"
           class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
         />
         <button
@@ -361,7 +361,7 @@
             name="treeName"
             required
             [(ngModel)]="treeFormName"
-            placeholder="e.g. Path of the Sentinel"
+            placeholder="Skill Tree"
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
           />
         </div>
@@ -375,7 +375,7 @@
             name="treeDesc"
             rows="3"
             [(ngModel)]="treeFormDescription"
-            placeholder="Describe what kind of Combat Arts and Passive Upgrades belong to this path..."
+            placeholder="Description"
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm"
           ></textarea>
         </div>
@@ -500,7 +500,7 @@
             type="search"
             [ngModel]="attachSearch()"
             (ngModelChange)="attachSearch.set($event)"
-            placeholder="Filter abilities..."
+            placeholder="Filter"
             class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
           />
         </div>

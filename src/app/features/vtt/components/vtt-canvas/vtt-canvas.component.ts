@@ -12,6 +12,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ColorPickerComponent } from '../../../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../../../shared/compendium-icon/compendium-icon.component';
 import {
   HexPathResult,
@@ -171,7 +172,7 @@ function hexToRgba(hex: string, alpha: number): string {
 @Component({
   selector: 'app-vtt-canvas',
   standalone: true,
-  imports: [FormsModule, CompendiumIconComponent],
+  imports: [FormsModule, ColorPickerComponent, CompendiumIconComponent],
   templateUrl: './vtt-canvas.component.html',
 })
 export class VttCanvasComponent implements AfterViewInit {

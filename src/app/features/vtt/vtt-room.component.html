@@ -1125,12 +1125,12 @@
 
             <button
               type="button"
-              (click)="sidebarTab.set('roster')"
+              (click)="sidebarTab.set('actors')"
               class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
-              [class.bg-[var(--mot-surface)]]="sidebarTab() === 'roster'"
-              [class.text-[var(--mot-text)]]="sidebarTab() === 'roster'"
-              [class.shadow-xs]="sidebarTab() === 'roster'"
-              [class.text-[var(--mot-muted)]]="sidebarTab() !== 'roster'"
+              [class.bg-[var(--mot-surface)]]="sidebarTab() === 'actors'"
+              [class.text-[var(--mot-text)]]="sidebarTab() === 'actors'"
+              [class.shadow-xs]="sidebarTab() === 'actors'"
+              [class.text-[var(--mot-muted)]]="sidebarTab() !== 'actors'"
             >
               <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -1138,7 +1138,7 @@
                 <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span>Roster ({{ visibleRosterTokens().length }})</span>
+              <span>Actors ({{ visibleCampaignRosterActors().length }})</span>
             </button>
 
             @if (vttStore.isGm()) {
@@ -1252,7 +1252,7 @@
                     type="text"
                     name="chatText"
                     [(ngModel)]="chatText"
-                    placeholder="Send table note or RP message..."
+                    placeholder="Message"
                     class="mot-input px-2.5 py-1.5 text-xs"
                   />
                   <button
@@ -1266,7 +1266,7 @@
             </div>
           }
 
-          @if (sidebarTab() === 'roster') {
+          @if (sidebarTab() === 'actors') {
             @let rTree = rosterDirectoryTree();
 
             <ng-template #rosterEntryTpl let-actorItem let-indent="indent">
@@ -1491,7 +1491,7 @@
                     type="text"
                     [ngModel]="rosterSearchQuery()"
                     (ngModelChange)="rosterSearchQuery.set($event)"
-                    placeholder="Search roster or folders..."
+                    placeholder="Search"
                     class="mot-input w-full px-2.5 py-1.5 pr-7 text-xs"
                   />
                   @if (rosterSearchQuery()) {
@@ -1527,12 +1527,12 @@
                   @if (rTree.folders.length === 0 && rTree.rootItems.length === 0) {
                     @if (rosterSearchQuery().trim()) {
                       <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 text-center text-[var(--mot-muted)]">
-                        No roster actors or folders match &ldquo;{{ rosterSearchQuery() }}&rdquo;.
+                        No actors or folders match &ldquo;{{ rosterSearchQuery() }}&rdquo;.
                       </div>
                     } @else {
                       <div class="rounded-2xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] p-4 text-center space-y-2.5">
                         <div class="font-display text-sm font-bold text-[var(--mot-text)]">
-                          Campaign Roster Directory
+                          Actors Directory
                         </div>
                         <p class="text-[11px] leading-relaxed text-[var(--mot-muted)]">
                           Make characters or adversaries from scratch, import from your Character Vault or Collections, organize into folders, and drag directly onto the map.
@@ -1618,7 +1618,7 @@
                           (dragstart)="onCharacterDragStart($event, ch)"
                           (dragend)="onDirectoryDragEnd()"
                           class="flex cursor-grab items-center justify-between gap-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-2 select-none active:cursor-grabbing hover:border-[#C4491A]"
-                          title="Drag onto battlemap to deploy, or click + Roster to organize in folders"
+                          title="Drag onto battlemap to deploy, or click + Actors to organize in folders"
                         >
                           <div class="min-w-0">
                             <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
@@ -1632,9 +1632,9 @@
                               type="button"
                               (click)="importCharacterIntoRoster(ch, false)"
                               class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
-                              title="Add to Campaign Roster Directory"
+                              title="Add to Actors Directory"
                             >
-                              + Roster
+                              + Actors
                             </button>
                             @if (deployed) {
                               <button
@@ -1964,7 +1964,7 @@
                     type="text"
                     [ngModel]="mapSearchQuery()"
                     (ngModelChange)="mapSearchQuery.set($event)"
-                    placeholder="Search scenes or folders..."
+                    placeholder="Search"
                     class="mot-input w-full px-2.5 py-1.5 pr-7 text-xs"
                   />
                   @if (mapSearchQuery()) {
@@ -2397,7 +2397,7 @@
               (click)="deleteRosterActorFromMenu(menuActor.id)"
               class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-bold text-[#FDA4AF] hover:bg-[#3B1822]"
             >
-              <span>Remove from Roster</span>
+              <span>Remove from Actors</span>
             </button>
           }
         </div>
@@ -2441,7 +2441,7 @@
               name="createMapName"
               [ngModel]="cm.name"
               (ngModelChange)="updateCreateMapModalField('name', $event)"
-              placeholder="e.g., Sunken Reliquary"
+              placeholder="Scene"
               class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
             />
           </label>
@@ -2523,7 +2523,7 @@
               name="folderName"
               [ngModel]="fm.name"
               (ngModelChange)="updateFolderModalField('name', $event)"
-              placeholder="e.g., Act I: The Iron Wastes"
+              placeholder="Folder"
               class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
             />
           </label>
@@ -2545,26 +2545,13 @@
 
           <div class="space-y-1.5">
             <span class="block font-semibold text-[#EBF5F3]">Folder Color</span>
-            <div class="flex flex-wrap items-center gap-2">
-              @for (sw of folderSwatches; track sw) {
-                <button
-                  type="button"
-                  (click)="updateFolderModalField('color', sw)"
-                  class="h-6 w-6 rounded-full border-2 transition-transform"
-                  [style.backgroundColor]="sw"
-                  [class.border-white]="fm.color === sw"
-                  [class.scale-110]="fm.color === sw"
-                  [class.border-transparent]="fm.color !== sw"
-                ></button>
-              }
-              <input
-                type="color"
-                name="folderCustomColor"
-                [ngModel]="fm.color"
-                (ngModelChange)="updateFolderModalField('color', $event)"
-                class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
-              />
-            </div>
+            <app-color-picker
+              [color]="fm.color"
+              [presets]="folderSwatches"
+              mode="inline"
+              surfaceTheme="dark"
+              (colorChange)="updateFolderModalField('color', $event)"
+            />
           </div>
         </div>
 
@@ -2624,7 +2611,7 @@
                 name="editMapName"
                 [ngModel]="em.name"
                 (ngModelChange)="updateEditMapField('name', $event)"
-                placeholder="Untitled Scene"
+                placeholder="Scene"
                 class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
               />
             </label>
@@ -2704,7 +2691,7 @@
                   name="editMapUrl"
                   [ngModel]="em.map_image_url"
                   (ngModelChange)="onEditMapUrlChange($event)"
-                  placeholder="Or paste background image URL..."
+                  placeholder="Image URL"
                   class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
                 />
                 @if (em.map_image_url) {
@@ -2744,13 +2731,11 @@
                     <span>{{ sw.label }}</span>
                   </button>
                 }
-                <input
-                  type="color"
-                  name="editMapBgCustom"
-                  [ngModel]="em.background_color"
-                  (ngModelChange)="updateEditMapField('background_color', $event)"
-                  class="h-7 w-9 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
-                  title="Custom Scene Color"
+                <app-color-picker
+                  [color]="em.background_color"
+                  mode="popover"
+                  surfaceTheme="dark"
+                  (colorChange)="updateEditMapField('background_color', $event)"
                 />
               </div>
             </div>
@@ -3579,7 +3564,7 @@
         <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
           <div>
             <h2 class="font-display text-base font-bold text-white">
-              {{ ram.mode === 'create' ? 'Create Roster Actor' : 'Edit Roster Actor' }}
+              {{ ram.mode === 'create' ? 'Create Actor' : 'Edit Actor' }}
             </h2>
             <p class="text-[11px] text-[#8AB0AB]">
               Configure combat stats, token icon, and deployment behavior. Drag onto any scene to place.
@@ -3642,7 +3627,7 @@
                 required
                 [ngModel]="ram.name"
                 (ngModelChange)="updateRosterActorModalField('name', $event)"
-                placeholder="e.g., Captain Valen or Ash Stalker"
+                [placeholder]="ram.actor_kind === 'npc' ? 'NPC' : 'Character'"
                 class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
               />
             </label>
@@ -3695,30 +3680,18 @@
           }
 
           <div class="space-y-2 border-t border-[#243B37] pt-3">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
                 Token Emblem &amp; Color
               </span>
-              <div class="flex items-center gap-1.5">
-                @for (sw of actorColorSwatches; track sw) {
-                  <button
-                    type="button"
-                    (click)="updateRosterActorModalField('color', sw)"
-                    class="h-5 w-5 rounded-full border-2 transition-transform"
-                    [style.backgroundColor]="sw"
-                    [class.border-white]="ram.color.toUpperCase() === sw.toUpperCase()"
-                    [class.scale-110]="ram.color.toUpperCase() === sw.toUpperCase()"
-                    [class.border-transparent]="ram.color.toUpperCase() !== sw.toUpperCase()"
-                  ></button>
-                }
-                <input
-                  type="color"
-                  name="rosterActorCustomColor"
-                  [ngModel]="ram.color"
-                  (ngModelChange)="updateRosterActorModalField('color', $event)"
-                  class="h-6 w-8 cursor-pointer rounded border border-[#243B37] bg-[#09100F] p-0.5"
-                />
-              </div>
+              <app-color-picker
+                [color]="ram.color"
+                [presets]="actorColorSwatches"
+                mode="popover"
+                popoverAlign="right"
+                surfaceTheme="dark"
+                (colorChange)="updateRosterActorModalField('color', $event)"
+              />
             </div>
 
             <div class="grid max-h-28 grid-cols-8 gap-1.5 overflow-y-auto rounded-xl border border-[#243B37] bg-[#09100F] p-2 sm:grid-cols-10">
@@ -3914,7 +3887,7 @@
               rows="2"
               [ngModel]="ram.notes"
               (ngModelChange)="updateRosterActorModalField('notes', $event)"
-              placeholder="Voice cues, motives, loot, or special tactics..."
+              placeholder="Notes"
               class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
             ></textarea>
           </label>
@@ -3943,7 +3916,7 @@
             type="submit"
             class="btn-copper rounded-lg px-4 py-1.5 font-bold"
           >
-            {{ ram.mode === 'create' ? 'Create Roster Actor' : 'Save Actor' }}
+            {{ ram.mode === 'create' ? 'Create Actor' : 'Save Actor' }}
           </button>
         </div>
       </form>
@@ -3962,7 +3935,7 @@
         <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
           <div>
             <h2 class="font-display text-base font-bold text-white">
-              Import into Campaign Roster
+              Import into Actors
             </h2>
             <p class="text-[11px] text-[#8AB0AB]">
               Load characters you created, import reusable templates from Collections, or pull starter adversaries.
@@ -4047,7 +4020,7 @@
               type="text"
               [ngModel]="rosterImportSearch()"
               (ngModelChange)="rosterImportSearch.set($event)"
-              placeholder="Filter by name..."
+              placeholder="Filter"
               class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
             />
 
@@ -4092,7 +4065,7 @@
                   <div class="flex shrink-0 items-center gap-1.5">
                     @if (inRoster) {
                       <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
-                        In Roster
+                        In Actors
                       </span>
                     } @else {
                       <button
@@ -4188,7 +4161,7 @@
                   <div>
                     @if (inRoster) {
                       <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
-                        In Roster
+                        In Actors
                       </span>
                     } @else {
                       <button
@@ -4229,7 +4202,7 @@
                   (click)="importPresetIntoRoster(npc)"
                   class="btn-copper shrink-0 rounded-lg px-3 py-1.5 font-bold"
                 >
-                  + Import to Roster
+                  + Import to Actors
                 </button>
               </div>
             }

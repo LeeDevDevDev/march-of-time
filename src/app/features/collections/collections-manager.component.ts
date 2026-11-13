@@ -13,6 +13,7 @@ import {
   ActiveCombatTag,
   COMPENDIUM_ICON_PRESETS,
 } from '../../core/compendium/compendium.model';
+import { ColorPickerComponent } from '../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
 import { CharacterModel } from '../characters/models/character.model';
 import {
@@ -85,6 +86,7 @@ export interface CollectionActorFormState {
     FormsModule,
     RouterLink,
     NgTemplateOutlet,
+    ColorPickerComponent,
     CompendiumIconComponent,
   ],
   templateUrl: './collections-manager.component.html',

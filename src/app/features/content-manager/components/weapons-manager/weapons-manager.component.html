@@ -23,7 +23,7 @@
         type="text"
         [ngModel]="weaponSearch()"
         (ngModelChange)="weaponSearch.set($event)"
-        placeholder="Search weapons or traits..."
+        placeholder="Search"
         class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
       />
       <button
@@ -493,7 +493,7 @@
               name="wepName"
               [(ngModel)]="weaponForm.name"
               required
-              placeholder="e.g. Executioner's Halberd"
+              placeholder="Weapon"
               class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
             />
           </div>
@@ -804,7 +804,7 @@
               name="wepTraitName"
               [(ngModel)]="weaponForm.trait_name"
               required
-              placeholder="e.g. Cleaving, Versatile"
+              placeholder="Trait"
               class="mot-input mt-1.5 px-3.5 py-2 text-sm font-semibold"
             />
           </div>
@@ -817,7 +817,7 @@
               (valueChange)="weaponForm.trait_description = $event"
               [rows]="2"
               (requestCreateKeyword)="requestCreateKeyword.emit($event)"
-              placeholder="e.g. Even on a defended hit, target loses 3 [SP]. Cannot be used with a Shield while [Two-Handed]."
+              placeholder="Description"
             />
           </div>
         </div>

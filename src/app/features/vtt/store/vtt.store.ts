@@ -2202,7 +2202,7 @@ export class VttStore {
     if (res.error || !res.actor) {
       if (!options?.silent) {
         this.notifications.error(
-          'Unable to Add Roster Actor',
+          'Unable to Add Actor',
           res.error ?? 'Unknown error.'
         );
       }
@@ -2214,8 +2214,8 @@ export class VttStore {
     );
     if (!options?.silent) {
       this.notifications.success(
-        'Added to Roster',
-        `${res.actor.name} is ready in the campaign roster.`
+        'Added to Actors',
+        `${res.actor.name} is ready in Actors.`
       );
     }
     return res.actor;
@@ -2233,8 +2233,8 @@ export class VttStore {
         await this.updateRosterActor(existing.id, { folder_id: folderId });
       }
       this.notifications.info(
-        'Already in Roster',
-        `${character.name} is already loaded in this campaign's Roster.`
+        'Already in Actors',
+        `${character.name} is already loaded in Actors.`
       );
       return existing;
     }
@@ -2317,7 +2317,7 @@ export class VttStore {
       patch
     );
     if (err) {
-      this.notifications.error('Roster Update Error', err);
+      this.notifications.error('Actor Update Error', err);
       return false;
     }
     return true;
@@ -2374,7 +2374,7 @@ export class VttStore {
     this.rosterActors.update((curr) => curr.filter((a) => a.id !== actorId));
     const err = await this.vttService.deleteRosterActor(camp.id, actorId);
     if (err) {
-      this.notifications.error('Roster Delete Error', err);
+      this.notifications.error('Actor Delete Error', err);
     }
   }
 

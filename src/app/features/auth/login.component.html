@@ -83,7 +83,7 @@
               name="displayName"
               required
               [(ngModel)]="displayName"
-              placeholder="e.g., Kaelen Vance"
+              placeholder="Display Name"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
             />
           </div>
@@ -105,7 +105,7 @@
                 required
                 [ngModel]="handle"
                 (ngModelChange)="onHandleInput($event)"
-                placeholder="kaelen_vance"
+                placeholder="handle"
                 class="mot-input py-2.5 pl-8 pr-3.5 font-mono-num text-sm font-semibold"
               />
             </div>
@@ -128,7 +128,7 @@
             name="email"
             required
             [(ngModel)]="email"
-            placeholder="you@example.com"
+            placeholder="Email"
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
           />
         </div>
@@ -144,7 +144,7 @@
             required
             minlength="6"
             [(ngModel)]="password"
-            placeholder="At least 6 characters"
+            placeholder="Password"
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
           />
         </div>
@@ -161,7 +161,7 @@
               required
               minlength="6"
               [(ngModel)]="confirmPassword"
-              placeholder="Re-enter your password"
+              placeholder="Confirm Password"
               class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-medium"
             />
           </div>

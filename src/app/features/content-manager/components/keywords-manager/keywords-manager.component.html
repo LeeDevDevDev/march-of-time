@@ -19,7 +19,7 @@
           type="text"
           [ngModel]="keywordSearch()"
           (ngModelChange)="keywordSearch.set($event)"
-          placeholder="Search keywords..."
+          placeholder="Search"
           class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-52"
         />
         <button
@@ -175,7 +175,7 @@
             name="kwTerm"
             required
             [(ngModel)]="keywordFormTerm"
-            placeholder="e.g. Overcharge, Exposed, or Riposte"
+            placeholder="Keyword"
             class="mot-input mt-1.5 px-3.5 py-2.5 text-sm font-bold"
           />
         </div>
@@ -205,7 +205,7 @@
             (valueChange)="keywordFormSummary = $event"
             [excludeTerm]="keywordFormTerm"
             [showNewKeywordButton]="false"
-            placeholder="Type [ to chain related keywords inside this explanation (e.g. The defender must declare [Parry] or [Shield Block])..."
+            placeholder="Description"
           />
 
           @if (keywordFormSummary.trim()) {
