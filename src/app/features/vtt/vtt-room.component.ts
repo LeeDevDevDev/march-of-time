@@ -12,6 +12,13 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import {
+  UserAssetModel,
+  UserAssetPurpose,
+  extractAssetDisplayNameFromUrl,
+  formatAssetByteSize,
+} from '../../core/assets/user-assets.model';
+import { UserAssetsStore } from '../../core/assets/user-assets.store';
 import { AuthStore } from '../../core/auth/auth.store';
 import {
   ActiveCombatTag,
@@ -34,6 +41,7 @@ import {
   normalizeKeyComboFromEvent,
 } from '../../core/settings/vtt-settings.store';
 import { ThemeMode, ThemeStore } from '../../core/theme/theme.store';
+import { AssetBrowserModalComponent } from '../../shared/asset-browser/asset-browser-modal.component';
 import { ColorPickerComponent } from '../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
 import {
@@ -57,6 +65,7 @@ import {
 import { computeSceneCanvasLayout } from './engine/hex-grid.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
+  DEFAULT_VTT_DARKNESS_LEVEL,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
   DEFAULT_VTT_SCENE_HEIGHT_PX,
@@ -83,6 +92,7 @@ import { VttStore } from './store/vtt.store';
 
 export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
 export type VttSettingsModalKind = 'general' | 'controls' | 'invites';
+export type EditSceneModalTab = 'general' | 'grid' | 'visibility';
 export type VttRosterImportTab =
   | 'my-characters'
   | 'collections'
@@ -159,8 +169,10 @@ export interface EditingMapDraft {
   grid_offset_x: number;
   grid_offset_y: number;
   grid_opacity: number;
+  token_vision: boolean;
   fog_enabled: boolean;
   global_illumination: boolean;
+  darkness_level: number;
   isUploadingImage: boolean;
   imageNaturalWidth: number | null;
   imageNaturalHeight: number | null;
@@ -174,6 +186,7 @@ export interface EditingMapDraft {
     RouterLink,
     DatePipe,
     NgTemplateOutlet,
+    AssetBrowserModalComponent,
     ColorPickerComponent,
     CompendiumIconComponent,
     VttCanvasComponent,
@@ -187,6 +200,7 @@ export class VttRoomComponent {
   readonly settingsStore = inject(VttSettingsStore);
   readonly characterStore = inject(CharacterStore);
   readonly collectionsStore = inject(CollectionsStore);
+  readonly userAssetsStore = inject(UserAssetsStore);
   private readonly notifications = inject(NotificationStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -205,6 +219,7 @@ export class VttRoomComponent {
   readonly defaultGridSizePx = DEFAULT_VTT_GRID_SIZE_PX;
   readonly defaultScenePadding = DEFAULT_VTT_SCENE_PADDING;
   readonly defaultGridOpacity = DEFAULT_VTT_GRID_OPACITY;
+  readonly defaultDarknessLevel = DEFAULT_VTT_DARKNESS_LEVEL;
   readonly statusOptions: Exclude<CombatStatusEffect, 'None'>[] = [
     'Sundered',
     'Staggered',
@@ -234,14 +249,31 @@ export class VttRoomComponent {
   readonly createMapModal = signal<CreateBlankMapModalState | null>(null);
   readonly folderModal = signal<DirectoryFolderModalState | null>(null);
   readonly editingMapDraft = signal<EditingMapDraft | null>(null);
+  readonly editMapTab = signal<EditSceneModalTab>('general');
   readonly rosterActorModal = signal<RosterActorModalState | null>(null);
   readonly rosterImportModalOpen = signal(false);
   readonly rosterImportTab = signal<VttRosterImportTab>('my-characters');
   readonly rosterImportFolderId = signal<string | null>(null);
   readonly rosterImportSearch = signal('');
   readonly activeSettingsModal = signal<VttSettingsModalKind | null>(null);
+  readonly assetBrowserModal = signal<{
+    mode: 'picker' | 'manage';
+    purpose: UserAssetPurpose;
+    initialFolderId?: string | null;
+    currentUrl: string | null;
+    openRoutingOnInit: boolean;
+  } | null>(null);
   readonly recordingHotkeyAction = signal<VttHotkeyAction | null>(null);
+  readonly confirmClearLogs = signal(false);
   readonly formatBadge = formatHotkeyBadge;
+  readonly extractAssetName = extractAssetDisplayNameFromUrl;
+  readonly formatAssetBytes = formatAssetByteSize;
+
+  readonly editingMapMatchedAsset = computed<UserAssetModel | null>(() => {
+    const draft = this.editingMapDraft();
+    if (!draft?.map_image_url) return null;
+    return this.userAssetsStore.findAssetByUrl(draft.map_image_url);
+  });
 
   readonly campaignInviteLink = computed<string>(() => {
     const code = this.vttStore.campaign()?.invite_code;
@@ -486,8 +518,11 @@ export class VttRoomComponent {
     });
 
     effect(() => {
-      if (this.sidebarTab() === 'actors') {
+      const tab = this.sidebarTab();
+      if (tab === 'actors') {
         void this.characterStore.ensureUserCharactersLoaded();
+      } else if (tab === 'settings') {
+        void this.userAssetsStore.ensureLoaded();
       }
     });
 
@@ -553,8 +588,14 @@ export class VttRoomComponent {
     this.settingsStore.resetPreferences();
     this.notifications.info(
       'Settings Reset',
-      'Restored default audio and interface settings.'
+      'Restored default movement, audio, and interface settings.'
     );
+  }
+
+  formatTokenMoveSpeedLabel(speed: number): string {
+    if (speed <= 0) return 'Instant';
+    const tilesPerSec = Number((speed / 5).toFixed(1));
+    return `${speed} ft/s · ${tilesPerSec} tiles/s`;
   }
 
   returnToMainMenu(): void {
@@ -687,6 +728,10 @@ export class VttRoomComponent {
       }
       if (this.folderModal()) {
         this.folderModal.set(null);
+        return;
+      }
+      if (this.assetBrowserModal()) {
+        this.assetBrowserModal.set(null);
         return;
       }
       if (this.editingMapDraft()) {
@@ -1146,9 +1191,12 @@ export class VttRoomComponent {
     this.directoryContextMenu.set(null);
   }
 
-  editMapFromMenu(sceneId: string): void {
+  editMapFromMenu(
+    sceneId: string,
+    initialTab: EditSceneModalTab = 'general'
+  ): void {
     this.closeDirectoryContextMenu();
-    this.openEditMapModal(sceneId);
+    this.openEditMapModal(sceneId, initialTab);
   }
 
   viewMapFromMenu(sceneId: string): void {
@@ -1621,11 +1669,16 @@ export class VttRoomComponent {
     }
   }
 
-  openEditMapModal(sceneId: string): void {
+  openEditMapModal(
+    sceneId: string,
+    initialTab: EditSceneModalTab = 'general'
+  ): void {
     if (!this.vttStore.isGm()) return;
     const sc = this.vttStore.scenes().find((s) => s.id === sceneId);
     if (!sc) return;
     this.closeDirectoryContextMenu();
+    this.editMapTab.set(initialTab);
+    void this.userAssetsStore.ensureLoaded();
 
     const activeNat =
       this.vttStore.activeScene()?.id === sc.id
@@ -1657,8 +1710,10 @@ export class VttRoomComponent {
       grid_offset_x: sc.grid_offset_x ?? 0,
       grid_offset_y: sc.grid_offset_y ?? 0,
       grid_opacity: sc.grid_opacity ?? DEFAULT_VTT_GRID_OPACITY,
+      token_vision: sc.token_vision ?? true,
       fog_enabled: sc.fog_enabled,
       global_illumination: sc.global_illumination,
+      darkness_level: sc.darkness_level ?? DEFAULT_VTT_DARKNESS_LEVEL,
       isUploadingImage: false,
       imageNaturalWidth: activeNat?.width ?? null,
       imageNaturalHeight: activeNat?.height ?? null,
@@ -1739,12 +1794,85 @@ export class VttRoomComponent {
       return;
     }
 
+    const matched = this.userAssetsStore.findAssetByUrl(uploadedUrl);
+    const knownW = matched?.width && matched.width > 0 ? matched.width : null;
+    const knownH =
+      matched?.height && matched.height > 0 ? matched.height : null;
+
     this.editingMapDraft.set({
       ...afterUpload,
       map_image_url: uploadedUrl,
       isUploadingImage: false,
+      imageNaturalWidth: knownW ?? afterUpload.imageNaturalWidth,
+      imageNaturalHeight: knownH ?? afterUpload.imageNaturalHeight,
+      scene_width: knownW ?? afterUpload.scene_width,
+      scene_height: knownH ?? afterUpload.scene_height,
     });
-    this.probeDraftImageDimensions(uploadedUrl, true);
+    if (!knownW || !knownH) {
+      this.probeDraftImageDimensions(uploadedUrl, true);
+    }
+  }
+
+  openSceneAssetPicker(
+    initialFolderId?: string | null,
+    openRoutingOnInit = false
+  ): void {
+    const cur = this.editingMapDraft();
+    this.assetBrowserModal.set({
+      mode: 'picker',
+      purpose: 'maps',
+      initialFolderId,
+      currentUrl: cur?.map_image_url ?? null,
+      openRoutingOnInit,
+    });
+  }
+
+  openAssetLibraryManager(openRoutingOnInit = false): void {
+    this.inGameMenuOpen.set(false);
+    this.closeDirectoryContextMenu();
+    this.assetBrowserModal.set({
+      mode: 'manage',
+      purpose: 'maps',
+      initialFolderId: undefined,
+      currentUrl: null,
+      openRoutingOnInit,
+    });
+  }
+
+  closeAssetBrowserModal(): void {
+    this.assetBrowserModal.set(null);
+  }
+
+  onAssetBrowserSelected(asset: UserAssetModel): void {
+    const cur = this.editingMapDraft();
+    if (!cur) return;
+
+    const knownW = asset.width && asset.width > 0 ? asset.width : null;
+    const knownH = asset.height && asset.height > 0 ? asset.height : null;
+
+    this.editingMapDraft.set({
+      ...cur,
+      map_image_url: asset.public_url,
+      imageNaturalWidth: knownW,
+      imageNaturalHeight: knownH,
+      scene_width: knownW ?? cur.scene_width,
+      scene_height: knownH ?? cur.scene_height,
+    });
+
+    if (!knownW || !knownH) {
+      this.probeDraftImageDimensions(asset.public_url, true);
+    }
+  }
+
+  async saveCurrentSceneImageToLibrary(): Promise<void> {
+    const cur = this.editingMapDraft();
+    if (!cur || !cur.map_image_url.trim()) return;
+    await this.userAssetsStore.registerAssetFromUrl(cur.map_image_url, {
+      name: cur.name.trim() || undefined,
+      purpose: 'maps',
+      width: cur.imageNaturalWidth,
+      height: cur.imageNaturalHeight,
+    });
   }
 
   clearEditMapBackground(): void {
@@ -1786,6 +1914,15 @@ export class VttRoomComponent {
     this.editingMapDraft.set({
       ...cur,
       grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+    });
+  }
+
+  resetEditMapDarknessLevel(): void {
+    const cur = this.editingMapDraft();
+    if (!cur) return;
+    this.editingMapDraft.set({
+      ...cur,
+      darkness_level: DEFAULT_VTT_DARKNESS_LEVEL,
     });
   }
 
@@ -1861,6 +1998,10 @@ export class VttRoomComponent {
     const nextOpacity = Number.isFinite(rawOpacity)
       ? Math.max(0, Math.min(0.95, Number(rawOpacity.toFixed(2))))
       : DEFAULT_VTT_GRID_OPACITY;
+    const rawDarkness = Number(draft.darkness_level);
+    const nextDarkness = Number.isFinite(rawDarkness)
+      ? Math.max(0, Math.min(1, Number(rawDarkness.toFixed(2))))
+      : DEFAULT_VTT_DARKNESS_LEVEL;
 
     const nextLayout = computeSceneCanvasLayout({
       sceneWidthPx: nextSceneWidth,
@@ -1886,8 +2027,10 @@ export class VttRoomComponent {
       grid_offset_x: nextOffX,
       grid_offset_y: nextOffY,
       grid_opacity: nextOpacity,
+      token_vision: draft.token_vision,
       fog_enabled: draft.fog_enabled,
       global_illumination: draft.global_illumination,
+      darkness_level: nextDarkness,
     });
 
     if (this.vttStore.activeScene()?.id === draft.sceneId) {
@@ -1905,7 +2048,9 @@ export class VttRoomComponent {
     await this.vttStore.deleteSceneById(draft.sceneId);
   }
 
-  toggleSceneBoolean(field: 'fog_enabled' | 'global_illumination'): void {
+  toggleSceneBoolean(
+    field: 'token_vision' | 'fog_enabled' | 'global_illumination'
+  ): void {
     void this.vttStore.toggleSceneBooleanField(field);
   }
 
@@ -2074,5 +2219,22 @@ export class VttRoomComponent {
       kind: 'chat',
       title: msg,
     });
+  }
+
+  deleteLogEntry(logId: string): void {
+    void this.vttStore.deleteLogEntry(logId);
+  }
+
+  requestClearAllLogs(): void {
+    this.confirmClearLogs.set(true);
+  }
+
+  cancelClearAllLogs(): void {
+    this.confirmClearLogs.set(false);
+  }
+
+  async executeClearAllLogs(): Promise<void> {
+    this.confirmClearLogs.set(false);
+    await this.vttStore.clearAllLogs();
   }
 }

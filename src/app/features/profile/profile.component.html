@@ -116,6 +116,82 @@
     >
       <div>
         <h2 class="font-display text-base font-bold text-white">
+          Personal Asset Storage &amp; Folders
+        </h2>
+        <p class="mt-0.5 text-xs text-[#8AB0AB]">
+          Configure where your uploaded map battlemaps and character/token images are stored in Supabase.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        (click)="assetLibraryOpen.set(true)"
+        class="btn-copper rounded-lg px-3.5 py-1.5 text-xs font-bold"
+      >
+        Open Asset Library ({{ userAssetsStore.assets().length }})
+      </button>
+    </div>
+
+    <div class="p-6 sm:p-8 space-y-4 text-xs">
+      <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        <span class="font-semibold text-[var(--mot-muted)]">Supabase User Root</span>
+        <span class="font-mono-num font-bold text-[var(--mot-text)]">
+          {{ userAssetsStore.userStorageRoot() }}/
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label class="block rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2">
+          <div class="font-display font-bold text-[var(--mot-text)]">
+            Maps / Scenes Folder
+          </div>
+          <select
+            name="profileMapsFolder"
+            [ngModel]="userAssetsStore.effectiveMapsFolderId()"
+            (ngModelChange)="userAssetsStore.setDefaultFolder('maps', $event)"
+            class="mot-input w-full px-2.5 py-2 text-xs font-semibold"
+          >
+            <option [ngValue]="null">Root ({{ userAssetsStore.userRootLabel() }})</option>
+            @for (opt of userAssetsStore.directoryTree().flatFolderOptions; track opt.id) {
+              <option [ngValue]="opt.id">{{ opt.label }}</option>
+            }
+          </select>
+          <div class="truncate font-mono-num text-[11px] text-[var(--mot-muted)]">
+            {{ userAssetsStore.getSupabaseFolderPath(userAssetsStore.effectiveMapsFolderId()) }}
+          </div>
+        </label>
+
+        <label class="block rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2">
+          <div class="font-display font-bold text-[var(--mot-text)]">
+            Characters / Tokens Folder
+          </div>
+          <select
+            name="profileCharactersFolder"
+            [ngModel]="userAssetsStore.effectiveCharactersFolderId()"
+            (ngModelChange)="userAssetsStore.setDefaultFolder('characters', $event)"
+            class="mot-input w-full px-2.5 py-2 text-xs font-semibold"
+          >
+            <option [ngValue]="null">Root ({{ userAssetsStore.userRootLabel() }})</option>
+            @for (opt of userAssetsStore.directoryTree().flatFolderOptions; track opt.id) {
+              <option [ngValue]="opt.id">{{ opt.label }}</option>
+            }
+          </select>
+          <div class="truncate font-mono-num text-[11px] text-[var(--mot-muted)]">
+            {{ userAssetsStore.getSupabaseFolderPath(userAssetsStore.effectiveCharactersFolderId()) }}
+          </div>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section
+    class="overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+  >
+    <div
+      class="flex flex-wrap items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-6 py-4 sm:px-8"
+    >
+      <div>
+        <h2 class="font-display text-base font-bold text-white">
           VTT Controls &amp; Hotkeys
         </h2>
         <p class="mt-0.5 text-xs text-[#8AB0AB]">
@@ -228,4 +304,11 @@
       </div>
     </div>
   </section>
+
+  <app-asset-browser-modal
+    [open]="assetLibraryOpen()"
+    mode="manage"
+    purpose="maps"
+    (closed)="assetLibraryOpen.set(false)"
+  />
 </div>

@@ -13,11 +13,15 @@ function isMissingTableOrColumnError(code?: string, message?: string): boolean {
   const m = (message ?? '').toLowerCase();
   return (
     c === '42703' ||
+    c === '42883' ||
     c === '42P01' ||
+    c === 'PGRST202' ||
     c === 'PGRST204' ||
     c === 'PGRST205' ||
     m.includes('schema cache') ||
+    m.includes('could not find the function') ||
     (m.includes('column') && m.includes('does not exist')) ||
+    (m.includes('function') && m.includes('does not exist')) ||
     (m.includes('relation') && m.includes('does not exist')) ||
     m.includes('could not find the table')
   );
@@ -148,6 +152,42 @@ export function parseCollectionActorRow(
 @Injectable({ providedIn: 'root' })
 export class CollectionsService {
   private readonly supabase = inject(SupabaseService).client;
+
+  async fetchCollectionsBundle(ownerId: string): Promise<{
+    folders: CollectionFolderModel[];
+    actors: CollectionActorModel[];
+    fallback: boolean;
+    error: string | null;
+  }> {
+    const { data, error } = await this.supabase.rpc('get_collections_bundle');
+
+    if (!error && data && typeof data === 'object') {
+      const raw = data as {
+        folders?: Record<string, unknown>[];
+        actors?: Record<string, unknown>[];
+      };
+      const folders = (Array.isArray(raw.folders) ? raw.folders : []).map(
+        parseCollectionFolderRow
+      );
+      const actors = (Array.isArray(raw.actors) ? raw.actors : []).map(
+        parseCollectionActorRow
+      );
+      writeLocalFolders(ownerId, folders);
+      writeLocalActors(ownerId, actors);
+      return { folders, actors, fallback: false, error: null };
+    }
+
+    if (error && isMissingTableOrColumnError(error.code, error.message)) {
+      return { folders: [], actors: [], fallback: true, error: null };
+    }
+
+    return {
+      folders: readLocalFolders(ownerId),
+      actors: readLocalActors(ownerId),
+      fallback: false,
+      error: error?.message ?? null,
+    };
+  }
 
   async fetchFolders(ownerId: string): Promise<{
     folders: CollectionFolderModel[];

@@ -37,6 +37,17 @@ export interface VttPingBroadcast {
   createdAt: number;
 }
 
+export interface VttRoomBundle {
+  campaign: GameCardModel;
+  activeSceneId: string | null;
+  scenes: VttSceneModel[];
+  folders: VttFolderModel[];
+  rosterActors: VttRosterActorModel[];
+  tokens: VttTokenModel[];
+  logs: VttLogEntry[];
+  characters: CharacterModel[];
+}
+
 function parseOptionalCoord(val: unknown): number | null {
   if (val === null || val === undefined || val === '') return null;
   const num = Number(val);
@@ -98,6 +109,12 @@ function normalizeSceneRow(row: Record<string, unknown>): VttSceneModel {
     : DEFAULT_VTT_SCENE_PADDING;
 
   const sortOrder = Number(row['sort_order'] ?? meta.sort_order ?? 0) || 0;
+  const tokenVision =
+    typeof row['token_vision'] === 'boolean'
+      ? row['token_vision']
+      : typeof meta.token_vision === 'boolean'
+        ? meta.token_vision
+        : true;
 
   return {
     id: String(row['id'] ?? ''),
@@ -135,6 +152,7 @@ function normalizeSceneRow(row: Record<string, unknown>): VttSceneModel {
     initiative_order: Array.isArray(row['initiative_order'])
       ? (row['initiative_order'] as string[])
       : [],
+    token_vision: tokenVision,
     fog_enabled:
       typeof row['fog_enabled'] === 'boolean' ? row['fog_enabled'] : true,
     global_illumination: Boolean(row['global_illumination'] ?? false),
@@ -150,6 +168,10 @@ function normalizeSceneRow(row: Record<string, unknown>): VttSceneModel {
       row['pending_clash'] && typeof row['pending_clash'] === 'object'
         ? (row['pending_clash'] as VttPendingClash)
         : null,
+    token_count:
+      row['token_count'] !== undefined && row['token_count'] !== null
+        ? Number(row['token_count'])
+        : undefined,
     created_at: row['created_at'] as string | undefined,
     updated_at: row['updated_at'] as string | undefined,
   };
@@ -251,7 +273,9 @@ function isMissingColumnOrTableError(code?: string, message?: string): boolean {
   if (!code && !message) return false;
   if (
     code === '42703' ||
+    code === '42883' ||
     code === '42P01' ||
+    code === 'PGRST202' ||
     code === 'PGRST204' ||
     code === 'PGRST205'
   ) {
@@ -261,6 +285,10 @@ function isMissingColumnOrTableError(code?: string, message?: string): boolean {
   return (
     msg.includes('column') ||
     msg.includes('schema cache') ||
+    msg.includes('could not find the function') ||
+    msg.includes('could not find the table') ||
+    (msg.includes('does not exist') &&
+      (msg.includes('function') || msg.includes('relation'))) ||
     msg.includes('vtt_logs') ||
     msg.includes('vtt_folders')
   );
@@ -409,6 +437,107 @@ export class VttService {
   readonly parseFolderRow = normalizeFolderRow;
   readonly parseRosterActorRow = normalizeRosterActorRow;
   readonly parseLogRow = normalizeLogRow;
+
+  async fetchRoomBundle(campaignId: string): Promise<{
+    bundle: VttRoomBundle | null;
+    fallback: boolean;
+    error: string | null;
+  }> {
+    const { data, error } = await this.supabase.rpc('get_vtt_room_bundle', {
+      p_campaign_id: campaignId,
+    });
+
+    if (!error && data && typeof data === 'object') {
+      const raw = data as {
+        campaign?: GameCardModel | null;
+        activeSceneId?: string | null;
+        scenes?: Record<string, unknown>[];
+        folders?: Record<string, unknown>[];
+        rosterActors?: Record<string, unknown>[];
+        tokens?: Record<string, unknown>[];
+        logs?: Record<string, unknown>[];
+        characters?: CharacterModel[];
+      };
+
+      if (!raw.campaign) {
+        return {
+          bundle: null,
+          fallback: false,
+          error: 'Campaign not found.',
+        };
+      }
+
+      const scenes = (Array.isArray(raw.scenes) ? raw.scenes : []).map(
+        normalizeSceneRow
+      );
+      const folders = (Array.isArray(raw.folders) ? raw.folders : []).map(
+        normalizeFolderRow
+      );
+      const rosterActors = (
+        Array.isArray(raw.rosterActors) ? raw.rosterActors : []
+      ).map(normalizeRosterActorRow);
+      writeLocalRosterActors(campaignId, rosterActors);
+
+      const tokens = (Array.isArray(raw.tokens) ? raw.tokens : []).map(
+        normalizeTokenRow
+      );
+      const logs = (Array.isArray(raw.logs) ? raw.logs : []).map(
+        normalizeLogRow
+      );
+      const characters = (
+        Array.isArray(raw.characters) ? raw.characters : []
+      ).map((c) => ({
+        ...c,
+        unlocked_perk_ids: c.unlocked_perk_ids ?? [],
+        active_cooldowns: c.active_cooldowns ?? {},
+      }));
+
+      return {
+        bundle: {
+          campaign: raw.campaign,
+          activeSceneId: raw.activeSceneId ?? null,
+          scenes,
+          folders,
+          rosterActors,
+          tokens,
+          logs,
+          characters,
+        },
+        fallback: false,
+        error: null,
+      };
+    }
+
+    if (error && isMissingColumnOrTableError(error.code, error.message)) {
+      return { bundle: null, fallback: true, error: null };
+    }
+
+    return {
+      bundle: null,
+      fallback: false,
+      error: error?.message ?? 'Campaign not found.',
+    };
+  }
+
+  async activateSceneForParty(
+    campaignId: string,
+    sceneId: string
+  ): Promise<{ error: string | null; fallback: boolean }> {
+    const { error } = await this.supabase.rpc('activate_vtt_scene', {
+      p_campaign_id: campaignId,
+      p_scene_id: sceneId,
+    });
+
+    if (!error) {
+      return { error: null, fallback: false };
+    }
+
+    if (isMissingColumnOrTableError(error.code, error.message)) {
+      return { error: null, fallback: true };
+    }
+
+    return { error: error.message, fallback: false };
+  }
 
   async fetchCampaignById(campaignId: string): Promise<{
     data: GameCardModel | null;
@@ -740,11 +869,22 @@ export class VttService {
     needsMigration: boolean;
     error: string | null;
   }> {
-    const { data, error } = await this.supabase
-      .from('vtt_encounters')
+    let { data, error } = await this.supabase
+      .from('v_vtt_campaign_scenes')
       .select('*')
       .eq('campaign_id', campaignId)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
+
+    if (error && isMissingColumnOrTableError(error.code, error.message)) {
+      const baseRes = await this.supabase
+        .from('vtt_encounters')
+        .select('*')
+        .eq('campaign_id', campaignId)
+        .order('created_at', { ascending: true });
+      data = baseRes.data;
+      error = baseRes.error;
+    }
 
     if (error) {
       if (isMissingColumnOrTableError(error.code, error.message)) {
@@ -792,6 +932,7 @@ export class VttService {
     grid_opacity?: number;
     background_color?: string;
     map_image_url?: string | null;
+    token_vision?: boolean;
     fog_enabled?: boolean;
     global_illumination?: boolean;
     darkness_level?: number;
@@ -816,6 +957,7 @@ export class VttService {
         ? rawFolderId
         : null;
     const sortOrder = input.sort_order ?? 0;
+    const tokenVision = input.token_vision ?? true;
 
     const exploredFogWithMeta: VttExploredFog = {
       cells: [],
@@ -828,6 +970,7 @@ export class VttService {
         scene_height: sceneHeight,
         padding,
         sort_order: sortOrder,
+        token_vision: tokenVision,
       },
     };
 
@@ -861,6 +1004,7 @@ export class VttService {
       scene_height: sceneHeight,
       padding,
       sort_order: sortOrder,
+      token_vision: tokenVision,
     };
 
     let { data, error } = await this.supabase
@@ -951,6 +1095,7 @@ export class VttService {
             scene_height: sceneHeight,
             padding,
             sort_order: sortOrder,
+            token_vision: tokenVision,
           },
           needsMigration: true,
           error: null,
@@ -989,6 +1134,7 @@ export class VttService {
       patch.scene_height !== undefined ||
       patch.padding !== undefined ||
       patch.sort_order !== undefined ||
+      patch.token_vision !== undefined ||
       patch.explored_fog !== undefined;
 
     if (touchesMeta && existingScene) {
@@ -1029,6 +1175,10 @@ export class VttService {
             patch.sort_order !== undefined
               ? patch.sort_order
               : existingScene.sort_order ?? prevMeta.sort_order ?? 0,
+          token_vision:
+            patch.token_vision !== undefined
+              ? patch.token_vision
+              : existingScene.token_vision ?? prevMeta.token_vision ?? true,
         },
       };
     }
@@ -1077,6 +1227,7 @@ export class VttService {
       delete tier2Payload['scene_height'];
       delete tier2Payload['padding'];
       delete tier2Payload['sort_order'];
+      delete tier2Payload['token_vision'];
 
       if (Object.keys(tier2Payload).length > 1) {
         const tier2 = await this.supabase
@@ -1125,10 +1276,20 @@ export class VttService {
   }
 
   async fetchSceneTokens(encounterId: string): Promise<VttTokenModel[]> {
-    const { data } = await this.supabase
-      .from('vtt_tokens')
+    let { data, error } = await this.supabase
+      .from('v_visible_vtt_tokens')
       .select('*')
-      .eq('encounter_id', encounterId);
+      .eq('encounter_id', encounterId)
+      .order('created_at', { ascending: true });
+
+    if (error && isMissingColumnOrTableError(error.code, error.message)) {
+      const baseRes = await this.supabase
+        .from('vtt_tokens')
+        .select('*')
+        .eq('encounter_id', encounterId);
+      data = baseRes.data;
+    }
+
     const rows = (data as Record<string, unknown>[] | null) ?? [];
     return rows.map(normalizeTokenRow);
   }
@@ -1391,6 +1552,17 @@ export class VttService {
     return normalizeLogRow(data as Record<string, unknown>);
   }
 
+  async deleteLog(logId: string): Promise<string | null> {
+    if (!logId || logId.startsWith('local-')) {
+      return null;
+    }
+    const { error } = await this.supabase
+      .from('vtt_logs')
+      .delete()
+      .eq('id', logId);
+    return error?.message ?? null;
+  }
+
   async clearCampaignLogs(campaignId: string): Promise<string | null> {
     const { error } = await this.supabase
       .from('vtt_logs')
@@ -1443,6 +1615,7 @@ export class VttService {
       onTokenUpsert: (token: VttTokenModel) => void;
       onTokenDelete: (tokenId: string) => void;
       onLogInsert: (entry: VttLogEntry) => void;
+      onLogDelete?: (logId: string) => void;
       onPing: (ping: VttPingBroadcast) => void;
     }
   ): RealtimeChannel {
@@ -1527,15 +1700,30 @@ export class VttService {
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'vtt_logs',
-          filter: `campaign_id=eq.${campaignId}`,
         },
         (payload) => {
-          handlers.onLogInsert(
-            normalizeLogRow(payload.new as Record<string, unknown>)
-          );
+          if (payload.eventType === 'DELETE') {
+            const oldRow = (payload.old ?? {}) as Record<string, unknown>;
+            const oldCampId = oldRow['campaign_id']
+              ? String(oldRow['campaign_id'])
+              : '';
+            const oldId = String(oldRow['id'] ?? '');
+            if (oldId && (!oldCampId || oldCampId === campaignId)) {
+              handlers.onLogDelete?.(oldId);
+            }
+            return;
+          }
+          if (payload.eventType === 'INSERT') {
+            const parsed = normalizeLogRow(
+              payload.new as Record<string, unknown>
+            );
+            if (!parsed.campaign_id || parsed.campaign_id === campaignId) {
+              handlers.onLogInsert(parsed);
+            }
+          }
         }
       )
       .on('broadcast', { event: 'map_ping' }, (msg) => {

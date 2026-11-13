@@ -31,6 +31,18 @@ export class AuthService {
   }
 
   async isHandleTaken(cleanHandle: string, excludeUserId?: string): Promise<boolean> {
+    const { data: available, error: rpcErr } = await this.supabase.rpc(
+      'is_handle_available',
+      {
+        p_handle: cleanHandle,
+        p_exclude_user_id: excludeUserId ?? null,
+      }
+    );
+
+    if (!rpcErr && typeof available === 'boolean') {
+      return !available;
+    }
+
     let query = this.supabase
       .from('profiles')
       .select('id')

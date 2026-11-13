@@ -347,7 +347,7 @@
                 [class.text-white]="vttStore.activeTool() === 'fog'"
                 [class.text-[#8AB0AB]]="vttStore.activeTool() !== 'fog'"
                 [class.hover:bg-[#192B28]]="vttStore.activeTool() !== 'fog'"
-                [title]="'Fog of War & Global Daylight Settings (' + settingsStore.badges().tool_fog + ')'"
+                [title]="'Visibility & Fog Settings (' + settingsStore.badges().tool_fog + ')'"
               >
                 <span class="flex items-center gap-2">
                   <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -473,16 +473,60 @@
 
           @if (vttStore.isGm() && vttStore.activeTool() === 'fog' && vttStore.activeScene(); as sc) {
             <div
-              class="pointer-events-auto w-60 space-y-2.5 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
+              class="pointer-events-auto w-64 space-y-2 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-xl backdrop-blur-xs"
             >
-              <div class="font-display font-bold text-white">Fog &amp; Illumination</div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display font-bold text-white">Visibility &amp; Illumination</span>
+                <button
+                  type="button"
+                  (click)="openEditMapModal(sc.id, 'visibility')"
+                  class="text-[10px] font-bold text-[#FDBA74] hover:underline"
+                >
+                  Configure &rarr;
+                </button>
+              </div>
+
+              <button
+                type="button"
+                (click)="toggleSceneBoolean('token_vision')"
+                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold hover:border-[#C4491A]"
+              >
+                <span>Token Vision</span>
+                <span
+                  class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#38B29A]]="sc.token_vision"
+                  [class.text-[#061412]]="sc.token_vision"
+                  [class.bg-[#243B37]]="!sc.token_vision"
+                  [class.text-[#8AB0AB]]="!sc.token_vision"
+                >
+                  {{ sc.token_vision ? 'ON' : 'OFF' }}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                (click)="toggleSceneBoolean('global_illumination')"
+                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold hover:border-[#C4491A]"
+              >
+                <span>Global Illumination</span>
+                <span
+                  class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#FBBF24]]="sc.global_illumination"
+                  [class.text-[#1E1303]]="sc.global_illumination"
+                  [class.bg-[#243B37]]="!sc.global_illumination"
+                  [class.text-[#8AB0AB]]="!sc.global_illumination"
+                >
+                  {{ sc.global_illumination ? 'ON' : 'OFF' }}
+                </span>
+              </button>
 
               <button
                 type="button"
                 (click)="toggleSceneBoolean('fog_enabled')"
-                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold"
+                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold hover:border-[#C4491A]"
+                [class.opacity-55]="!sc.token_vision"
               >
-                <span>Dynamic Fog of War</span>
+                <span>Fog Exploration</span>
                 <span
                   class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
                   [class.bg-[#38B29A]]="sc.fog_enabled"
@@ -491,23 +535,6 @@
                   [class.text-[#8AB0AB]]="!sc.fog_enabled"
                 >
                   {{ sc.fog_enabled ? 'ON' : 'OFF' }}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                (click)="toggleSceneBoolean('global_illumination')"
-                class="flex w-full items-center justify-between rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-semibold"
-              >
-                <span>Global Daylight</span>
-                <span
-                  class="rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
-                  [class.bg-[#FBBF24]]="sc.global_illumination"
-                  [class.text-[#1E1303]]="sc.global_illumination"
-                  [class.bg-[#243B37]]="!sc.global_illumination"
-                  [class.text-[#8AB0AB]]="!sc.global_illumination"
-                >
-                  {{ sc.global_illumination ? 'DAYLIGHT' : 'DARKNESS' }}
                 </span>
               </button>
 
@@ -1179,6 +1206,41 @@
 
           @if (sidebarTab() === 'log') {
             <div class="flex flex-1 min-h-0 flex-col">
+              @if (vttStore.isGm() && vttStore.logs().length > 0) {
+                <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-3 py-1.5 text-[11px]">
+                  <span class="font-mono-num text-[var(--mot-muted)]">
+                    {{ vttStore.logs().length }} {{ vttStore.logs().length === 1 ? 'Entry' : 'Entries' }}
+                  </span>
+                  @if (!confirmClearLogs()) {
+                    <button
+                      type="button"
+                      (click)="requestClearAllLogs()"
+                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-0.5 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                    >
+                      Clear Log
+                    </button>
+                  } @else {
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-[10px] font-bold text-[#F43F5E]">Clear all?</span>
+                      <button
+                        type="button"
+                        (click)="executeClearAllLogs()"
+                        class="rounded-md border border-[#F43F5E] bg-[#F43F5E]/15 px-2 py-0.5 text-[10px] font-bold text-[#F43F5E] hover:bg-[#F43F5E]/25"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        (click)="cancelClearAllLogs()"
+                        class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+
               <div
                 #logScroll
                 class="flex-1 overflow-y-auto p-3 space-y-2 text-xs"
@@ -1190,7 +1252,7 @@
                 } @else {
                   @for (entry of vttStore.logs(); track entry.id) {
                     <div
-                      class="rounded-xl border p-2.5 space-y-1"
+                      class="group rounded-xl border p-2.5 space-y-1"
                       [class.border-[#C4491A]]="entry.kind === 'clash'"
                       [class.bg-[var(--mot-warn-bg)]]="entry.kind === 'clash'"
                       [class.border-[var(--mot-hp)]]="entry.kind === 'damage'"
@@ -1201,8 +1263,21 @@
                       [class.bg-[var(--mot-well)]]="entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
                     >
                       <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
-                        <span class="font-bold uppercase">{{ entry.sender_name }}</span>
-                        <span class="font-mono-num">{{ entry.created_at | date: 'shortTime' }}</span>
+                        <span class="truncate font-bold uppercase">{{ entry.sender_name }}</span>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                          <span class="font-mono-num">{{ entry.created_at | date: 'shortTime' }}</span>
+                          @if (vttStore.canDeleteLog(entry)) {
+                            <button
+                              type="button"
+                              (click)="deleteLogEntry(entry.id)"
+                              title="Delete Log Entry"
+                              aria-label="Delete Log Entry"
+                              class="rounded px-1 py-0.5 text-[11px] leading-none font-bold text-[var(--mot-muted)] opacity-60 transition-opacity group-hover:opacity-100 hover:bg-[#F43F5E]/15 hover:text-[#F43F5E]"
+                            >
+                              &times;
+                            </button>
+                          }
+                        </div>
                       </div>
                       <div class="font-bold text-[var(--mot-text)]">
                         {{ entry.title }}
@@ -2094,7 +2169,7 @@
                           General Settings
                         </div>
                         <div class="truncate text-[11px] text-[var(--mot-muted)]">
-                          Audio, sound cues, badges &amp; table rules
+                          Audio, token travel speed, badges &amp; table rules
                         </div>
                       </div>
                     </div>
@@ -2125,6 +2200,31 @@
                       </div>
                     </div>
                     <span class="shrink-0 font-bold text-[var(--mot-muted)]">&rsaquo;</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="openAssetLibraryManager(false)"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-accent-text)]">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                        </svg>
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Asset Library &amp; Folders
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Manage reusable map &amp; character image folders
+                        </div>
+                      </div>
+                    </div>
+                    <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ userAssetsStore.assets().length }}
+                    </span>
                   </button>
 
                   @if (vttStore.campaign()?.invite_code; as code) {
@@ -2225,11 +2325,19 @@
         <div class="mt-1 space-y-0.5">
           <button
             type="button"
-            (click)="editMapFromMenu(menuMap.id)"
+            (click)="editMapFromMenu(menuMap.id, 'general')"
             class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
           >
             <span>Configure Scene...</span>
-            <span class="text-[10px] text-[#8AB0AB]">Grid &amp; Pad</span>
+            <span class="text-[10px] text-[#8AB0AB]">Edit</span>
+          </button>
+          <button
+            type="button"
+            (click)="editMapFromMenu(menuMap.id, 'visibility')"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>Visibility &amp; Lighting...</span>
+            <span class="text-[10px] text-[#8AB0AB]">{{ menuMap.token_vision ? 'Vision' : 'Open' }}</span>
           </button>
           <button
             type="button"
@@ -2590,7 +2698,7 @@
               Scene Configuration
             </h2>
             <p class="text-[11px] text-[#8AB0AB]">
-              Configure scene dimensions, background image, single-number pixel grid size, and off-scene padding.
+              Configure scene background, grid dimensions, token vision, and global illumination.
             </p>
           </div>
           <button
@@ -2602,418 +2710,749 @@
           </button>
         </div>
 
+        <div
+          role="tablist"
+          aria-label="Scene Configuration Tabs"
+          class="grid shrink-0 grid-cols-3 gap-1.5 border-b border-[#243B37] bg-[#0B1413] px-5 py-2"
+        >
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="editMapTab() === 'general'"
+            (click)="editMapTab.set('general')"
+            class="flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 font-display text-xs font-bold transition-colors"
+            [class.bg-[#C4491A]]="editMapTab() === 'general'"
+            [class.text-white]="editMapTab() === 'general'"
+            [class.text-[#8AB0AB]]="editMapTab() !== 'general'"
+            [class.hover:bg-[#142220]]="editMapTab() !== 'general'"
+            [class.hover:text-white]="editMapTab() !== 'general'"
+          >
+            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-5-5L5 21" />
+            </svg>
+            <span>General</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="editMapTab() === 'grid'"
+            (click)="editMapTab.set('grid')"
+            class="flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 font-display text-xs font-bold transition-colors"
+            [class.bg-[#C4491A]]="editMapTab() === 'grid'"
+            [class.text-white]="editMapTab() === 'grid'"
+            [class.text-[#8AB0AB]]="editMapTab() !== 'grid'"
+            [class.hover:bg-[#142220]]="editMapTab() !== 'grid'"
+            [class.hover:text-white]="editMapTab() !== 'grid'"
+          >
+            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="3" y1="15" x2="21" y2="15" />
+            </svg>
+            <span>Grid</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="editMapTab() === 'visibility'"
+            (click)="editMapTab.set('visibility')"
+            class="flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 font-display text-xs font-bold transition-colors"
+            [class.bg-[#C4491A]]="editMapTab() === 'visibility'"
+            [class.text-white]="editMapTab() === 'visibility'"
+            [class.text-[#8AB0AB]]="editMapTab() !== 'visibility'"
+            [class.hover:bg-[#142220]]="editMapTab() !== 'visibility'"
+            [class.hover:text-white]="editMapTab() !== 'visibility'"
+          >
+            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>Visibility</span>
+          </button>
+        </div>
+
         <div class="flex-1 overflow-y-auto p-5 space-y-5">
-          <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="block space-y-1">
-              <span class="font-semibold text-[#EBF5F3]">Scene Name</span>
-              <input
-                type="text"
-                name="editMapName"
-                [ngModel]="em.name"
-                (ngModelChange)="updateEditMapField('name', $event)"
-                placeholder="Scene"
-                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-              />
-            </label>
-
-            <label class="block space-y-1">
-              <span class="font-semibold text-[#EBF5F3]">Folder</span>
-              <select
-                name="editMapFolder"
-                [ngModel]="em.folder_id"
-                (ngModelChange)="updateEditMapField('folder_id', $event)"
-                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
-              >
-                <option [ngValue]="null">None (Root Directory)</option>
-                @for (opt of mapDirectoryTree().flatFolderOptions; track opt.id) {
-                  <option [ngValue]="opt.id">{{ opt.label }}</option>
-                }
-              </select>
-            </label>
-          </section>
-
-          <section class="space-y-3 border-t border-[#243B37] pt-4">
-            <div class="flex items-center justify-between">
-              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-                Background
-              </span>
-              @if (em.map_image_url) {
-                <span class="font-mono-num text-[10px] text-[#5EEAD4]">
-                  @if (em.imageNaturalWidth && em.imageNaturalHeight) {
-                    Image {{ em.imageNaturalWidth }}&times;{{ em.imageNaturalHeight }} px
-                  } @else {
-                    Battlemap Image Set
-                  }
-                </span>
-              } @else {
-                <span class="font-mono-num text-[10px] text-[#8AB0AB]">
-                  Blank Scene ({{ em.background_color }})
-                </span>
-              }
-            </div>
-
-            <div
-              class="relative flex h-28 w-full items-center justify-center overflow-hidden rounded-xl border border-[#243B37]"
-              [style.backgroundColor]="em.background_color"
-            >
-              @if (em.map_image_url) {
-                <img
-                  [src]="em.map_image_url"
-                  alt=""
-                  class="h-full w-full object-contain"
-                />
-              } @else {
-                <span class="font-display text-xs font-bold text-white/50">
-                  Blank Scene Surface
-                </span>
-              }
-            </div>
-
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr]">
-              <label
-                class="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#385E58] bg-[#142220] px-3.5 py-2 font-semibold text-white hover:border-[#C4491A]"
-              >
-                <span>
-                  {{ em.isUploadingImage ? 'Uploading...' : 'Upload Image' }}
-                </span>
+          @if (editMapTab() === 'general') {
+            <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label class="block space-y-1">
+                <span class="font-semibold text-[#EBF5F3]">Scene Name</span>
                 <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  [disabled]="em.isUploadingImage"
-                  (change)="onEditMapFileSelected($event)"
-                  class="hidden"
+                  type="text"
+                  name="editMapName"
+                  [ngModel]="em.name"
+                  (ngModelChange)="updateEditMapField('name', $event)"
+                  placeholder="Scene"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
                 />
               </label>
 
-              <div class="flex items-center gap-1.5">
-                <input
-                  type="url"
-                  name="editMapUrl"
-                  [ngModel]="em.map_image_url"
-                  (ngModelChange)="onEditMapUrlChange($event)"
-                  placeholder="Image URL"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
-                />
-                @if (em.map_image_url) {
-                  <button
-                    type="button"
-                    (click)="clearEditMapBackground()"
-                    class="shrink-0 rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-2 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
-                    title="Clear Image to Blank Background"
-                  >
-                    Clear
-                  </button>
-                }
-              </div>
-            </div>
-
-            <div class="space-y-1.5">
-              <span class="block text-[11px] font-semibold text-[#8AB0AB]">
-                Blank Scene / Backdrop Color
-              </span>
-              <div class="flex flex-wrap items-center gap-2">
-                @for (sw of mapBgSwatches; track sw.color) {
-                  <button
-                    type="button"
-                    (click)="updateEditMapField('background_color', sw.color)"
-                    class="flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors"
-                    [class.border-[#C4491A]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
-                    [class.bg-[#192B28]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
-                    [class.text-white]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
-                    [class.border-[#243B37]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
-                    [class.bg-[#142220]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
-                    [class.text-[#8AB0AB]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
-                  >
-                    <span
-                      class="h-3 w-3 rounded-xs border border-white/25"
-                      [style.backgroundColor]="sw.color"
-                    ></span>
-                    <span>{{ sw.label }}</span>
-                  </button>
-                }
-                <app-color-picker
-                  [color]="em.background_color"
-                  mode="popover"
-                  surfaceTheme="dark"
-                  (colorChange)="updateEditMapField('background_color', $event)"
-                />
-              </div>
-            </div>
-          </section>
-
-          <section class="space-y-3.5 border-t border-[#243B37] pt-4">
-            <div class="flex items-center justify-between">
-              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-                Grid, Dimensions &amp; Padding
-              </span>
-              <span class="font-mono-num text-[11px] text-[#8AB0AB]">
-                1 tile = 5 ft
-              </span>
-            </div>
-
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                (click)="updateEditMapField('grid_mode', 'square')"
-                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
-                [class.border-[#C4491A]]="em.grid_mode !== 'gridless'"
-                [class.bg-[#27160E]]="em.grid_mode !== 'gridless'"
-                [class.border-[#243B37]]="em.grid_mode === 'gridless'"
-                [class.bg-[#142220]]="em.grid_mode === 'gridless'"
-              >
-                <span class="font-display text-xs font-bold text-white">
-                  Square Grid
-                </span>
-                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
-                  Balanced square grid (5 ft per tile) auto-covering the entire scene and padding.
-                </span>
-              </button>
-
-              <button
-                type="button"
-                (click)="updateEditMapField('grid_mode', 'gridless')"
-                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
-                [class.border-[#C4491A]]="em.grid_mode === 'gridless'"
-                [class.bg-[#27160E]]="em.grid_mode === 'gridless'"
-                [class.border-[#243B37]]="em.grid_mode !== 'gridless'"
-                [class.bg-[#142220]]="em.grid_mode !== 'gridless'"
-              >
-                <span class="font-display text-xs font-bold text-white">
-                  Gridless
-                </span>
-                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
-                  No grid lines. Free continuous token movement with distances measured in feet.
-                </span>
-              </button>
-            </div>
-
-            <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-semibold text-[#EBF5F3]">
-                  Grid Size (Pixels)
-                </span>
-                <button
-                  type="button"
-                  (click)="resetEditMapDefaultGrid()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+              <label class="block space-y-1">
+                <span class="font-semibold text-[#EBF5F3]">Folder</span>
+                <select
+                  name="editMapFolder"
+                  [ngModel]="em.folder_id"
+                  (ngModelChange)="updateEditMapField('folder_id', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
                 >
-                  Default ({{ defaultGridSizePx }} px)
-                </button>
-              </div>
+                  <option [ngValue]="null">None (Root Directory)</option>
+                  @for (opt of mapDirectoryTree().flatFolderOptions; track opt.id) {
+                    <option [ngValue]="opt.id">{{ opt.label }}</option>
+                  }
+                </select>
+              </label>
+            </section>
 
-              <div class="flex items-center gap-3">
-                <input
-                  type="number"
-                  name="editMapSizePxNum"
-                  min="20"
-                  max="400"
-                  step="1"
-                  [ngModel]="em.grid_size_px"
-                  (ngModelChange)="updateEditMapField('grid_size_px', $event)"
-                  class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                />
-                <input
-                  type="range"
-                  name="editMapSizePxRange"
-                  min="30"
-                  max="250"
-                  step="2"
-                  [ngModel]="em.grid_size_px"
-                  (ngModelChange)="updateEditMapField('grid_size_px', $event)"
-                  class="w-full accent-[#C4491A]"
-                />
-              </div>
-
-              <p class="text-[11px] text-[#8AB0AB]">
-                Pixels per 5 ft square tile (default {{ defaultGridSizePx }} px). Grid counts calculate automatically to cover 100% of the scene and padding.
-              </p>
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-semibold text-[#EBF5F3]">
-                  Scene Dimensions (px)
+            <section class="space-y-3 border-t border-[#243B37] pt-4">
+              <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Background
                 </span>
                 @if (em.map_image_url) {
-                  <button
-                    type="button"
-                    [disabled]="!em.imageNaturalWidth"
-                    (click)="matchEditMapToImage()"
-                    class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-0.5 text-[10px] font-semibold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-45"
-                  >
-                    Match Image Dimensions
-                  </button>
-                }
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <label class="block space-y-1">
-                  <span class="text-[11px] text-[#8AB0AB]">Width (px)</span>
-                  <input
-                    type="number"
-                    name="editSceneWidthPx"
-                    min="200"
-                    max="20000"
-                    step="10"
-                    [ngModel]="em.scene_width"
-                    (ngModelChange)="updateEditMapField('scene_width', $event)"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[11px] text-[#8AB0AB]">Height (px)</span>
-                  <input
-                    type="number"
-                    name="editSceneHeightPx"
-                    min="200"
-                    max="20000"
-                    step="10"
-                    [ngModel]="em.scene_height"
-                    (ngModelChange)="updateEditMapField('scene_height', $event)"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-semibold text-[#EBF5F3]">
-                  Padding Percentage
-                </span>
-                <button
-                  type="button"
-                  (click)="resetEditMapPadding()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
-                >
-                  Default ({{ defaultScenePadding }})
-                </button>
-              </div>
-
-              <div class="flex items-center gap-3">
-                <input
-                  type="number"
-                  name="editMapPaddingNum"
-                  min="0"
-                  max="0.5"
-                  step="0.05"
-                  [ngModel]="em.padding"
-                  (ngModelChange)="updateEditMapField('padding', $event)"
-                  class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                />
-                <input
-                  type="range"
-                  name="editMapPaddingRange"
-                  min="0"
-                  max="0.5"
-                  step="0.05"
-                  [ngModel]="em.padding"
-                  (ngModelChange)="updateEditMapField('padding', $event)"
-                  class="w-full accent-[#C4491A]"
-                />
-              </div>
-
-              <p class="text-[11px] text-[#8AB0AB]">
-                Additional usable canvas space around the scene background (default {{ defaultScenePadding }}). Place tokens in the padding border and right-click to hide them until ready.
-              </p>
-            </div>
-
-            @if (editDraftLayout(); as dl) {
-              <div class="rounded-xl border border-[#21423B] bg-[#0D1E1B] px-3 py-2.5 font-mono-num text-[11px] text-[#A7F3D0] space-y-1">
-                <div class="flex flex-wrap items-center justify-between gap-2 font-bold">
-                  <span>
-                    @if (em.grid_mode === 'gridless') {
-                      Gridless Scale: {{ dl.gridSizePx }} px = 5 ft
+                  <span class="font-mono-num text-[10px] text-[#5EEAD4]">
+                    @if (em.imageNaturalWidth && em.imageNaturalHeight) {
+                      Image {{ em.imageNaturalWidth }}&times;{{ em.imageNaturalHeight }} px
                     } @else {
-                      Auto-Calculated Grid: {{ dl.gridCols }} &times; {{ dl.gridRows }} tiles
+                      Battlemap Image Set
                     }
                   </span>
-                  <span class="text-[#5EEAD4]">
-                    Canvas {{ dl.totalWidth }} &times; {{ dl.totalHeight }} px
+                } @else {
+                  <span class="font-mono-num text-[10px] text-[#8AB0AB]">
+                    Blank Scene ({{ em.background_color }})
                   </span>
-                </div>
-                <div class="text-[10px] text-[#8AB0AB]">
-                  Scene {{ dl.innerWidth }} &times; {{ dl.innerHeight }} px + Padding {{ dl.sceneX }} px (L/R) &middot; {{ dl.sceneY }} px (T/B)
-                </div>
+                }
               </div>
-            }
 
-            @if (em.grid_mode !== 'gridless') {
-              <div class="grid grid-cols-2 gap-3">
-                <label class="block space-y-1">
-                  <span class="font-semibold text-[#EBF5F3]">Grid Offset X (px)</span>
+              <div
+                class="relative flex h-28 w-full items-center justify-center overflow-hidden rounded-xl border border-[#243B37]"
+                [style.backgroundColor]="em.background_color"
+              >
+                @if (em.map_image_url) {
+                  <img
+                    [src]="em.map_image_url"
+                    alt=""
+                    class="h-full w-full object-contain"
+                  />
+                } @else {
+                  <span class="font-display text-xs font-bold text-white/50">
+                    Blank Scene Surface
+                  </span>
+                }
+              </div>
+
+              @if (em.map_image_url) {
+                @if (editingMapMatchedAsset(); as matchedAsset) {
+                  <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#21423B] bg-[#0D1E1B] px-3 py-2">
+                    <div class="min-w-0 space-y-0.5">
+                      <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <svg class="h-3.5 w-3.5 shrink-0 text-[#5EEAD4]" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                        </svg>
+                        <span class="font-semibold text-[#5EEAD4]">
+                          {{ userAssetsStore.getFolderTrailLabel(matchedAsset.folder_id) }}
+                        </span>
+                        <span class="text-[#8AB0AB]">/</span>
+                        <span class="truncate font-bold text-white">
+                          {{ matchedAsset.name }}
+                        </span>
+                      </div>
+                      <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                        {{ matchedAsset.storage_bucket }}/{{ matchedAsset.storage_path }}
+                        @if (matchedAsset.size_bytes > 0) {
+                          &middot; {{ formatAssetBytes(matchedAsset.size_bytes) }}
+                        }
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      (click)="openSceneAssetPicker(matchedAsset.folder_id)"
+                      class="shrink-0 rounded-lg border border-[#2C574E] bg-[#122925] px-2.5 py-1 text-[11px] font-bold text-[#5EEAD4] hover:border-[#38B29A] hover:text-white"
+                    >
+                      Open Folder
+                    </button>
+                  </div>
+                } @else {
+                  <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#12201E] px-3 py-2">
+                    <div class="min-w-0 space-y-0.5">
+                      <div class="truncate text-[11px] font-bold text-white">
+                        {{ extractAssetName(em.map_image_url) }}
+                      </div>
+                      <div class="text-[10px] text-[#8AB0AB]">
+                        Not saved in your Asset Library yet
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      (click)="saveCurrentSceneImageToLibrary()"
+                      class="shrink-0 rounded-lg border border-[#C4491A] bg-[#27160E] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] hover:text-white"
+                    >
+                      + Save to Maps Folder
+                    </button>
+                  </div>
+                }
+              }
+
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-[auto_auto_1fr]">
+                <button
+                  type="button"
+                  (click)="openSceneAssetPicker()"
+                  class="btn-copper flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 font-bold"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                  </svg>
+                  <span>Browse Files</span>
+                </button>
+
+                <label
+                  class="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#385E58] bg-[#142220] px-3.5 py-2 font-semibold text-white hover:border-[#C4491A]"
+                >
+                  <span>
+                    {{ em.isUploadingImage ? 'Uploading...' : 'Upload Image' }}
+                  </span>
                   <input
-                    type="number"
-                    name="editMapOffX"
-                    step="2"
-                    [ngModel]="em.grid_offset_x"
-                    (ngModelChange)="updateEditMapField('grid_offset_x', $event)"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                    [disabled]="em.isUploadingImage"
+                    (change)="onEditMapFileSelected($event)"
+                    class="hidden"
                   />
                 </label>
 
-                <label class="block space-y-1">
-                  <span class="font-semibold text-[#EBF5F3]">Grid Offset Y (px)</span>
+                <div class="flex items-center gap-1.5">
                   <input
-                    type="number"
-                    name="editMapOffY"
-                    step="2"
-                    [ngModel]="em.grid_offset_y"
-                    (ngModelChange)="updateEditMapField('grid_offset_y', $event)"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                    type="url"
+                    name="editMapUrl"
+                    [ngModel]="em.map_image_url"
+                    (ngModelChange)="onEditMapUrlChange($event)"
+                    placeholder="Image URL"
+                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
                   />
-                </label>
+                  @if (em.map_image_url) {
+                    <button
+                      type="button"
+                      (click)="clearEditMapBackground()"
+                      class="shrink-0 rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-2 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                      title="Clear Image to Blank Background"
+                    >
+                      Clear
+                    </button>
+                  }
+                </div>
               </div>
 
-              <div class="space-y-1">
-                <div class="flex items-center justify-between gap-2 font-semibold">
-                  <span>Grid Line Opacity ({{ em.grid_opacity }})</span>
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1E332F] bg-[#0B1413] px-3 py-1.5 text-[11px]">
+                <span class="truncate text-[#8AB0AB]">
+                  Uploads go to:
+                  <strong class="font-semibold text-[#EBF5F3]">
+                    {{ userAssetsStore.getFolderTrailLabel(userAssetsStore.effectiveMapsFolderId()) }}
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  (click)="openSceneAssetPicker(undefined, true)"
+                  class="shrink-0 font-bold text-[#FDBA74] hover:underline"
+                >
+                  Setup Folders &rarr;
+                </button>
+              </div>
+
+              <div class="space-y-1.5">
+                <span class="block text-[11px] font-semibold text-[#8AB0AB]">
+                  Blank Scene / Backdrop Color
+                </span>
+                <div class="flex flex-wrap items-center gap-2">
+                  @for (sw of mapBgSwatches; track sw.color) {
+                    <button
+                      type="button"
+                      (click)="updateEditMapField('background_color', sw.color)"
+                      class="flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors"
+                      [class.border-[#C4491A]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                      [class.bg-[#192B28]]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                      [class.text-white]="em.background_color.toUpperCase() === sw.color.toUpperCase()"
+                      [class.border-[#243B37]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                      [class.bg-[#142220]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                      [class.text-[#8AB0AB]]="em.background_color.toUpperCase() !== sw.color.toUpperCase()"
+                    >
+                      <span
+                        class="h-3 w-3 rounded-xs border border-white/25"
+                        [style.backgroundColor]="sw.color"
+                      ></span>
+                      <span>{{ sw.label }}</span>
+                    </button>
+                  }
+                  <app-color-picker
+                    [color]="em.background_color"
+                    mode="popover"
+                    surfaceTheme="dark"
+                    (colorChange)="updateEditMapField('background_color', $event)"
+                  />
+                </div>
+              </div>
+            </section>
+          }
+
+          @if (editMapTab() === 'grid') {
+            <section class="space-y-3.5">
+              <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Grid Type &amp; Scale
+                </span>
+                <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                  1 tile = 5 ft
+                </span>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  (click)="updateEditMapField('grid_mode', 'square')"
+                  class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="em.grid_mode !== 'gridless'"
+                  [class.bg-[#27160E]]="em.grid_mode !== 'gridless'"
+                  [class.border-[#243B37]]="em.grid_mode === 'gridless'"
+                  [class.bg-[#142220]]="em.grid_mode === 'gridless'"
+                >
+                  <span class="font-display text-xs font-bold text-white">
+                    Square Grid
+                  </span>
+                  <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                    Balanced square grid (5 ft per tile) auto-covering the entire scene and padding.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  (click)="updateEditMapField('grid_mode', 'gridless')"
+                  class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="em.grid_mode === 'gridless'"
+                  [class.bg-[#27160E]]="em.grid_mode === 'gridless'"
+                  [class.border-[#243B37]]="em.grid_mode !== 'gridless'"
+                  [class.bg-[#142220]]="em.grid_mode !== 'gridless'"
+                >
+                  <span class="font-display text-xs font-bold text-white">
+                    Gridless
+                  </span>
+                  <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                    No grid lines. Free continuous token movement with distances measured in feet.
+                  </span>
+                </button>
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-semibold text-[#EBF5F3]">
+                    Grid Size (Pixels)
+                  </span>
                   <button
                     type="button"
-                    (click)="resetEditMapGridOpacity()"
+                    (click)="resetEditMapDefaultGrid()"
                     class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
                   >
-                    Default ({{ defaultGridOpacity }})
+                    Default ({{ defaultGridSizePx }} px)
                   </button>
                 </div>
-                <input
-                  type="range"
-                  name="editMapOpacity"
-                  min="0"
-                  max="0.9"
-                  step="0.05"
-                  [ngModel]="em.grid_opacity"
-                  (ngModelChange)="updateEditMapField('grid_opacity', $event)"
-                  class="w-full accent-[#C4491A]"
-                />
+
+                <div class="flex items-center gap-3">
+                  <input
+                    type="number"
+                    name="editMapSizePxNum"
+                    min="20"
+                    max="400"
+                    step="1"
+                    [ngModel]="em.grid_size_px"
+                    (ngModelChange)="updateEditMapField('grid_size_px', $event)"
+                    class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                  />
+                  <input
+                    type="range"
+                    name="editMapSizePxRange"
+                    min="30"
+                    max="250"
+                    step="2"
+                    [ngModel]="em.grid_size_px"
+                    (ngModelChange)="updateEditMapField('grid_size_px', $event)"
+                    class="w-full accent-[#C4491A]"
+                  />
+                </div>
+
+                <p class="text-[11px] text-[#8AB0AB]">
+                  Pixels per 5 ft square tile (default {{ defaultGridSizePx }} px). Grid counts calculate automatically to cover 100% of the scene and padding.
+                </p>
               </div>
-            }
-          </section>
 
-          <section class="grid grid-cols-1 gap-2 border-t border-[#243B37] pt-4 sm:grid-cols-2">
-            <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
-              <input
-                type="checkbox"
-                name="editMapFog"
-                [ngModel]="em.fog_enabled"
-                (ngModelChange)="updateEditMapField('fog_enabled', $event)"
-                class="accent-[#C4491A]"
-              />
-              <span>Dynamic Fog of War</span>
-            </label>
+              <div class="space-y-2 border-t border-[#243B37] pt-3.5">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-semibold text-[#EBF5F3]">
+                    Scene Dimensions (px)
+                  </span>
+                  @if (em.map_image_url) {
+                    <button
+                      type="button"
+                      [disabled]="!em.imageNaturalWidth"
+                      (click)="matchEditMapToImage()"
+                      class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-0.5 text-[10px] font-semibold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-45"
+                    >
+                      Match Image Dimensions
+                    </button>
+                  }
+                </div>
 
-            <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
-              <input
-                type="checkbox"
-                name="editMapDaylight"
-                [ngModel]="em.global_illumination"
-                (ngModelChange)="updateEditMapField('global_illumination', $event)"
-                class="accent-[#C4491A]"
-              />
-              <span>Global Daylight</span>
-            </label>
-          </section>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block space-y-1">
+                    <span class="text-[11px] text-[#8AB0AB]">Width (px)</span>
+                    <input
+                      type="number"
+                      name="editSceneWidthPx"
+                      min="200"
+                      max="20000"
+                      step="10"
+                      [ngModel]="em.scene_width"
+                      (ngModelChange)="updateEditMapField('scene_width', $event)"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[11px] text-[#8AB0AB]">Height (px)</span>
+                    <input
+                      type="number"
+                      name="editSceneHeightPx"
+                      min="200"
+                      max="20000"
+                      step="10"
+                      [ngModel]="em.scene_height"
+                      (ngModelChange)="updateEditMapField('scene_height', $event)"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-semibold text-[#EBF5F3]">
+                    Padding Percentage
+                  </span>
+                  <button
+                    type="button"
+                    (click)="resetEditMapPadding()"
+                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                  >
+                    Default ({{ defaultScenePadding }})
+                  </button>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <input
+                    type="number"
+                    name="editMapPaddingNum"
+                    min="0"
+                    max="0.5"
+                    step="0.05"
+                    [ngModel]="em.padding"
+                    (ngModelChange)="updateEditMapField('padding', $event)"
+                    class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                  />
+                  <input
+                    type="range"
+                    name="editMapPaddingRange"
+                    min="0"
+                    max="0.5"
+                    step="0.05"
+                    [ngModel]="em.padding"
+                    (ngModelChange)="updateEditMapField('padding', $event)"
+                    class="w-full accent-[#C4491A]"
+                  />
+                </div>
+
+                <p class="text-[11px] text-[#8AB0AB]">
+                  Additional usable canvas space around the scene background (default {{ defaultScenePadding }}). Place tokens in the padding border and right-click to hide them until ready.
+                </p>
+              </div>
+
+              @if (editDraftLayout(); as dl) {
+                <div class="rounded-xl border border-[#21423B] bg-[#0D1E1B] px-3 py-2.5 font-mono-num text-[11px] text-[#A7F3D0] space-y-1">
+                  <div class="flex flex-wrap items-center justify-between gap-2 font-bold">
+                    <span>
+                      @if (em.grid_mode === 'gridless') {
+                        Gridless Scale: {{ dl.gridSizePx }} px = 5 ft
+                      } @else {
+                        Auto-Calculated Grid: {{ dl.gridCols }} &times; {{ dl.gridRows }} tiles
+                      }
+                    </span>
+                    <span class="text-[#5EEAD4]">
+                      Canvas {{ dl.totalWidth }} &times; {{ dl.totalHeight }} px
+                    </span>
+                  </div>
+                  <div class="text-[10px] text-[#8AB0AB]">
+                    Scene {{ dl.innerWidth }} &times; {{ dl.innerHeight }} px + Padding {{ dl.sceneX }} px (L/R) &middot; {{ dl.sceneY }} px (T/B)
+                  </div>
+                </div>
+              }
+
+              @if (em.grid_mode !== 'gridless') {
+                <div class="grid grid-cols-2 gap-3 border-t border-[#243B37] pt-3.5">
+                  <label class="block space-y-1">
+                    <span class="font-semibold text-[#EBF5F3]">Grid Offset X (px)</span>
+                    <input
+                      type="number"
+                      name="editMapOffX"
+                      step="2"
+                      [ngModel]="em.grid_offset_x"
+                      (ngModelChange)="updateEditMapField('grid_offset_x', $event)"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="font-semibold text-[#EBF5F3]">Grid Offset Y (px)</span>
+                    <input
+                      type="number"
+                      name="editMapOffY"
+                      step="2"
+                      [ngModel]="em.grid_offset_y"
+                      (ngModelChange)="updateEditMapField('grid_offset_y', $event)"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs text-white"
+                    />
+                  </label>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between gap-2 font-semibold">
+                    <span>Grid Line Opacity ({{ em.grid_opacity }})</span>
+                    <button
+                      type="button"
+                      (click)="resetEditMapGridOpacity()"
+                      class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                    >
+                      Default ({{ defaultGridOpacity }})
+                    </button>
+                  </div>
+                  <input
+                    type="range"
+                    name="editMapOpacity"
+                    min="0"
+                    max="0.9"
+                    step="0.05"
+                    [ngModel]="em.grid_opacity"
+                    (ngModelChange)="updateEditMapField('grid_opacity', $event)"
+                    class="w-full accent-[#C4491A]"
+                  />
+                </div>
+              }
+            </section>
+          }
+
+          @if (editMapTab() === 'visibility') {
+            <section class="space-y-3.5">
+              <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Vision &amp; Lighting Rules
+                </span>
+                <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                  {{ em.token_vision ? 'Restricted Vision' : 'Entire Scene Visible' }}
+                </span>
+              </div>
+
+              <label
+                class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border p-3.5 transition-colors"
+                [class.border-[#38B29A]]="em.token_vision"
+                [class.bg-[#0E221E]]="em.token_vision"
+                [class.border-[#243B37]]="!em.token_vision"
+                [class.bg-[#142220]]="!em.token_vision"
+              >
+                <div class="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="editMapTokenVision"
+                    [ngModel]="em.token_vision"
+                    (ngModelChange)="updateEditMapField('token_vision', $event)"
+                    class="mt-0.5 h-4 w-4 shrink-0 accent-[#38B29A]"
+                  />
+                  <div class="space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-display text-xs font-bold text-white">
+                        Token Vision
+                      </span>
+                      <span class="rounded bg-[#182C28] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#8AB0AB]">
+                        Default: Yes
+                      </span>
+                    </div>
+                    <p class="text-[11px] leading-relaxed text-[#8AB0AB]">
+                      Restricts visibility within the scene to the vision of controlled Tokens. If disabled, the entire scene is visible.
+                    </p>
+                  </div>
+                </div>
+
+                <span
+                  class="shrink-0 rounded px-2 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#38B29A]]="em.token_vision"
+                  [class.text-[#061412]]="em.token_vision"
+                  [class.bg-[#243B37]]="!em.token_vision"
+                  [class.text-[#8AB0AB]]="!em.token_vision"
+                >
+                  {{ em.token_vision ? 'YES' : 'NO' }}
+                </span>
+              </label>
+
+              <label
+                class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border p-3.5 transition-colors"
+                [class.border-[#FBBF24]]="em.global_illumination"
+                [class.bg-[#261D0B]]="em.global_illumination"
+                [class.border-[#243B37]]="!em.global_illumination"
+                [class.bg-[#142220]]="!em.global_illumination"
+              >
+                <div class="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="editMapDaylight"
+                    [ngModel]="em.global_illumination"
+                    (ngModelChange)="updateEditMapField('global_illumination', $event)"
+                    class="mt-0.5 h-4 w-4 shrink-0 accent-[#FBBF24]"
+                  />
+                  <div class="space-y-1">
+                    <span class="font-display text-xs font-bold text-white">
+                      Global Illumination
+                    </span>
+                    <p class="text-[11px] leading-relaxed text-[#8AB0AB]">
+                      The scene contains a global source of light that provides all areas of the Scene with a base level of illumination.
+                    </p>
+                  </div>
+                </div>
+
+                <span
+                  class="shrink-0 rounded px-2 py-0.5 font-mono-num text-[10px] font-bold"
+                  [class.bg-[#FBBF24]]="em.global_illumination"
+                  [class.text-[#1E1303]]="em.global_illumination"
+                  [class.bg-[#243B37]]="!em.global_illumination"
+                  [class.text-[#8AB0AB]]="!em.global_illumination"
+                >
+                  {{ em.global_illumination ? 'ON' : 'OFF' }}
+                </span>
+              </label>
+
+              <div class="space-y-3 border-t border-[#243B37] pt-3.5">
+                <label
+                  class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] p-3.5 transition-opacity"
+                  [class.opacity-55]="!em.token_vision"
+                >
+                  <div class="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      name="editMapFog"
+                      [ngModel]="em.fog_enabled"
+                      (ngModelChange)="updateEditMapField('fog_enabled', $event)"
+                      class="mt-0.5 h-4 w-4 shrink-0 accent-[#C4491A]"
+                    />
+                    <div class="space-y-1">
+                      <span class="font-display text-xs font-bold text-white">
+                        Fog Exploration
+                      </span>
+                      <p class="text-[11px] leading-relaxed text-[#8AB0AB]">
+                        Tracks previously explored areas in a dimmed shroud as controlled Tokens move through the scene. Applies when Token Vision is enabled.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    class="shrink-0 rounded px-2 py-0.5 font-mono-num text-[10px] font-bold"
+                    [class.bg-[#38B29A]]="em.fog_enabled"
+                    [class.text-[#061412]]="em.fog_enabled"
+                    [class.bg-[#243B37]]="!em.fog_enabled"
+                    [class.text-[#8AB0AB]]="!em.fog_enabled"
+                  >
+                    {{ em.fog_enabled ? 'ON' : 'OFF' }}
+                  </span>
+                </label>
+
+                <div
+                  class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2 transition-opacity"
+                  [class.opacity-60]="em.global_illumination"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-semibold text-[#EBF5F3]">
+                      Ambient Darkness Level ({{ em.darkness_level }})
+                    </span>
+                    <button
+                      type="button"
+                      (click)="resetEditMapDarknessLevel()"
+                      class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                    >
+                      Default ({{ defaultDarknessLevel }})
+                    </button>
+                  </div>
+
+                  <div class="flex items-center gap-3">
+                    <input
+                      type="number"
+                      name="editMapDarknessNum"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      [ngModel]="em.darkness_level"
+                      (ngModelChange)="updateEditMapField('darkness_level', $event)"
+                      class="w-28 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-mono-num text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                    />
+                    <input
+                      type="range"
+                      name="editMapDarknessRange"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      [ngModel]="em.darkness_level"
+                      (ngModelChange)="updateEditMapField('darkness_level', $event)"
+                      class="w-full accent-[#C4491A]"
+                    />
+                  </div>
+                </div>
+
+                @if (vttStore.activeScene()?.id === em.sceneId) {
+                  <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#0B1413] px-3 py-2.5">
+                    <span class="text-[11px] font-semibold text-[#8AB0AB]">
+                      Explored Fog Progress
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        (click)="vttStore.revealEntireMapFog()"
+                        class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#5EEAD4] hover:border-[#38B29A]"
+                      >
+                        Reveal Shroud
+                      </button>
+                      <button
+                        type="button"
+                        (click)="vttStore.resetExploredFog()"
+                        class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#FDA4AF] hover:border-[#F43F5E]"
+                      >
+                        Reset Explored Fog
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+
+              <div class="rounded-xl border border-[#21423B] bg-[#0D1E1B] px-3.5 py-2.5 text-[11px] leading-relaxed text-[#A7F3D0]">
+                @if (!em.token_vision) {
+                  <strong class="font-bold text-white">Entire Scene Visible:</strong>
+                  Token Vision is disabled, so players can see the full scene without requiring a controlled token.
+                } @else if (em.global_illumination) {
+                  <strong class="font-bold text-white">Token Vision + Global Illumination:</strong>
+                  Visibility is restricted to controlled Tokens, and base illumination lets them see across all unobstructed line of sight (blocked by walls and closed doors).
+                } @else {
+                  <strong class="font-bold text-white">Token Vision in Unlit Darkness:</strong>
+                  Visibility is restricted to controlled Tokens within their personal vision range plus areas illuminated by scene or token light sources.
+                }
+              </div>
+            </section>
+          }
         </div>
 
         <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#243B37] bg-[#122220] px-5 py-3">
@@ -3071,7 +3510,7 @@
             </h2>
             <p class="text-[11px] text-[var(--mot-muted)]">
               @if (settingsModal === 'general') {
-                Configure interface theme, audio volume, sound cues, and table rules.
+                Configure interface theme, token travel speed, audio volume, and table rules.
               } @else if (settingsModal === 'controls') {
                 Click any shortcut badge to press a new key or key combination.
               } @else {
@@ -3157,6 +3596,102 @@
                   class="accent-[#C4491A]"
                 />
               </label>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  Token Movement
+                </span>
+                <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-bold text-[var(--mot-text)]">
+                  {{ formatTokenMoveSpeedLabel(settingsStore.preferences().tokenMoveSpeed) }}
+                </span>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Token Travel Speed</span>
+                  <div class="flex items-center gap-1.5 font-mono-num text-[11px]">
+                    <input
+                      type="number"
+                      min="0"
+                      max="120"
+                      step="5"
+                      aria-label="Token Travel Speed"
+                      [ngModel]="settingsStore.preferences().tokenMoveSpeed"
+                      (ngModelChange)="updatePreference('tokenMoveSpeed', +$event)"
+                      class="mot-input w-16 px-2 py-1 text-center font-mono-num text-xs font-bold"
+                    />
+                    <span class="text-[var(--mot-muted)]">ft/s</span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="0"
+                  max="120"
+                  step="5"
+                  aria-label="Token Travel Speed Slider"
+                  [ngModel]="settingsStore.preferences().tokenMoveSpeed"
+                  (ngModelChange)="updatePreference('tokenMoveSpeed', +$event)"
+                  class="w-full accent-[#C4491A]"
+                />
+
+                <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    (click)="updatePreference('tokenMoveSpeed', 0)"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().tokenMoveSpeed === 0"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().tokenMoveSpeed === 0"
+                    [class.text-[var(--mot-text)]]="settingsStore.preferences().tokenMoveSpeed === 0"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().tokenMoveSpeed !== 0"
+                    [class.text-[var(--mot-muted)]]="settingsStore.preferences().tokenMoveSpeed !== 0"
+                  >
+                    Instant (0)
+                  </button>
+                  <button
+                    type="button"
+                    (click)="updatePreference('tokenMoveSpeed', 15)"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().tokenMoveSpeed === 15"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().tokenMoveSpeed === 15"
+                    [class.text-[var(--mot-text)]]="settingsStore.preferences().tokenMoveSpeed === 15"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().tokenMoveSpeed !== 15"
+                    [class.text-[var(--mot-muted)]]="settingsStore.preferences().tokenMoveSpeed !== 15"
+                  >
+                    Slow (15)
+                  </button>
+                  <button
+                    type="button"
+                    (click)="updatePreference('tokenMoveSpeed', 30)"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().tokenMoveSpeed === 30"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().tokenMoveSpeed === 30"
+                    [class.text-[var(--mot-text)]]="settingsStore.preferences().tokenMoveSpeed === 30"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().tokenMoveSpeed !== 30"
+                    [class.text-[var(--mot-muted)]]="settingsStore.preferences().tokenMoveSpeed !== 30"
+                  >
+                    Normal (30)
+                  </button>
+                  <button
+                    type="button"
+                    (click)="updatePreference('tokenMoveSpeed', 60)"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().tokenMoveSpeed === 60"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().tokenMoveSpeed === 60"
+                    [class.text-[var(--mot-text)]]="settingsStore.preferences().tokenMoveSpeed === 60"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().tokenMoveSpeed !== 60"
+                    [class.text-[var(--mot-muted)]]="settingsStore.preferences().tokenMoveSpeed !== 60"
+                  >
+                    Fast (60)
+                  </button>
+                </div>
+
+                <p class="text-[11px] text-[var(--mot-muted)]">
+                  Controls how fast tokens travel across the map. Set to 0 for instant placement.
+                </p>
+              </div>
             </section>
 
             <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
@@ -4228,4 +4763,16 @@
       </div>
     </div>
   }
+
+  @let abm = assetBrowserModal();
+  <app-asset-browser-modal
+    [open]="abm !== null"
+    [mode]="abm?.mode ?? 'picker'"
+    [purpose]="abm?.purpose ?? 'maps'"
+    [initialFolderId]="abm?.initialFolderId"
+    [currentUrl]="abm?.currentUrl ?? null"
+    [openRoutingOnInit]="abm?.openRoutingOnInit ?? false"
+    (closed)="closeAssetBrowserModal()"
+    (assetSelected)="onAssetBrowserSelected($event)"
+  />
 </div>

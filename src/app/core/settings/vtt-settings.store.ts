@@ -26,6 +26,7 @@ export interface VttGeneralPreferences {
   diceSounds: boolean;
   pingAndTurnSounds: boolean;
   showHotkeyBadges: boolean;
+  tokenMoveSpeed: number;
 }
 
 export const DEFAULT_VTT_PREFERENCES: VttGeneralPreferences = {
@@ -34,6 +35,7 @@ export const DEFAULT_VTT_PREFERENCES: VttGeneralPreferences = {
   diceSounds: true,
   pingAndTurnSounds: true,
   showHotkeyBadges: true,
+  tokenMoveSpeed: 30,
 };
 
 export const DEFAULT_VTT_HOTKEYS: VttHotkeyMap = {
@@ -99,8 +101,8 @@ export const VTT_HOTKEY_META: VttHotkeyBindingMeta[] = [
   },
   {
     action: 'tool_fog',
-    label: 'Fog of War Tool',
-    description: 'Open Fog of War and Global Daylight controls.',
+    label: 'Visibility & Fog Tool',
+    description: 'Open Token Vision, Fog Exploration, and Global Illumination controls.',
     defaultCombo: DEFAULT_VTT_HOTKEYS.tool_fog,
     gmOnly: true,
   },
@@ -352,7 +354,16 @@ export class VttSettingsStore {
       const parsed = JSON.parse(raw) as Partial<Record<keyof VttGeneralPreferences, unknown>>;
       if (!parsed || typeof parsed !== 'object') return fallback;
 
-      const rawVol = Number(parsed.masterVolume);
+      const rawVol =
+        parsed.masterVolume !== undefined && parsed.masterVolume !== null
+          ? Number(parsed.masterVolume)
+          : Number.NaN;
+      const rawSpeed =
+        parsed.tokenMoveSpeed !== undefined &&
+        parsed.tokenMoveSpeed !== null &&
+        parsed.tokenMoveSpeed !== ''
+          ? Number(parsed.tokenMoveSpeed)
+          : Number.NaN;
       return {
         masterVolume: Number.isFinite(rawVol)
           ? Math.max(0, Math.min(100, Math.round(rawVol)))
@@ -373,6 +384,9 @@ export class VttSettingsStore {
           typeof parsed.showHotkeyBadges === 'boolean'
             ? parsed.showHotkeyBadges
             : fallback.showHotkeyBadges,
+        tokenMoveSpeed: Number.isFinite(rawSpeed)
+          ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
+          : fallback.tokenMoveSpeed,
       };
     } catch {
       return fallback;
@@ -391,7 +405,13 @@ export class VttSettingsStore {
   updatePreferences(patch: Partial<VttGeneralPreferences>): void {
     const cur = this.preferences();
     const rawVol =
-      patch.masterVolume !== undefined ? Number(patch.masterVolume) : cur.masterVolume;
+      patch.masterVolume !== undefined && patch.masterVolume !== null
+        ? Number(patch.masterVolume)
+        : cur.masterVolume;
+    const rawSpeed =
+      patch.tokenMoveSpeed !== undefined && patch.tokenMoveSpeed !== null
+        ? Number(patch.tokenMoveSpeed)
+        : cur.tokenMoveSpeed;
     const next: VttGeneralPreferences = {
       masterVolume: Number.isFinite(rawVol)
         ? Math.max(0, Math.min(100, Math.round(rawVol)))
@@ -408,6 +428,9 @@ export class VttSettingsStore {
         typeof patch.showHotkeyBadges === 'boolean'
           ? patch.showHotkeyBadges
           : cur.showHotkeyBadges,
+      tokenMoveSpeed: Number.isFinite(rawSpeed)
+        ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
+        : cur.tokenMoveSpeed,
     };
     this.preferences.set(next);
     this.persistPreferences(next);

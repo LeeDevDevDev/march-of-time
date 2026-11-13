@@ -177,6 +177,20 @@ export class CollectionsStore {
     this.isLoading.set(true);
     try {
       await this.compendiumStore.ensureLoaded();
+
+      if (
+        typeof this.collectionsService.fetchCollectionsBundle === 'function'
+      ) {
+        const bundleRes =
+          await this.collectionsService.fetchCollectionsBundle(userId);
+        if (!bundleRes.fallback) {
+          this.folders.set(bundleRes.folders);
+          this.actors.set(bundleRes.actors);
+          this.loadedOwnerId.set(userId);
+          return;
+        }
+      }
+
       const [foldersRes, actorsRes] = await Promise.all([
         this.collectionsService.fetchFolders(userId),
         this.collectionsService.fetchActors(userId),

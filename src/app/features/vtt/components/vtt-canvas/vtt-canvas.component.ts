@@ -9,15 +9,19 @@ import {
   inject,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { VttSettingsStore } from '../../../../core/settings/vtt-settings.store';
 import { ColorPickerComponent } from '../../../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../../../shared/compendium-icon/compendium-icon.component';
 import {
   HexPathResult,
+  TokenTravelAnimation,
   clampHexToBounds,
   clampWorldPointToBounds,
+  createTokenTravelAnimation,
   feetToWorldPixels,
   findHexPath,
   getHexDistanceFeet,
@@ -30,6 +34,7 @@ import {
   isHexInBounds,
   isWorldSegmentBlockedByWalls,
   parseHexKey,
+  sampleTokenTravelAnimation,
   worldPixelsToFeet,
   worldPointToHex,
 } from '../../engine/hex-grid.engine';
@@ -177,6 +182,7 @@ function hexToRgba(hex: string, alpha: number): string {
 })
 export class VttCanvasComponent implements AfterViewInit {
   readonly vttStore = inject(VttStore);
+  readonly settingsStore = inject(VttSettingsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly requestCreateMap = output<void>();
@@ -223,9 +229,14 @@ export class VttCanvasComponent implements AfterViewInit {
 
   readonly mapImage = signal<HTMLImageElement | null>(null);
   readonly mapNaturalSize = signal<{ width: number; height: number } | null>(null);
+  readonly tokenAnimPositions = signal<Record<string, VttPoint>>({});
 
   private loadedMapUrl: string | null = null;
   private lastFittedSceneId: string | null = null;
+  private trackedAnimSceneId: string | null = null;
+  private readonly activeTokenAnimations = new Map<string, TokenTravelAnimation>();
+  private readonly lastTokenCenters = new Map<string, VttPoint>();
+  private tokenTravelAnimFrame: number | null = null;
   private offscreenFogCanvas: HTMLCanvasElement | null = null;
   private panPointerStart: {
     x: number;
@@ -313,12 +324,44 @@ export class VttCanvasComponent implements AfterViewInit {
     );
   });
 
+  readonly animatedSceneTokens = computed<VttTokenModel[]>(() => {
+    const tokens = this.vttStore.sceneTokens();
+    const animPos = this.tokenAnimPositions();
+    if (Object.keys(animPos).length === 0) return tokens;
+    return tokens.map((tok) => {
+      const pt = animPos[tok.id];
+      if (!pt) return tok;
+      return {
+        ...tok,
+        world_x: pt.x,
+        world_y: pt.y,
+        npc_stats: { ...(tok.npc_stats ?? {}), __unsnapped: true },
+      };
+    });
+  });
+
+  readonly animatedObserverTokens = computed<VttTokenModel[]>(() => {
+    const observers = this.vttStore.observerTokens();
+    const animPos = this.tokenAnimPositions();
+    if (Object.keys(animPos).length === 0) return observers;
+    return observers.map((tok) => {
+      const pt = animPos[tok.id];
+      if (!pt) return tok;
+      return {
+        ...tok,
+        world_x: pt.x,
+        world_y: pt.y,
+        npc_stats: { ...(tok.npc_stats ?? {}), __unsnapped: true },
+      };
+    });
+  });
+
   readonly lightPolygons = computed<ComputedLightPolygon[]>(() => {
     const sc = this.vttStore.activeScene();
     if (!sc) return [];
     return buildLightPolygons(
       this.effectiveSceneLights(),
-      this.vttStore.sceneTokens(),
+      this.animatedSceneTokens(),
       sc.walls,
       this.vttStore.gridGeometry(),
       sc.grid_mode
@@ -327,11 +370,11 @@ export class VttCanvasComponent implements AfterViewInit {
 
   readonly observerVisions = computed<ComputedObserverVision[]>(() => {
     const sc = this.vttStore.activeScene();
-    if (!sc) return [];
+    if (!sc || !sc.token_vision) return [];
     const wb = this.worldBounds();
     const maxDiag = Math.hypot(wb.width, wb.height) + 300;
     return buildObserverVisions(
-      this.vttStore.observerTokens(),
+      this.animatedObserverTokens(),
       sc.walls,
       this.vttStore.gridGeometry(),
       sc.global_illumination,
@@ -370,10 +413,15 @@ export class VttCanvasComponent implements AfterViewInit {
     const isGm = this.vttStore.isGm();
     const preview = this.vttStore.previewPlayerVision();
     const restrictVision = !isGm || preview;
+    const observerIds = new Set(
+      this.vttStore.observerTokens().map((o) => o.id)
+    );
     const visions = this.observerVisions();
     const lights = this.lightPolygons();
     const drag = this.dragTokenState();
     const chain = this.chainedTokenMove();
+    const animPos = this.tokenAnimPositions();
+    const instantMove = this.settingsStore.preferences().tokenMoveSpeed <= 0;
     const selId = this.vttStore.selectedTokenId();
     const pendingTarget = this.vttStore.pendingTargetAction();
     const attackerTok = pendingTarget
@@ -391,14 +439,15 @@ export class VttCanvasComponent implements AfterViewInit {
         continue;
       }
 
-      const restingCenter = getTokenWorldCenter(tok, geom, sc.grid_mode);
+      const restingCenter =
+        animPos[tok.id] ?? getTokenWorldCenter(tok, geom, sc.grid_mode);
 
       if (
         restrictVision &&
-        sc.fog_enabled &&
+        sc.token_vision &&
         !sc.explored_fog?.revealed_all &&
-        tok.faction !== 'ally' &&
-        (!controllable || preview)
+        (!controllable || preview) &&
+        !observerIds.has(tok.id)
       ) {
         const seen = isWorldPointVisibleToObservers(
           restingCenter,
@@ -413,11 +462,11 @@ export class VttCanvasComponent implements AfterViewInit {
       }
 
       let center = restingCenter;
-      if (drag && drag.tokenId === tok.id) {
+      if (instantMove && drag && drag.tokenId === tok.id) {
         center = drag.freeUnsnap
           ? drag.currentWorld
           : hexToWorldCenter(drag.currentHex, geom);
-      } else if (chain && chain.tokenId === tok.id) {
+      } else if (instantMove && chain && chain.tokenId === tok.id) {
         center = chain.lastUnsnapped
           ? chain.currentWorld
           : hexToWorldCenter(chain.currentHex, geom);
@@ -490,7 +539,7 @@ export class VttCanvasComponent implements AfterViewInit {
       const mx = (w.x1 + w.x2) / 2;
       const my = (w.y1 + w.y2) / 2;
 
-      if (!showAll && sc.fog_enabled && !sc.explored_fog?.revealed_all) {
+      if (!showAll && sc.token_vision && !sc.explored_fog?.revealed_all) {
         const doorHex = worldPointToHex({ x: mx, y: my }, geom);
         const key = hexKey(doorHex.col, doorHex.row);
         const otherWalls = sc.walls.filter((other) => other.id !== w.id);
@@ -501,7 +550,8 @@ export class VttCanvasComponent implements AfterViewInit {
           otherWalls,
           sc.global_illumination
         );
-        if (!inActiveLos && !exploredSet.has(key)) {
+        const rememberedInFog = sc.fog_enabled && exploredSet.has(key);
+        if (!inActiveLos && !rememberedInFog) {
           continue;
         }
       }
@@ -612,6 +662,117 @@ export class VttCanvasComponent implements AfterViewInit {
     });
 
     effect(() => {
+      const sc = this.vttStore.activeScene();
+      const tokens = this.vttStore.sceneTokens();
+      const geom = this.vttStore.gridGeometry();
+      const speed = this.settingsStore.preferences().tokenMoveSpeed;
+
+      if (!sc) {
+        this.trackedAnimSceneId = null;
+        this.lastTokenCenters.clear();
+        this.clearAllTokenTravelAnimations();
+        return;
+      }
+
+      if (sc.id !== this.trackedAnimSceneId) {
+        this.trackedAnimSceneId = sc.id;
+        this.lastTokenCenters.clear();
+        this.clearAllTokenTravelAnimations();
+        for (const tok of tokens) {
+          this.lastTokenCenters.set(
+            tok.id,
+            getTokenWorldCenter(tok, geom, sc.grid_mode)
+          );
+        }
+        return;
+      }
+
+      if (speed <= 0) {
+        this.clearAllTokenTravelAnimations();
+        this.lastTokenCenters.clear();
+        for (const tok of tokens) {
+          this.lastTokenCenters.set(
+            tok.id,
+            getTokenWorldCenter(tok, geom, sc.grid_mode)
+          );
+        }
+        return;
+      }
+
+      const currentAnimMap = untracked(() => this.tokenAnimPositions());
+      const seenIds = new Set<string>();
+      let startedNewAnim = false;
+      let removedAnim = false;
+
+      for (const tok of tokens) {
+        seenIds.add(tok.id);
+        const nextCenter = getTokenWorldCenter(tok, geom, sc.grid_mode);
+        const prevCenter = this.lastTokenCenters.get(tok.id);
+
+        if (!prevCenter) {
+          this.lastTokenCenters.set(tok.id, nextCenter);
+          continue;
+        }
+
+        const dist = Math.hypot(
+          nextCenter.x - prevCenter.x,
+          nextCenter.y - prevCenter.y
+        );
+        if (dist > 1.5) {
+          const originPt = currentAnimMap[tok.id] ?? prevCenter;
+          this.lastTokenCenters.set(tok.id, nextCenter);
+
+          let waypoints: VttPoint[] = [originPt, nextCenter];
+          if (
+            sc.grid_mode !== 'gridless' &&
+            !tok.npc_stats?.__unsnapped
+          ) {
+            const fromHex = clampHexToBounds(
+              worldPointToHex(originPt, geom),
+              geom.gridWidth,
+              geom.gridHeight
+            );
+            const toHex = { col: tok.x, row: tok.y };
+            const pathRes = findHexPath(fromHex, toHex, geom, sc.walls);
+            if (pathRes.reachable && pathRes.path.length > 2) {
+              waypoints = [
+                originPt,
+                ...pathRes.path
+                  .slice(1)
+                  .map((h) => hexToWorldCenter(h, geom)),
+              ];
+            }
+          }
+
+          const anim = createTokenTravelAnimation(
+            waypoints,
+            speed,
+            geom.gridSizePx,
+            this.nowAnimClockMs()
+          );
+          if (anim) {
+            this.activeTokenAnimations.set(tok.id, anim);
+            startedNewAnim = true;
+          }
+        }
+      }
+
+      for (const existingId of Array.from(this.lastTokenCenters.keys())) {
+        if (!seenIds.has(existingId)) {
+          this.lastTokenCenters.delete(existingId);
+          if (this.activeTokenAnimations.delete(existingId)) {
+            removedAnim = true;
+          }
+        }
+      }
+
+      if (startedNewAnim || removedAnim) {
+        this.syncTokenAnimPositionsNow();
+        this.startTokenTravelLoopIfNeeded();
+      }
+    });
+
+    effect(() => {
       this.vttStore.activeScene();
       this.vttStore.sceneLayout();
       this.vttStore.sceneTokens();
@@ -622,6 +783,7 @@ export class VttCanvasComponent implements AfterViewInit {
       this.vttStore.selectedLightId();
       this.vttStore.pendingTargetAction();
       this.vttStore.pendingClash();
+      this.tokenAnimPositions();
       this.lightPolygons();
       this.observerVisions();
       this.viewportWidth();
@@ -663,6 +825,9 @@ export class VttCanvasComponent implements AfterViewInit {
     this.destroyRef.onDestroy(() => {
       if (this.pingAnimFrame !== null) {
         cancelAnimationFrame(this.pingAnimFrame);
+      }
+      if (this.tokenTravelAnimFrame !== null) {
+        cancelAnimationFrame(this.tokenTravelAnimFrame);
       }
     });
   }
@@ -848,6 +1013,83 @@ export class VttCanvasComponent implements AfterViewInit {
     return true;
   }
 
+  private nowAnimClockMs(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  private clearAllTokenTravelAnimations(): void {
+    if (this.tokenTravelAnimFrame !== null) {
+      cancelAnimationFrame(this.tokenTravelAnimFrame);
+      this.tokenTravelAnimFrame = null;
+    }
+    this.activeTokenAnimations.clear();
+    if (Object.keys(untracked(() => this.tokenAnimPositions())).length > 0) {
+      this.tokenAnimPositions.set({});
+    }
+  }
+
+  private syncTokenAnimPositionsNow(): void {
+    const now = this.nowAnimClockMs();
+    const nextPositions: Record<string, VttPoint> = {};
+    for (const [tokenId, anim] of Array.from(
+      this.activeTokenAnimations.entries()
+    )) {
+      const sampled = sampleTokenTravelAnimation(anim, now);
+      if (sampled.done) {
+        this.activeTokenAnimations.delete(tokenId);
+      } else {
+        nextPositions[tokenId] = sampled.point;
+      }
+    }
+    this.tokenAnimPositions.set(nextPositions);
+  }
+
+  private startTokenTravelLoopIfNeeded(): void {
+    if (
+      this.tokenTravelAnimFrame !== null ||
+      this.activeTokenAnimations.size === 0 ||
+      typeof requestAnimationFrame === 'undefined'
+    ) {
+      return;
+    }
+    const tick = () => {
+      this.tokenTravelAnimFrame = null;
+      if (this.settingsStore.preferences().tokenMoveSpeed <= 0) {
+        this.clearAllTokenTravelAnimations();
+        return;
+      }
+      this.syncTokenAnimPositionsNow();
+      if (this.activeTokenAnimations.size > 0) {
+        this.tokenTravelAnimFrame = requestAnimationFrame(tick);
+      }
+    };
+    this.tokenTravelAnimFrame = requestAnimationFrame(tick);
+  }
+
+  private queueTokenTravelWaypoints(
+    tokenId: string,
+    waypoints: VttPoint[]
+  ): void {
+    const speed = this.settingsStore.preferences().tokenMoveSpeed;
+    if (speed <= 0 || waypoints.length < 2) {
+      return;
+    }
+    const geom = this.vttStore.gridGeometry();
+    const anim = createTokenTravelAnimation(
+      waypoints,
+      speed,
+      geom.gridSizePx,
+      this.nowAnimClockMs()
+    );
+    if (!anim) {
+      return;
+    }
+    this.lastTokenCenters.set(tokenId, anim.targetEnd);
+    this.activeTokenAnimations.set(tokenId, anim);
+    this.syncTokenAnimPositionsNow();
+    this.startTokenTravelLoopIfNeeded();
+  }
+
   commitActiveChainedMove(): void {
     const chain = this.chainedTokenMove();
     this.chainedTokenMove.set(null);
@@ -858,6 +1100,22 @@ export class VttCanvasComponent implements AfterViewInit {
 
   private commitChainedTokenMoveState(chain: ChainedTokenMoveState): void {
     if (chain.legs.length === 0) return;
+    const geom = this.vttStore.gridGeometry();
+    const currentAnimPt = this.tokenAnimPositions()[chain.tokenId];
+    const waypoints: VttPoint[] = [currentAnimPt ?? chain.originWorld];
+    for (const leg of chain.legs) {
+      if (leg.freeUnsnap) {
+        waypoints.push(leg.toWorld);
+      } else {
+        const steps =
+          leg.hexPath.length > 1 ? leg.hexPath.slice(1) : [leg.toHex];
+        for (const h of steps) {
+          waypoints.push(hexToWorldCenter(h, geom));
+        }
+      }
+    }
+    this.queueTokenTravelWaypoints(chain.tokenId, waypoints);
+
     if (chain.lastUnsnapped) {
       const intermediateWorldPts = chain.legs
         .slice(0, -1)
@@ -1305,10 +1563,18 @@ export class VttCanvasComponent implements AfterViewInit {
 
     if (tool === 'select' && item.isControllable) {
       const chainForToken = this.chainedTokenMove();
+      const geom = this.vttStore.gridGeometry();
+      const isMidAnim = Boolean(this.tokenAnimPositions()[item.token.id]);
       const startHex =
         chainForToken && chainForToken.tokenId === item.token.id
           ? chainForToken.currentHex
-          : { col: item.token.x, row: item.token.y };
+          : isMidAnim
+            ? clampHexToBounds(
+                worldPointToHex(item.center, geom),
+                geom.gridWidth,
+                geom.gridHeight
+              )
+            : { col: item.token.x, row: item.token.y };
       const startWorld =
         chainForToken && chainForToken.tokenId === item.token.id
           ? chainForToken.currentWorld
@@ -1804,6 +2070,10 @@ export class VttCanvasComponent implements AfterViewInit {
         } else {
           this.chainedTokenMove.set(null);
           if (dragTok.freeUnsnap) {
+            this.queueTokenTravelWaypoints(dragTok.tokenId, [
+              dragTok.startWorld,
+              dragTok.currentWorld,
+            ]);
             void this.vttStore.moveTokenToWorldPoint(
               dragTok.tokenId,
               dragTok.currentWorld,
@@ -1812,6 +2082,14 @@ export class VttCanvasComponent implements AfterViewInit {
               this.worldBounds()
             );
           } else {
+            const pathSteps =
+              dragTok.pathResult.path.length > 1
+                ? dragTok.pathResult.path.slice(1)
+                : [dragTok.currentHex];
+            this.queueTokenTravelWaypoints(dragTok.tokenId, [
+              dragTok.startWorld,
+              ...pathSteps.map((h) => hexToWorldCenter(h, geom)),
+            ]);
             void this.vttStore.moveTokenToHex(
               dragTok.tokenId,
               dragTok.currentHex.col,
@@ -2169,7 +2447,7 @@ export class VttCanvasComponent implements AfterViewInit {
 
     ctx.restore();
 
-    if (sc.fog_enabled) {
+    if (sc.token_vision) {
       this.renderFogLayer(ctx, vw, vh, dpr, px, py, z, wb, R);
     }
 
@@ -2360,7 +2638,9 @@ export class VttCanvasComponent implements AfterViewInit {
     const playerMode = !isGm || preview;
     const baseDarkness = playerMode
       ? 0.985
-      : Math.max(0.28, Math.min(0.62, sc.darkness_level * 0.52));
+      : sc.global_illumination
+        ? 0.28
+        : Math.max(0.28, Math.min(0.62, sc.darkness_level * 0.52));
 
     fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     fctx.globalCompositeOperation = 'source-over';
@@ -2379,7 +2659,7 @@ export class VttCanvasComponent implements AfterViewInit {
     if (sc.explored_fog?.revealed_all) {
       fctx.fillStyle = `rgba(0, 0, 0, ${shroudPunchAlpha})`;
       fctx.fillRect(-40, -40, wb.width + 80, wb.height + 80);
-    } else if (sc.explored_fog?.cells?.length) {
+    } else if (sc.fog_enabled && sc.explored_fog?.cells?.length) {
       fctx.beginPath();
       const expandedR = hexRadius * 1.04;
       for (const key of sc.explored_fog.cells) {
@@ -2602,6 +2882,19 @@ export class VttCanvasComponent implements AfterViewInit {
         const chainEndPt = chain.lastUnsnapped
           ? chain.currentWorld
           : hexToWorldCenter(chain.currentHex, geom);
+        if (
+          chainTok &&
+          this.settingsStore.preferences().tokenMoveSpeed > 0
+        ) {
+          this.drawTokenDestinationGhost(
+            ctx,
+            chainEndPt,
+            chainTok,
+            chainStroke,
+            hexRadius,
+            z
+          );
+        }
         const movesNeeded = Math.max(
           1,
           Math.ceil(chain.totalFeet / Math.max(5, speedFeet))
@@ -2645,6 +2938,16 @@ export class VttCanvasComponent implements AfterViewInit {
           stroke,
           z
         );
+        if (tok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
+          this.drawTokenDestinationGhost(
+            ctx,
+            dragTok.currentWorld,
+            tok,
+            stroke,
+            hexRadius,
+            z
+          );
+        }
 
         const freeBadge =
           dragTok.gridMode !== 'gridless' ? ' · Free (Shift)' : '';
@@ -2689,6 +2992,16 @@ export class VttCanvasComponent implements AfterViewInit {
         this.strokeHexPath(ctx, pathRes.path, geom, stroke, z, hexRadius);
 
         const endPt = hexToWorldCenter(dragTok.currentHex, geom);
+        if (tok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
+          this.drawTokenDestinationGhost(
+            ctx,
+            endPt,
+            tok,
+            stroke,
+            hexRadius,
+            z
+          );
+        }
         const movesNeeded = Math.max(
           1,
           Math.ceil(totalFeet / Math.max(5, speedFeet))
@@ -2846,6 +3159,46 @@ export class VttCanvasComponent implements AfterViewInit {
     ctx.restore();
   }
 
+  private drawTokenDestinationGhost(
+    ctx: CanvasRenderingContext2D,
+    center: VttPoint,
+    token: VttTokenModel,
+    borderColor: string,
+    hexRadius: number,
+    z: number
+  ): void {
+    const r = Math.max(
+      18,
+      hexRadius * 0.82 * Math.min(2, Math.max(1, token.size || 1))
+    );
+    const fillHex =
+      token.color ||
+      (token.faction === 'enemy'
+        ? '#E11D48'
+        : token.faction === 'neutral'
+          ? '#D97706'
+          : '#0D9488');
+
+    ctx.save();
+    ctx.fillStyle = hexToRgba(fillHex, 0.28);
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2.4 / z;
+    ctx.setLineDash([6 / z, 4 / z]);
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const initials = (token.name || '?').trim().slice(0, 2).toUpperCase();
+    ctx.font = `700 ${Math.max(11, Math.round(r * 0.62))}px "Cinzel", serif`;
+    ctx.fillStyle = 'rgba(235, 245, 243, 0.82)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(initials, center.x, center.y + 1 / z);
+    ctx.restore();
+  }
+
   private renderPendingClashVector(
     ctx: CanvasRenderingContext2D,
     z: number
@@ -2859,8 +3212,9 @@ export class VttCanvasComponent implements AfterViewInit {
     if (!att || !def) return;
 
     const geom = this.vttStore.gridGeometry();
-    const a = getTokenWorldCenter(att, geom, sc.grid_mode);
-    const b = getTokenWorldCenter(def, geom, sc.grid_mode);
+    const animPos = this.tokenAnimPositions();
+    const a = animPos[att.id] ?? getTokenWorldCenter(att, geom, sc.grid_mode);
+    const b = animPos[def.id] ?? getTokenWorldCenter(def, geom, sc.grid_mode);
 
     ctx.save();
     ctx.strokeStyle = '#FB923C';

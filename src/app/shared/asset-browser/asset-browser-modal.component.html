@@ -1,0 +1,661 @@
+@if (open()) {
+  @let tree = userAssetsStore.directoryTree();
+
+  <ng-template #assetFolderNodeTpl let-node>
+    <div class="space-y-1" [style.paddingLeft.px]="node.depth * 12">
+      <div
+        (click)="navigateToFolder(node.folder.id)"
+        (dragover)="onFolderDropTargetDragOver($event, 'folder:' + node.folder.id)"
+        (drop)="onFolderDropTargetDrop($event, node.folder.id)"
+        class="group flex cursor-pointer items-center justify-between gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs transition-colors select-none"
+        [class.border-[#38B29A]]="dragOverFolderTarget() === 'folder:' + node.folder.id"
+        [class.bg-[#0E2823]]="dragOverFolderTarget() === 'folder:' + node.folder.id"
+        [class.border-[#C4491A]]="!viewAllFolders() && activeFolderId() === node.folder.id && dragOverFolderTarget() !== 'folder:' + node.folder.id"
+        [class.bg-[#27160E]]="!viewAllFolders() && activeFolderId() === node.folder.id && dragOverFolderTarget() !== 'folder:' + node.folder.id"
+        [class.border-transparent]="(viewAllFolders() || activeFolderId() !== node.folder.id) && dragOverFolderTarget() !== 'folder:' + node.folder.id"
+        [class.bg-[#12201E]]="(viewAllFolders() || activeFolderId() !== node.folder.id) && dragOverFolderTarget() !== 'folder:' + node.folder.id"
+        [class.hover:border-[#2C4641]]="(viewAllFolders() || activeFolderId() !== node.folder.id) && dragOverFolderTarget() !== 'folder:' + node.folder.id"
+      >
+        <div class="flex min-w-0 items-center gap-1.5">
+          @if (node.subfolders.length > 0) {
+            <button
+              type="button"
+              (click)="toggleFolderCollapse(node.folder.id, $event)"
+              class="w-3.5 text-center text-[10px] font-bold text-[#8AB0AB] hover:text-white"
+            >
+              {{ isFolderCollapsed(node.folder.id) ? '&#9656;' : '&#9662;' }}
+            </button>
+          } @else {
+            <span class="w-3.5"></span>
+          }
+
+          <svg
+            class="h-4 w-4 shrink-0"
+            [style.color]="node.folder.color || '#C4491A'"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+          </svg>
+
+          <span class="truncate font-semibold text-white">
+            {{ node.folder.name }}
+          </span>
+
+          @if (userAssetsStore.effectiveMapsFolderId() === node.folder.id) {
+            <span
+              class="shrink-0 rounded bg-[#C4491A]/25 px-1 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#FDBA74]"
+              title="Default Maps Upload Folder"
+            >
+              Maps
+            </span>
+          }
+          @if (userAssetsStore.effectiveCharactersFolderId() === node.folder.id) {
+            <span
+              class="shrink-0 rounded bg-[#38B29A]/20 px-1 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#5EEAD4]"
+              title="Default Characters & Tokens Upload Folder"
+            >
+              Chars
+            </span>
+          }
+        </div>
+
+        <div class="flex shrink-0 items-center gap-1">
+          <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{ node.totalItemCount }}
+          </span>
+
+          <div
+            class="hidden items-center gap-0.5 group-hover:flex"
+            (click)="$event.stopPropagation()"
+          >
+            @if (userAssetsStore.canNestFolder(null, node.folder.id)) {
+              <button
+                type="button"
+                (click)="openCreateFolderForm(node.folder.id, $event)"
+                class="rounded px-1 py-0.5 text-[11px] font-bold text-[#FDBA74] hover:bg-[#09100F]"
+                title="New Subfolder"
+              >
+                +
+              </button>
+            }
+            <button
+              type="button"
+              (click)="openEditFolderForm(node.folder.id, $event)"
+              class="rounded px-1 py-0.5 text-[10px] font-bold text-[#8AB0AB] hover:bg-[#09100F] hover:text-white"
+              title="Edit Folder"
+            >
+              &#9998;
+            </button>
+            <button
+              type="button"
+              (click)="deleteFolderById(node.folder.id, $event)"
+              class="rounded px-1 py-0.5 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#3B1822]"
+              title="Delete Folder"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      </div>
+
+      @if (!isFolderCollapsed(node.folder.id) && node.subfolders.length > 0) {
+        <div class="space-y-1">
+          @for (sub of node.subfolders; track sub.folder.id) {
+            <ng-container
+              *ngTemplateOutlet="assetFolderNodeTpl; context: { $implicit: sub }"
+            />
+          }
+        </div>
+      }
+    </div>
+  </ng-template>
+
+  <div
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-xs"
+    (click)="close()"
+  >
+    <div
+      (click)="$event.stopPropagation()"
+      class="flex h-[min(88vh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+    >
+      <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-display text-base font-bold text-white">
+              {{ modalTitle() }}
+            </h2>
+            <span class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#5EEAD4]">
+              {{ userAssetsStore.userStorageRoot() }}/
+            </span>
+          </div>
+          <p class="mt-0.5 text-[11px] text-[#8AB0AB]">
+            Your personal Supabase folder workspace &mdash; organize map &amp; character images and reuse them across any scene or game.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            (click)="showRoutingSetup.set(!showRoutingSetup())"
+            class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+            [class.border-[#C4491A]]="showRoutingSetup()"
+            [class.bg-[#27160E]]="showRoutingSetup()"
+            [class.text-white]="showRoutingSetup()"
+            [class.border-[#243B37]]="!showRoutingSetup()"
+            [class.bg-[#0D1615]]="!showRoutingSetup()"
+            [class.text-[#EBF5F3]]="!showRoutingSetup()"
+          >
+            <svg class="h-3.5 w-3.5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+            <span>Upload Locations</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="close()"
+            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-base font-bold text-[#8AB0AB] hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+      </div>
+
+      @if (showRoutingSetup()) {
+        <div class="shrink-0 border-b border-[#243B37] bg-[#101D1B] px-5 py-3.5 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[#FDBA74]">
+              Default Upload Folder Routing
+            </span>
+            <span class="text-[11px] text-[#8AB0AB]">
+              Choose where direct uploads from Scenes and Character/Token editors are stored in Supabase.
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="block rounded-xl border border-[#243B37] bg-[#0D1615] p-3 space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-bold text-white">Maps / Scenes Folder</span>
+                <span class="rounded bg-[#C4491A]/25 px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#FDBA74]">
+                  Maps
+                </span>
+              </div>
+              <select
+                name="defaultMapsFolder"
+                [ngModel]="userAssetsStore.effectiveMapsFolderId()"
+                (ngModelChange)="userAssetsStore.setDefaultFolder('maps', $event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">Root ({{ userAssetsStore.userRootLabel() }})</option>
+                @for (opt of tree.flatFolderOptions; track opt.id) {
+                  <option [ngValue]="opt.id">{{ opt.label }}</option>
+                }
+              </select>
+              <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                {{ userAssetsStore.getSupabaseFolderPath(userAssetsStore.effectiveMapsFolderId()) }}
+              </div>
+            </label>
+
+            <label class="block rounded-xl border border-[#243B37] bg-[#0D1615] p-3 space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-bold text-white">Characters / Tokens Folder</span>
+                <span class="rounded bg-[#38B29A]/20 px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#5EEAD4]">
+                  Chars
+                </span>
+              </div>
+              <select
+                name="defaultCharactersFolder"
+                [ngModel]="userAssetsStore.effectiveCharactersFolderId()"
+                (ngModelChange)="userAssetsStore.setDefaultFolder('characters', $event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">Root ({{ userAssetsStore.userRootLabel() }})</option>
+                @for (opt of tree.flatFolderOptions; track opt.id) {
+                  <option [ngValue]="opt.id">{{ opt.label }}</option>
+                }
+              </select>
+              <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                {{ userAssetsStore.getSupabaseFolderPath(userAssetsStore.effectiveCharactersFolderId()) }}
+              </div>
+            </label>
+          </div>
+        </div>
+      }
+
+      <div class="flex flex-1 min-h-0 flex-col md:flex-row">
+        <aside class="flex w-full shrink-0 flex-col border-b border-[#243B37] bg-[#0B1312] md:w-64 md:border-b-0 md:border-r">
+          <div class="flex items-center justify-between gap-2 border-b border-[#243B37] px-3.5 py-2.5">
+            <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+              Folders
+            </span>
+            <button
+              type="button"
+              (click)="openCreateFolderForm(activeFolderId())"
+              class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-bold text-white hover:border-[#C4491A]"
+            >
+              + Folder
+            </button>
+          </div>
+
+          @if (folderForm(); as ff) {
+            <form
+              (ngSubmit)="submitFolderForm()"
+              class="border-b border-[#243B37] bg-[#12201E] p-3 space-y-2.5"
+            >
+              <div class="flex items-center justify-between">
+                <span class="font-display text-[11px] font-bold text-white">
+                  {{ ff.mode === 'create' ? 'New Folder' : 'Edit Folder' }}
+                </span>
+                <button
+                  type="button"
+                  (click)="folderForm.set(null)"
+                  class="text-xs font-bold text-[#8AB0AB] hover:text-white"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <input
+                type="text"
+                name="assetFolderName"
+                required
+                [ngModel]="ff.name"
+                (ngModelChange)="updateFolderFormField('name', $event)"
+                placeholder="Folder"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+              />
+
+              <select
+                name="assetFolderParent"
+                [ngModel]="ff.parentFolderId"
+                (ngModelChange)="updateFolderFormField('parentFolderId', $event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">Root Directory</option>
+                @for (opt of validParentFolderOptions(); track opt.id) {
+                  <option [ngValue]="opt.id">{{ opt.label }}</option>
+                }
+              </select>
+
+              <app-color-picker
+                [color]="ff.color"
+                [presets]="folderSwatches"
+                mode="popover"
+                surfaceTheme="dark"
+                (colorChange)="updateFolderFormField('color', $event)"
+              />
+
+              <div class="flex items-center justify-end gap-1.5 pt-1">
+                <button
+                  type="button"
+                  (click)="folderForm.set(null)"
+                  class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 font-semibold text-[#8AB0AB] hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn-copper rounded-lg px-3 py-1 font-bold"
+                >
+                  {{ ff.mode === 'create' ? 'Create' : 'Save' }}
+                </button>
+              </div>
+            </form>
+          }
+
+          <div class="max-h-44 flex-1 overflow-y-auto p-2.5 space-y-1 md:max-h-none">
+            <button
+              type="button"
+              (click)="showAllAssets()"
+              class="flex w-full items-center justify-between rounded-xl border px-2.5 py-1.5 text-left font-semibold transition-colors"
+              [class.border-[#C4491A]]="viewAllFolders()"
+              [class.bg-[#27160E]]="viewAllFolders()"
+              [class.text-white]="viewAllFolders()"
+              [class.border-transparent]="!viewAllFolders()"
+              [class.bg-[#12201E]]="!viewAllFolders()"
+              [class.text-[#EBF5F3]]="!viewAllFolders()"
+            >
+              <span>All Saved Images</span>
+              <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+                {{ userAssetsStore.assets().length }}
+              </span>
+            </button>
+
+            <div
+              (click)="navigateToFolder(null)"
+              (dragover)="onFolderDropTargetDragOver($event, 'root')"
+              (drop)="onFolderDropTargetDrop($event, null)"
+              class="flex cursor-pointer items-center justify-between rounded-xl border px-2.5 py-1.5 font-semibold transition-colors select-none"
+              [class.border-[#38B29A]]="dragOverFolderTarget() === 'root'"
+              [class.bg-[#0E2823]]="dragOverFolderTarget() === 'root'"
+              [class.border-[#C4491A]]="!viewAllFolders() && activeFolderId() === null && dragOverFolderTarget() !== 'root'"
+              [class.bg-[#27160E]]="!viewAllFolders() && activeFolderId() === null && dragOverFolderTarget() !== 'root'"
+              [class.text-white]="!viewAllFolders() && activeFolderId() === null"
+              [class.border-transparent]="(viewAllFolders() || activeFolderId() !== null) && dragOverFolderTarget() !== 'root'"
+              [class.bg-[#12201E]]="(viewAllFolders() || activeFolderId() !== null) && dragOverFolderTarget() !== 'root'"
+            >
+              <span class="truncate">{{ userAssetsStore.userRootLabel() }} (Root)</span>
+              <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+                {{ rootAssetCount() }}
+              </span>
+            </div>
+
+            @for (folderNode of tree.folders; track folderNode.folder.id) {
+              <ng-container
+                *ngTemplateOutlet="assetFolderNodeTpl; context: { $implicit: folderNode }"
+              />
+            }
+          </div>
+        </aside>
+
+        <div
+          class="flex flex-1 min-h-0 flex-col"
+          (dragover)="onBrowserPaneDragOver($event)"
+          (dragleave)="onBrowserPaneDragLeave()"
+          (drop)="onBrowserPaneDrop($event)"
+        >
+          <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#243B37] bg-[#101C1A] px-4 py-2.5">
+            <div class="min-w-0">
+              @if (viewAllFolders()) {
+                <div class="font-display text-xs font-bold text-white">
+                  All Saved Images ({{ visibleAssets().length }})
+                </div>
+                <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                  {{ userAssetsStore.userStorageRoot() }}/
+                </div>
+              } @else {
+                <div class="flex flex-wrap items-center gap-1 text-xs">
+                  @for (crumb of breadcrumbs(); track crumb.id ?? 'root'; let last = $last) {
+                    <button
+                      type="button"
+                      (click)="navigateToFolder(crumb.id)"
+                      class="rounded px-1.5 py-0.5 font-bold transition-colors hover:bg-[#192B28]"
+                      [class.text-white]="last"
+                      [class.text-[#8AB0AB]]="!last"
+                    >
+                      {{ crumb.name }}
+                    </button>
+                    @if (!last) {
+                      <span class="text-[#8AB0AB]">/</span>
+                    }
+                  }
+                </div>
+                <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                  {{ activeStoragePath() }}
+                </div>
+              }
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative">
+                <input
+                  type="text"
+                  [ngModel]="searchQuery()"
+                  (ngModelChange)="searchQuery.set($event)"
+                  placeholder="Search"
+                  class="w-36 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 pr-6 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none sm:w-44"
+                />
+                @if (searchQuery()) {
+                  <button
+                    type="button"
+                    (click)="searchQuery.set('')"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8AB0AB] hover:text-white"
+                  >
+                    &times;
+                  </button>
+                }
+              </div>
+
+              @if (!viewAllFolders() && userAssetsStore.canNestFolder(null, activeFolderId())) {
+                <button
+                  type="button"
+                  (click)="openCreateFolderForm(activeFolderId())"
+                  class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1.5 font-bold text-[#EBF5F3] hover:border-[#C4491A]"
+                >
+                  + Subfolder
+                </button>
+              }
+
+              <label
+                class="btn-copper flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold"
+              >
+                <span>
+                  {{ userAssetsStore.isUploading() ? 'Uploading...' : '+ Upload Here' }}
+                </span>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                  [disabled]="userAssetsStore.isUploading()"
+                  (change)="onUploadFilesInput($event)"
+                  class="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div
+            class="relative flex-1 overflow-y-auto p-4 space-y-4"
+            [class.bg-[#0E2823]/40]="isExternalFileDragOver()"
+          >
+            @if (childSubfolders().length > 0) {
+              <div class="space-y-1.5">
+                <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Subfolders
+                </div>
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                  @for (sub of childSubfolders(); track sub.id) {
+                    <button
+                      type="button"
+                      (click)="navigateToFolder(sub.id)"
+                      (dragover)="onFolderDropTargetDragOver($event, 'subcard:' + sub.id)"
+                      (drop)="onFolderDropTargetDrop($event, sub.id)"
+                      class="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors"
+                      [class.border-[#38B29A]]="dragOverFolderTarget() === 'subcard:' + sub.id"
+                      [class.bg-[#0E2823]]="dragOverFolderTarget() === 'subcard:' + sub.id"
+                      [class.border-[#243B37]]="dragOverFolderTarget() !== 'subcard:' + sub.id"
+                      [class.bg-[#142220]]="dragOverFolderTarget() !== 'subcard:' + sub.id"
+                      [class.hover:border-[#C4491A]]="dragOverFolderTarget() !== 'subcard:' + sub.id"
+                    >
+                      <svg
+                        class="h-4 w-4 shrink-0"
+                        [style.color]="sub.color || '#C4491A'"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                      >
+                        <path d="M3 6a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.6.8L12.2 6.5H19a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+                      </svg>
+                      <span class="truncate font-bold text-white">{{ sub.name }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (userAssetsStore.isLoading()) {
+              <div class="py-12 text-center text-[#8AB0AB]">
+                Loading your asset folders...
+              </div>
+            } @else if (visibleAssets().length === 0) {
+              <div class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[#2C4641] bg-[#111E1C] px-6 py-12 text-center space-y-3">
+                <div class="font-display text-sm font-bold text-white">
+                  @if (searchQuery().trim()) {
+                    No matching images found
+                  } @else {
+                    This folder has no images yet
+                  }
+                </div>
+                <p class="max-w-md text-[11px] leading-relaxed text-[#8AB0AB]">
+                  Upload map battlemaps or character art directly into <span class="font-mono-num text-[#5EEAD4]">{{ activeStoragePath() }}</span>, or drag image files from your computer into this window.
+                </p>
+                @if (!searchQuery().trim()) {
+                  <label class="btn-copper cursor-pointer rounded-lg px-4 py-2 font-bold">
+                    <span>+ Upload Image</span>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                      [disabled]="userAssetsStore.isUploading()"
+                      (change)="onUploadFilesInput($event)"
+                      class="hidden"
+                    />
+                  </label>
+                }
+              </div>
+            } @else {
+              <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                @for (asset of visibleAssets(); track asset.id) {
+                  @let isPicked = selectedAssetId() === asset.id;
+                  @let isActiveUrl = currentUrl() && asset.public_url.trim() === currentUrl()!.trim();
+                  <div
+                    draggable="true"
+                    (dragstart)="onAssetDragStart($event, asset)"
+                    (dragend)="onAssetDragEnd()"
+                    (click)="selectAssetCard(asset)"
+                    (dblclick)="confirmSelectAsset(asset)"
+                    class="group flex cursor-pointer flex-col overflow-hidden rounded-xl border transition-all select-none"
+                    [class.border-[#C4491A]]="isPicked"
+                    [class.ring-1]="isPicked"
+                    [class.ring-[#C4491A]]="isPicked"
+                    [class.bg-[#22150F]]="isPicked"
+                    [class.border-[#243B37]]="!isPicked"
+                    [class.bg-[#12201E]]="!isPicked"
+                    [class.hover:border-[#385E58]]="!isPicked"
+                    title="Click to inspect · Double-click to select · Drag onto a folder to move"
+                  >
+                    <div class="relative flex h-28 w-full items-center justify-center overflow-hidden bg-[#080E0D]">
+                      <img
+                        [src]="asset.public_url"
+                        [alt]="asset.name"
+                        loading="lazy"
+                        class="h-full w-full object-cover transition-transform duration-150 group-hover:scale-[1.03]"
+                      />
+                      @if (isActiveUrl) {
+                        <span class="absolute left-1.5 top-1.5 rounded bg-[#0D1E1B]/90 px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                          In Use
+                        </span>
+                      }
+                      @if (viewAllFolders() || searchQuery().trim()) {
+                        <span class="absolute bottom-1.5 left-1.5 max-w-[85%] truncate rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-[#EBF5F3]">
+                          {{ getFolderBadgeForAsset(asset) }}
+                        </span>
+                      }
+                    </div>
+
+                    <div class="p-2.5 space-y-0.5">
+                      <div class="truncate font-bold text-white">
+                        {{ asset.name }}
+                      </div>
+                      <div class="flex items-center justify-between gap-1 font-mono-num text-[10px] text-[#8AB0AB]">
+                        <span>
+                          @if (asset.width && asset.height) {
+                            {{ asset.width }}&times;{{ asset.height }}
+                          } @else {
+                            Image
+                          }
+                        </span>
+                        @if (asset.size_bytes > 0) {
+                          <span>{{ formatBytes(asset.size_bytes) }}</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="shrink-0 border-t border-[#243B37] bg-[#122220] px-4 py-3">
+            @if (selectedAsset(); as sel) {
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+                  <img
+                    [src]="sel.public_url"
+                    alt=""
+                    class="h-10 w-10 shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] object-cover"
+                  />
+
+                  <div class="min-w-[160px] flex-1 space-y-1">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <input
+                        type="text"
+                        name="selectedAssetRename"
+                        [ngModel]="editingAssetName()"
+                        (ngModelChange)="editingAssetName.set($event)"
+                        (blur)="saveSelectedAssetRename()"
+                        (keydown.enter)="saveSelectedAssetRename()"
+                        placeholder="Asset"
+                        class="w-44 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none sm:w-52"
+                      />
+
+                      <select
+                        name="selectedAssetFolder"
+                        [ngModel]="sel.folder_id"
+                        (ngModelChange)="moveSelectedAsset($event)"
+                        class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-[#EBF5F3] focus:border-[#C4491A] focus:outline-none"
+                      >
+                        <option [ngValue]="null">Folder: Root</option>
+                        @for (opt of tree.flatFolderOptions; track opt.id) {
+                          <option [ngValue]="opt.id">Folder: {{ opt.label }}</option>
+                        }
+                      </select>
+                    </div>
+
+                    <div class="truncate font-mono-num text-[10px] text-[#8AB0AB]">
+                      {{ sel.storage_bucket }}/{{ sel.storage_path }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    (click)="copySelectedAssetUrl()"
+                    class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1.5 font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+                  >
+                    Copy URL
+                  </button>
+                  <button
+                    type="button"
+                    (click)="deleteSelectedAsset()"
+                    class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-1.5 font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                  >
+                    Delete
+                  </button>
+                  @if (mode() === 'picker') {
+                    <button
+                      type="button"
+                      (click)="confirmSelectedFooter()"
+                      class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+                    >
+                      Use Image
+                    </button>
+                  }
+                </div>
+              </div>
+            } @else {
+              <div class="flex items-center justify-between gap-2 text-[11px] text-[#8AB0AB]">
+                <span>
+                  @if (mode() === 'picker') {
+                    Select any image to inspect or double-click to apply it immediately.
+                  } @else {
+                    Select an image to rename, move between folders, copy its URL, or delete.
+                  }
+                </span>
+                <button
+                  type="button"
+                  (click)="close()"
+                  class="rounded-lg border border-[#243B37] bg-[#142220] px-3.5 py-1.5 font-semibold text-[#EBF5F3] hover:text-white"
+                >
+                  Close
+                </button>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+}

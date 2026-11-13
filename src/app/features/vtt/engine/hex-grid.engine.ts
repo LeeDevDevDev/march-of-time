@@ -587,3 +587,101 @@ export function findHexPath(
     feet: fallbackSteps * 5,
   };
 }
+
+export interface TokenTravelAnimation {
+  waypoints: VttPoint[];
+  cumulativeLengthsPx: number[];
+  totalLengthPx: number;
+  startedAtMs: number;
+  durationMs: number;
+  targetEnd: VttPoint;
+}
+
+export function createTokenTravelAnimation(
+  waypoints: VttPoint[],
+  speedFeetPerSec: number,
+  gridSizePx: number,
+  startedAtMs: number
+): TokenTravelAnimation | null {
+  if (speedFeetPerSec <= 0 || waypoints.length < 2) {
+    return null;
+  }
+
+  const deduped: VttPoint[] = [waypoints[0]];
+  const cumulative: number[] = [0];
+  let totalPx = 0;
+
+  for (let i = 1; i < waypoints.length; i++) {
+    const prev = deduped[deduped.length - 1];
+    const curr = waypoints[i];
+    const segLen = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    if (segLen < 0.5) {
+      continue;
+    }
+    totalPx += segLen;
+    deduped.push(curr);
+    cumulative.push(totalPx);
+  }
+
+  if (deduped.length < 2 || totalPx < 1) {
+    return null;
+  }
+
+  const speedPxPerSec = feetToWorldPixels(
+    speedFeetPerSec,
+    Math.max(10, gridSizePx)
+  );
+  if (speedPxPerSec <= 0) {
+    return null;
+  }
+
+  const durationMs = Math.max(40, (totalPx / speedPxPerSec) * 1000);
+  return {
+    waypoints: deduped,
+    cumulativeLengthsPx: cumulative,
+    totalLengthPx: totalPx,
+    startedAtMs,
+    durationMs,
+    targetEnd: deduped[deduped.length - 1],
+  };
+}
+
+export function sampleTokenTravelAnimation(
+  anim: TokenTravelAnimation,
+  nowMs: number
+): { point: VttPoint; done: boolean } {
+  const elapsed = nowMs - anim.startedAtMs;
+  if (elapsed <= 0) {
+    return { point: anim.waypoints[0], done: false };
+  }
+  if (elapsed + 1e-6 >= anim.durationMs || anim.totalLengthPx <= 0) {
+    return { point: anim.targetEnd, done: true };
+  }
+
+  const t = elapsed / anim.durationMs;
+  const distPx = t * anim.totalLengthPx;
+
+  let segEndIdx = 1;
+  while (
+    segEndIdx < anim.cumulativeLengthsPx.length - 1 &&
+    anim.cumulativeLengthsPx[segEndIdx] < distPx
+  ) {
+    segEndIdx++;
+  }
+
+  const segStartDist = anim.cumulativeLengthsPx[segEndIdx - 1];
+  const segEndDist = anim.cumulativeLengthsPx[segEndIdx];
+  const segSpan = Math.max(0.0001, segEndDist - segStartDist);
+  const localT = Math.max(0, Math.min(1, (distPx - segStartDist) / segSpan));
+
+  const p0 = anim.waypoints[segEndIdx - 1];
+  const p1 = anim.waypoints[segEndIdx];
+
+  return {
+    point: {
+      x: p0.x + (p1.x - p0.x) * localT,
+      y: p0.y + (p1.y - p0.y) * localT,
+    },
+    done: false,
+  };
+}

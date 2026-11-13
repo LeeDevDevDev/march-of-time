@@ -29,7 +29,7 @@ export function slugifyText(value: string): string {
 export class CompendiumService {
   private readonly supabase = inject(SupabaseService).client;
 
-  async fetchFullCompendium(): Promise<CompendiumBundle> {
+  async fetchFullCompendium(includeInactive = false): Promise<CompendiumBundle> {
     const { data, error } = await this.supabase.rpc('get_compendium_bundle');
 
     if (!error && data) {
@@ -43,6 +43,33 @@ export class CompendiumService {
             ? bundle.keywords
             : DEFAULT_KEYWORDS,
       };
+    }
+
+    if (!includeInactive) {
+      const [vWeps, vTrees, vPerks, vKw] = await Promise.all([
+        this.supabase.from('v_active_weapons').select('*').order('name'),
+        this.supabase.from('v_active_skill_trees').select('*').order('name'),
+        this.supabase
+          .from('v_active_perk_nodes')
+          .select('*')
+          .order('tier', { ascending: true })
+          .order('name', { ascending: true }),
+        this.supabase.from('v_active_keywords').select('*').order('term'),
+      ]);
+
+      if (!vWeps.error && !vTrees.error && !vPerks.error && !vKw.error) {
+        return {
+          weapons: (vWeps.data as WeaponModel[]) ?? [],
+          skillTrees: (vTrees.data as SkillTreeModel[]) ?? [],
+          perkNodes: normalizePerkNodesTiers(
+            (vPerks.data as PerkNodeModel[]) ?? []
+          ),
+          keywords:
+            vKw.data && vKw.data.length > 0
+              ? (vKw.data as KeywordDefinition[])
+              : DEFAULT_KEYWORDS,
+        };
+      }
     }
 
     const [wepsRes, treesRes, perksRes, kwRes] = await Promise.all([

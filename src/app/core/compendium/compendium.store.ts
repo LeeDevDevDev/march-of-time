@@ -43,6 +43,7 @@ export class CompendiumStore {
 
   private loadPromise: Promise<void> | null = null;
   private lastUserId: string | null = null;
+  private lastIsAdmin = false;
 
   readonly #state = signal<CompendiumState>({
     weapons: [],
@@ -90,7 +91,15 @@ export class CompendiumStore {
 
   constructor() {
     effect(() => {
-      const userId = this.authStore.user()?.id ?? null;
+      const userId =
+        typeof this.authStore.user === 'function'
+          ? (this.authStore.user()?.id ?? null)
+          : null;
+      const isAdmin =
+        typeof this.authStore.isAdmin === 'function'
+          ? this.authStore.isAdmin()
+          : false;
+
       if (this.lastUserId !== null && userId !== this.lastUserId) {
         this.loadPromise = null;
         this.#state.set({
@@ -103,8 +112,14 @@ export class CompendiumStore {
           error: null,
           statusMessage: null,
         });
+      } else if (this.#state().hasLoaded && isAdmin && !this.lastIsAdmin) {
+        this.lastIsAdmin = isAdmin;
+        void this.loadCompendium();
+        return;
       }
+
       this.lastUserId = userId;
+      this.lastIsAdmin = isAdmin;
     });
   }
 
@@ -127,9 +142,14 @@ export class CompendiumStore {
       return this.loadPromise;
     }
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
+    const includeInactive =
+      typeof this.authStore.isAdmin === 'function'
+        ? this.authStore.isAdmin()
+        : false;
     const task = (async () => {
       try {
-        const result = await this.compendiumService.fetchFullCompendium();
+        const result =
+          await this.compendiumService.fetchFullCompendium(includeInactive);
         this.#state.update((s) => ({
           ...s,
           weapons: result.weapons,

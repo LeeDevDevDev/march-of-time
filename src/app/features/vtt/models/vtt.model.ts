@@ -17,6 +17,7 @@ export const DEFAULT_VTT_SCENE_HEIGHT_PX = 1100;
 export const DEFAULT_VTT_SCENE_PADDING = 0.2;
 export const DEFAULT_VTT_GRID_OPACITY = 0.2;
 export const DEFAULT_VTT_BG_COLOR = '#0E1917';
+export const DEFAULT_VTT_DARKNESS_LEVEL = 0.85;
 
 export interface VttFolderModel {
   id: string;
@@ -89,6 +90,7 @@ export interface VttSceneMetaFallback {
   scene_height?: number | null;
   padding?: number;
   sort_order?: number;
+  token_vision?: boolean;
 }
 
 export interface VttExploredFog {
@@ -195,6 +197,7 @@ export interface VttSceneModel {
   combat_active: boolean;
   active_turn_token_id: string | null;
   initiative_order: string[];
+  token_vision: boolean;
   fog_enabled: boolean;
   global_illumination: boolean;
   darkness_level: number;
@@ -202,6 +205,7 @@ export interface VttSceneModel {
   lights: VttLightSource[];
   explored_fog: VttExploredFog;
   pending_clash: VttPendingClash | null;
+  token_count?: number;
   created_at?: string;
   updated_at?: string;
 }

@@ -1,8 +1,17 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { App } from './app';
 import { routes } from './app.routes';
+import {
+  UserAssetFolderModel,
+  UserAssetModel,
+  UserAssetPreferencesModel,
+  buildUserStorageFolderPrefix,
+} from './core/assets/user-assets.model';
+import { UserAssetsService } from './core/assets/user-assets.service';
+import { UserAssetsStore } from './core/assets/user-assets.store';
 import { AuthService } from './core/auth/auth.service';
 import {
   PerkNodeModel,
@@ -51,6 +60,7 @@ import {
   normalizeKeyComboFromEvent,
 } from './core/settings/vtt-settings.store';
 import { ThemeStore } from './core/theme/theme.store';
+import { SupabaseService } from './core/supabase/supabase.service';
 import { AuthStore } from './core/auth/auth.store';
 import {
   CharacterModel,
@@ -69,6 +79,7 @@ import {
   parseContentManagerUrl,
 } from './features/content-manager/content-manager.component';
 import { CampaignService } from './features/dashboard/services/campaign.service';
+import { CampaignStore } from './features/dashboard/store/campaign.store';
 import {
   getLegalDefenderReactions,
   resolveClashReaction,
@@ -83,6 +94,7 @@ import {
   HexGridGeometry,
   clampWorldPointToBounds,
   computeSceneCanvasLayout,
+  createTokenTravelAnimation,
   feetToWorldPixels,
   findHexPath,
   getHexDistanceFeet,
@@ -92,6 +104,7 @@ import {
   getTokenWorldCenter,
   hexToWorldCenter,
   isWorldSegmentBlockedByWalls,
+  sampleTokenTravelAnimation,
   worldPointToHex,
 } from './features/vtt/engine/hex-grid.engine';
 import {
@@ -110,12 +123,14 @@ import {
   DEFAULT_VTT_SCENE_PADDING,
   DEFAULT_VTT_SCENE_WIDTH_PX,
   VttFolderModel,
+  VttLogEntry,
   VttPendingClash,
   VttRosterActorModel,
   VttSceneModel,
   VttTokenModel,
   VttWallSegment,
 } from './features/vtt/models/vtt.model';
+import { VttCanvasComponent } from './features/vtt/components/vtt-canvas/vtt-canvas.component';
 import { VttService } from './features/vtt/services/vtt.service';
 import { VttStore } from './features/vtt/store/vtt.store';
 import { VttRoomComponent } from './features/vtt/vtt-room.component';
@@ -2059,6 +2074,7 @@ describe('App', () => {
       grid_offset_x: 0,
       grid_offset_y: 0,
       grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      token_vision: true,
       fog_enabled: true,
       global_illumination: true,
       darkness_level: 0.85,
@@ -2180,6 +2196,7 @@ describe('App', () => {
                   combat_active: false,
                   active_turn_token_id: null,
                   initiative_order: [],
+                  token_vision: input.token_vision ?? true,
                   fog_enabled: true,
                   global_illumination: false,
                   darkness_level: 0.85,
@@ -2616,6 +2633,7 @@ describe('App', () => {
       grid_offset_x: 0,
       grid_offset_y: 0,
       grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      token_vision: true,
       fog_enabled: false,
       global_illumination: true,
       darkness_level: 0,
@@ -2796,5 +2814,1460 @@ describe('App', () => {
     fixture.detectChanges();
 
     expect(emitted[emitted.length - 1]).toBe('#99CC33');
+  });
+
+  it('should provision per-user Supabase asset folders, route map vs character uploads to configured folders, and allow reusing scene images', async () => {
+    let folderSeq = 0;
+    let assetSeq = 0;
+    const savedFolders: UserAssetFolderModel[] = [];
+    const savedAssets: UserAssetModel[] = [];
+    let savedPrefs: UserAssetPreferencesModel = {
+      owner_id: 'user-warden-42',
+      maps_folder_id: null,
+      characters_folder_id: null,
+    };
+    const uploadedStoragePaths: string[] = [];
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mot-user-assets-bootstrapped-v1-user-warden-42');
+    }
+
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({ id: 'user-warden-42', email: 'warden@example.com' }),
+            handle: () => 'warden',
+            displayName: () => 'Warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsService,
+          useValue: {
+            hasBootstrappedStarterFolders: () => savedFolders.length > 0,
+            markStarterFoldersBootstrapped: () => undefined,
+            fetchFolders: async () => ({ folders: [...savedFolders], error: null }),
+            fetchAssets: async () => ({ assets: [...savedAssets], error: null }),
+            fetchPreferences: async () => ({ ...savedPrefs }),
+            savePreferences: async (prefs: UserAssetPreferencesModel) => {
+              savedPrefs = { ...prefs };
+              return null;
+            },
+            createFolder: async (
+              input: Omit<UserAssetFolderModel, 'id' | 'created_at'>
+            ) => {
+              const created: UserAssetFolderModel = {
+                ...input,
+                id: `uaf-${++folderSeq}`,
+                created_at: new Date().toISOString(),
+              };
+              savedFolders.push(created);
+              return { folder: created, error: null };
+            },
+            updateFolder: async (
+              _ownerId: string,
+              folderId: string,
+              patch: Partial<UserAssetFolderModel>
+            ) => {
+              const idx = savedFolders.findIndex((f) => f.id === folderId);
+              if (idx >= 0) {
+                savedFolders[idx] = { ...savedFolders[idx], ...patch };
+              }
+              return null;
+            },
+            deleteFolder: async (_ownerId: string, folderId: string) => {
+              const idx = savedFolders.findIndex((f) => f.id === folderId);
+              if (idx >= 0) savedFolders.splice(idx, 1);
+              return null;
+            },
+            uploadFileToStorage: async (storagePrefix: string, file: File) => {
+              const storagePath = `${storagePrefix}/${file.name}`;
+              uploadedStoragePaths.push(storagePath);
+              return {
+                url: `https://cdn.example.com/storage/v1/object/public/user-assets/${storagePath}`,
+                bucket: 'user-assets',
+                storagePath,
+                error: null,
+              };
+            },
+            probeFileImageDimensions: async () => ({
+              width: 2400,
+              height: 1600,
+            }),
+            probeUrlImageDimensions: async () => ({
+              width: 1920,
+              height: 1080,
+            }),
+            createAssetRecord: async (
+              input: Omit<UserAssetModel, 'id' | 'created_at'>
+            ) => {
+              const created: UserAssetModel = {
+                ...input,
+                id: `ua-${++assetSeq}`,
+                created_at: new Date().toISOString(),
+              };
+              savedAssets.unshift(created);
+              return { asset: created, error: null };
+            },
+            updateAssetRecord: async (
+              _ownerId: string,
+              assetId: string,
+              patch: Partial<UserAssetModel>
+            ) => {
+              const idx = savedAssets.findIndex((a) => a.id === assetId);
+              if (idx >= 0) {
+                savedAssets[idx] = { ...savedAssets[idx], ...patch };
+              }
+              return null;
+            },
+            deleteAssetRecord: async (_ownerId: string, asset: UserAssetModel) => {
+              const idx = savedAssets.findIndex((a) => a.id === asset.id);
+              if (idx >= 0) savedAssets.splice(idx, 1);
+              return null;
+            },
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    });
+
+    const userAssetsStore = TestBed.inject(UserAssetsStore);
+    const vttStore = TestBed.inject(VttStore);
+
+    await userAssetsStore.ensureLoaded();
+    expect(userAssetsStore.folders().length).toBe(2);
+    const mapsRoot = userAssetsStore.folders().find((f) => f.slug === 'maps')!;
+    const charsRoot = userAssetsStore
+      .folders()
+      .find((f) => f.slug === 'characters')!;
+    expect(mapsRoot).toBeTruthy();
+    expect(charsRoot).toBeTruthy();
+    expect(userAssetsStore.effectiveMapsFolderId()).toBe(mapsRoot.id);
+    expect(userAssetsStore.effectiveCharactersFolderId()).toBe(charsRoot.id);
+
+    const dungeonsFolder = await userAssetsStore.createFolder(
+      'Dungeons',
+      mapsRoot.id,
+      '#8B5CF6'
+    );
+    expect(dungeonsFolder).toBeTruthy();
+    expect(
+      buildUserStorageFolderPrefix(
+        'user-warden-42',
+        dungeonsFolder!.id,
+        userAssetsStore.folders()
+      )
+    ).toBe('user-warden-42/maps/dungeons');
+
+    await userAssetsStore.setDefaultFolder('maps', dungeonsFolder!.id);
+    expect(userAssetsStore.effectiveMapsFolderId()).toBe(dungeonsFolder!.id);
+    expect(
+      userAssetsStore.getFolderTrailLabel(userAssetsStore.effectiveMapsFolderId())
+    ).toBe('@warden / Maps / Dungeons');
+
+    vttStore.campaign.set({
+      id: 'camp-assets-1',
+      gm_id: 'user-warden-42',
+      name: 'Asset Reuse Test',
+      cover_image_url: null,
+      invite_code: 'ASSET1',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const mapFile = new File(['mock-png-bytes'], 'sunken-reliquary.png', {
+      type: 'image/png',
+    });
+    const uploadedMapUrl = await vttStore.uploadMapFile(mapFile);
+    expect(uploadedMapUrl).toBe(
+      'https://cdn.example.com/storage/v1/object/public/user-assets/user-warden-42/maps/dungeons/sunken-reliquary.png'
+    );
+    expect(uploadedStoragePaths[0]).toBe(
+      'user-warden-42/maps/dungeons/sunken-reliquary.png'
+    );
+
+    const locatedAsset = userAssetsStore.findAssetByUrl(uploadedMapUrl);
+    expect(locatedAsset).toBeTruthy();
+    expect(locatedAsset!.folder_id).toBe(dungeonsFolder!.id);
+    expect(locatedAsset!.width).toBe(2400);
+    expect(locatedAsset!.height).toBe(1600);
+
+    const charFile = new File(['mock-portrait'], 'valen-token.webp', {
+      type: 'image/webp',
+    });
+    const uploadedCharAsset = await userAssetsStore.uploadAssetFile(charFile, {
+      purpose: 'characters',
+    });
+    expect(uploadedCharAsset).toBeTruthy();
+    expect(uploadedCharAsset!.folder_id).toBe(charsRoot.id);
+    expect(uploadedCharAsset!.storage_path).toBe(
+      'user-warden-42/characters/valen-token.webp'
+    );
+  });
+
+  it('should organize Scene Configuration into General, Grid, and Visibility tabs, default Token Vision on, restrict visibility to controlled tokens, illuminate full LoS with Global Illumination, and reveal the entire scene when Token Vision is disabled', async () => {
+    const activeUserSig = signal({ id: 'gm-1', email: 'gm-1@example.com' });
+    const capturedPatches: Partial<VttSceneModel>[] = [];
+    const createdPayloads: Partial<VttSceneModel>[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent, VttCanvasComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: activeUserSig,
+            handle: () => activeUserSig().id,
+            displayName: () =>
+              activeUserSig().id === 'gm-1' ? 'Warden' : 'Player One',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            effectiveMapsFolderId: () => null,
+            effectiveCharactersFolderId: () => null,
+            getFolderTrailLabel: () => '@gm-1 / Maps',
+            assets: () => [],
+            folders: () => [],
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            createScene: async (input: Partial<VttSceneModel>) => {
+              createdPayloads.push(input);
+              return {
+                scene: {
+                  id: 'scene-vis-1',
+                  campaign_id: input.campaign_id ?? 'camp-vis-1',
+                  gm_id: input.gm_id ?? 'gm-1',
+                  folder_id: input.folder_id ?? null,
+                  name: input.name ?? 'Sunken Sanctum',
+                  is_active_scene: true,
+                  map_image_url: null,
+                  background_color: DEFAULT_VTT_BG_COLOR,
+                  grid_mode: 'square',
+                  scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+                  scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+                  padding: DEFAULT_VTT_SCENE_PADDING,
+                  grid_width: input.grid_width ?? DEFAULT_VTT_GRID_WIDTH,
+                  grid_height: input.grid_height ?? DEFAULT_VTT_GRID_HEIGHT,
+                  grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+                  grid_offset_x: 0,
+                  grid_offset_y: 0,
+                  grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+                  sort_order: 0,
+                  round_number: 1,
+                  combat_active: false,
+                  active_turn_token_id: null,
+                  initiative_order: [],
+                  token_vision: input.token_vision ?? true,
+                  fog_enabled: input.fog_enabled ?? true,
+                  global_illumination: input.global_illumination ?? false,
+                  darkness_level: input.darkness_level ?? 0.85,
+                  walls: [],
+                  lights: [],
+                  explored_fog: { cells: [], revealed_all: false },
+                  pending_clash: null,
+                },
+                error: null,
+                needsMigration: false,
+              };
+            },
+            updateScene: async (_id: string, patch: Partial<VttSceneModel>) => {
+              capturedPatches.push(patch);
+              return { error: null, needsMigration: false };
+            },
+            fetchSceneTokens: async () => [],
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-vis-1',
+      gm_id: 'gm-1',
+      name: 'Sanctum Expedition',
+      cover_image_url: null,
+      invite_code: 'VIS101',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const created = await vttStore.createBlankMap({
+      name: 'Sunken Sanctum',
+      activateForParty: true,
+    });
+    expect(created).toBeTruthy();
+    expect(createdPayloads[0]?.token_vision).toBe(true);
+    expect(createdPayloads[0]?.global_illumination).toBe(false);
+    expect(vttStore.activeScene()?.token_vision).toBe(true);
+    expect(vttStore.activeScene()?.global_illumination).toBe(false);
+
+    const roomFixture = TestBed.createComponent(VttRoomComponent);
+    const roomComp = roomFixture.componentInstance;
+    roomFixture.detectChanges();
+
+    roomComp.openEditMapModal('scene-vis-1');
+    roomFixture.detectChanges();
+    expect(roomComp.editMapTab()).toBe('general');
+    const generalText = (roomFixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(generalText).toContain('General');
+    expect(generalText).toContain('Grid');
+    expect(generalText).toContain('Visibility');
+    expect(generalText).toContain('Scene Name');
+    expect(generalText).toContain('Blank Scene / Backdrop Color');
+
+    roomComp.editMapTab.set('grid');
+    roomFixture.detectChanges();
+    const gridText = (roomFixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(gridText).toContain('Grid Type & Scale');
+    expect(gridText).toContain('Grid Size (Pixels)');
+    expect(gridText).toContain('Scene Dimensions (px)');
+    expect(gridText).toContain('Padding Percentage');
+
+    roomComp.editMapTab.set('visibility');
+    roomFixture.detectChanges();
+    const visText = (roomFixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(visText).toContain('Token Vision');
+    expect(visText).toContain(
+      'Restricts visibility within the scene to the vision of controlled Tokens. If disabled, the entire scene is visible.'
+    );
+    expect(visText).toContain('Global Illumination');
+    expect(visText).toContain(
+      'The scene contains a global source of light that provides all areas of the Scene with a base level of illumination.'
+    );
+    expect(roomComp.editingMapDraft()?.token_vision).toBe(true);
+    expect(roomComp.editingMapDraft()?.global_illumination).toBe(false);
+
+    roomComp.updateEditMapField('global_illumination', true);
+    roomComp.updateEditMapField('darkness_level', 0.65);
+    await roomComp.saveEditMapModal();
+    expect(vttStore.activeScene()?.global_illumination).toBe(true);
+    expect(vttStore.activeScene()?.darkness_level).toBe(0.65);
+    expect(capturedPatches[capturedPatches.length - 1]?.token_vision).toBe(true);
+    expect(capturedPatches[capturedPatches.length - 1]?.global_illumination).toBe(
+      true
+    );
+
+    await vttStore.patchScene('scene-vis-1', {
+      token_vision: true,
+      global_illumination: false,
+      fog_enabled: true,
+      explored_fog: { cells: [], revealed_all: false },
+    });
+
+    const geom = vttStore.gridGeometry();
+    const wallBetween8And10 = hexToWorldCenter({ col: 9, row: 4 }, geom);
+    const closedWall: VttWallSegment = {
+      id: 'wall-crypt-divider',
+      x1: wallBetween8And10.x,
+      y1: wallBetween8And10.y - 300,
+      x2: wallBetween8And10.x,
+      y2: wallBetween8And10.y + 300,
+      kind: 'wall',
+    };
+    const closedDoorFar: VttWallSegment = {
+      id: 'door-crypt-far',
+      x1: wallBetween8And10.x,
+      y1: wallBetween8And10.y + 400,
+      x2: wallBetween8And10.x,
+      y2: wallBetween8And10.y + 500,
+      kind: 'door',
+      open: false,
+    };
+    await vttStore.patchScene('scene-vis-1', {
+      walls: [closedWall, closedDoorFar],
+    });
+
+    const controlledHero: VttTokenModel = {
+      id: 'tok-player-hero',
+      encounter_id: 'scene-vis-1',
+      character_id: null,
+      owner_id: 'player-1',
+      name: 'Vanguard Lyra',
+      faction: 'ally',
+      x: 2,
+      y: 4,
+      q: 2,
+      r: 2,
+      world_x: null,
+      world_y: null,
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      current_hp: 16,
+      max_hp: 16,
+      current_sp: 10,
+      max_sp: 10,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 15,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {},
+    };
+
+    const closeEnemy: VttTokenModel = {
+      ...controlledHero,
+      id: 'tok-enemy-close',
+      owner_id: null,
+      name: 'Near Ghoul',
+      faction: 'enemy',
+      x: 4,
+      y: 4,
+    };
+
+    const distantUnblockedEnemy: VttTokenModel = {
+      ...controlledHero,
+      id: 'tok-enemy-distant',
+      owner_id: null,
+      name: 'Distant Archer',
+      faction: 'enemy',
+      x: 7,
+      y: 4,
+    };
+
+    const wallBlockedEnemy: VttTokenModel = {
+      ...controlledHero,
+      id: 'tok-enemy-behind-wall',
+      owner_id: null,
+      name: 'Vault Warden',
+      faction: 'enemy',
+      x: 11,
+      y: 4,
+    };
+
+    const gmHiddenEnemy: VttTokenModel = {
+      ...controlledHero,
+      id: 'tok-enemy-gm-hidden',
+      owner_id: null,
+      name: 'Lurking Wraith',
+      faction: 'enemy',
+      x: 3,
+      y: 4,
+      is_hidden: true,
+    };
+
+    vttStore.tokens.set([
+      closeEnemy,
+      distantUnblockedEnemy,
+      wallBlockedEnemy,
+      gmHiddenEnemy,
+    ]);
+
+    const canvasFixture = TestBed.createComponent(VttCanvasComponent);
+    const canvasComp = canvasFixture.componentInstance;
+
+    activeUserSig.set({ id: 'player-1', email: 'player-1@example.com' });
+    expect(vttStore.isGm()).toBe(false);
+    expect(vttStore.observerTokens().length).toBe(0);
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([]);
+    expect(canvasComp.visibleDoorHandles().length).toBe(0);
+
+    vttStore.tokens.set([
+      controlledHero,
+      closeEnemy,
+      distantUnblockedEnemy,
+      wallBlockedEnemy,
+      gmHiddenEnemy,
+    ]);
+    expect(vttStore.observerTokens().map((o) => o.id)).toEqual(['tok-player-hero']);
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      'tok-player-hero',
+      'tok-enemy-close',
+    ]);
+
+    activeUserSig.set({ id: 'gm-1', email: 'gm-1@example.com' });
+    await vttStore.toggleSceneBooleanField('global_illumination');
+    expect(vttStore.activeScene()?.global_illumination).toBe(true);
+
+    activeUserSig.set({ id: 'player-1', email: 'player-1@example.com' });
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      'tok-player-hero',
+      'tok-enemy-close',
+      'tok-enemy-distant',
+    ]);
+    expect(canvasComp.visibleDoorHandles().map((d) => d.wall.id)).toEqual([
+      'door-crypt-far',
+    ]);
+
+    vttStore.tokens.set([
+      closeEnemy,
+      distantUnblockedEnemy,
+      wallBlockedEnemy,
+      gmHiddenEnemy,
+    ]);
+    expect(canvasComp.renderableTokens().length).toBe(0);
+
+    activeUserSig.set({ id: 'gm-1', email: 'gm-1@example.com' });
+    await vttStore.toggleSceneBooleanField('token_vision');
+    expect(vttStore.activeScene()?.token_vision).toBe(false);
+
+    activeUserSig.set({ id: 'player-1', email: 'player-1@example.com' });
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      'tok-enemy-close',
+      'tok-enemy-distant',
+      'tok-enemy-behind-wall',
+    ]);
+    expect(canvasComp.visibleDoorHandles().map((d) => d.wall.id)).toEqual([
+      'door-crypt-far',
+    ]);
+  });
+
+  it('should support configurable token travel speed (including 0 for instant), deploy tokens without entered-the-battlefield logs, and delete individual or all chat logs', async () => {
+    const activeUserSig = signal({ id: 'gm-1', email: 'gm-1@example.com' });
+    const insertedLogs: Omit<VttLogEntry, 'id' | 'created_at'>[] = [];
+    const deletedLogIds: string[] = [];
+    const clearedCampaignIds: string[] = [];
+    let spawnSeq = 0;
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mot_vtt_preferences_v1');
+    }
+
+    expect(
+      createTokenTravelAnimation(
+        [
+          { x: 0, y: 0 },
+          { x: 280, y: 0 },
+        ],
+        0,
+        70,
+        1000
+      )
+    ).toBeNull();
+
+    const lPathAnim = createTokenTravelAnimation(
+      [
+        { x: 0, y: 0 },
+        { x: 280, y: 0 },
+        { x: 280, y: 280 },
+      ],
+      30,
+      70,
+      1000
+    );
+    expect(lPathAnim).toBeTruthy();
+    expect(lPathAnim!.totalLengthPx).toBe(560);
+    expect(lPathAnim!.durationMs).toBeCloseTo((560 / 420) * 1000, 1);
+
+    const midLeg1 = sampleTokenTravelAnimation(
+      lPathAnim!,
+      1000 + lPathAnim!.durationMs * 0.25
+    );
+    expect(midLeg1.done).toBe(false);
+    expect(midLeg1.point.x).toBeCloseTo(140, 1);
+    expect(midLeg1.point.y).toBeCloseTo(0, 1);
+
+    const cornerSample = sampleTokenTravelAnimation(
+      lPathAnim!,
+      1000 + lPathAnim!.durationMs * 0.5
+    );
+    expect(cornerSample.done).toBe(false);
+    expect(cornerSample.point.x).toBeCloseTo(280, 1);
+    expect(cornerSample.point.y).toBeCloseTo(0, 1);
+
+    const midLeg2 = sampleTokenTravelAnimation(
+      lPathAnim!,
+      1000 + lPathAnim!.durationMs * 0.75
+    );
+    expect(midLeg2.done).toBe(false);
+    expect(midLeg2.point.x).toBeCloseTo(280, 1);
+    expect(midLeg2.point.y).toBeCloseTo(140, 1);
+
+    const endSample = sampleTokenTravelAnimation(
+      lPathAnim!,
+      1000 + lPathAnim!.durationMs
+    );
+    expect(endSample.done).toBe(true);
+    expect(endSample.point).toEqual({ x: 280, y: 280 });
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent, VttCanvasComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: activeUserSig,
+            handle: () => activeUserSig().id,
+            displayName: () =>
+              activeUserSig().id === 'gm-1' ? 'Warden' : 'Player One',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            effectiveMapsFolderId: () => null,
+            effectiveCharactersFolderId: () => null,
+            getFolderTrailLabel: () => '@gm-1 / Maps',
+            assets: () => [],
+            folders: () => [],
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            insertToken: async (input: Partial<VttTokenModel>) => {
+              const created: VttTokenModel = {
+                id: `tok-spawn-${++spawnSeq}`,
+                encounter_id: input.encounter_id ?? 'scene-speed-1',
+                character_id: input.character_id ?? null,
+                owner_id: input.owner_id ?? null,
+                name: input.name ?? 'Spawned Unit',
+                faction: input.faction ?? 'ally',
+                x: input.x ?? 2,
+                y: input.y ?? 2,
+                q: input.x ?? 2,
+                r: input.y ?? 2,
+                world_x: input.world_x ?? null,
+                world_y: input.world_y ?? null,
+                size: input.size ?? 1,
+                icon: input.icon ?? 'shield',
+                color: input.color ?? '#38B29A',
+                current_hp: input.current_hp ?? 14,
+                max_hp: input.max_hp ?? 14,
+                current_sp: input.current_sp ?? 8,
+                max_sp: input.max_sp ?? 8,
+                current_ap: input.current_ap ?? 4,
+                max_ap: input.max_ap ?? 4,
+                armor_dr: input.armor_dr ?? 1,
+                shield_block: input.shield_block ?? 0,
+                move_feet: input.move_feet ?? 20,
+                vision_feet: input.vision_feet ?? 60,
+                light_bright_feet: input.light_bright_feet ?? 0,
+                light_dim_feet: input.light_dim_feet ?? 0,
+                light_color: input.light_color ?? '#FF9B42',
+                shield_raised: false,
+                is_hidden: false,
+                statuses: [],
+                npc_stats: input.npc_stats ?? {},
+              };
+              return { token: created, error: null, needsMigration: false };
+            },
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (
+              entry: Omit<VttLogEntry, 'id' | 'created_at'>
+            ) => {
+              insertedLogs.push(entry);
+              return {
+                ...entry,
+                id: `log-${insertedLogs.length}`,
+                created_at: new Date().toISOString(),
+              };
+            },
+            deleteLog: async (logId: string) => {
+              deletedLogIds.push(logId);
+              return null;
+            },
+            clearCampaignLogs: async (campaignId: string) => {
+              clearedCampaignIds.push(campaignId);
+              return null;
+            },
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const settingsStore = TestBed.inject(VttSettingsStore);
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+
+    expect(settingsStore.preferences().tokenMoveSpeed).toBe(30);
+    settingsStore.updatePreferences({ tokenMoveSpeed: 0 });
+    expect(settingsStore.preferences().tokenMoveSpeed).toBe(0);
+    settingsStore.updatePreferences({ tokenMoveSpeed: 65 });
+    expect(settingsStore.preferences().tokenMoveSpeed).toBe(65);
+    settingsStore.updatePreferences({ tokenMoveSpeed: 999 });
+    expect(settingsStore.preferences().tokenMoveSpeed).toBe(120);
+    settingsStore.resetPreferences();
+    expect(settingsStore.preferences().tokenMoveSpeed).toBe(30);
+
+    vttStore.campaign.set({
+      id: 'camp-speed-1',
+      gm_id: 'gm-1',
+      name: 'Silent Deployment Test',
+      cover_image_url: null,
+      invite_code: 'SPD101',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const baseScene: VttSceneModel = {
+      id: 'scene-speed-1',
+      campaign_id: 'camp-speed-1',
+      gm_id: 'gm-1',
+      folder_id: null,
+      name: 'Courtyard',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: DEFAULT_VTT_GRID_WIDTH,
+      grid_height: DEFAULT_VTT_GRID_HEIGHT,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      sort_order: 0,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: true,
+      fog_enabled: true,
+      global_illumination: true,
+      darkness_level: 0.85,
+      walls: [],
+      lights: [],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+    };
+    vttStore.scenes.set([baseScene]);
+    vttStore.activeSceneId.set('scene-speed-1');
+
+    const sampleChar: CharacterModel = {
+      id: 'char-silent-1',
+      owner_id: 'player-1',
+      name: 'Seraphina',
+      level: 2,
+      attributes: {
+        Brawn: 2,
+        Agility: 2,
+        Technique: 2,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 0,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 14,
+      current_sp: 8,
+      current_ap: 4,
+      active_cooldowns: {},
+    };
+
+    await vttStore.deployCharacterToken(sampleChar);
+    expect(vttStore.tokens().length).toBe(1);
+    expect(insertedLogs.length).toBe(0);
+    expect(vttStore.logs().length).toBe(0);
+
+    const rosterActor: VttRosterActorModel = {
+      id: 'roster-silent-1',
+      campaign_id: 'camp-speed-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: 'gm-1',
+      actor_kind: 'npc',
+      is_unique: false,
+      name: 'Ash Hound',
+      faction: 'enemy',
+      size: 1,
+      icon: 'skull',
+      color: '#E11D48',
+      max_hp: 10,
+      max_sp: 4,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 25,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vttStore.rosterActors.set([rosterActor]);
+
+    const deployedNpc = await vttStore.deployRosterActor('roster-silent-1');
+    expect(deployedNpc).toBeTruthy();
+    expect(vttStore.tokens().length).toBe(2);
+    expect(insertedLogs.length).toBe(0);
+    expect(vttStore.logs().length).toBe(0);
+
+    activeUserSig.set({ id: 'player-1', email: 'player-1@example.com' });
+    await vttStore.postLog({ kind: 'chat', title: 'Player One scouts ahead.' });
+    activeUserSig.set({ id: 'gm-1', email: 'gm-1@example.com' });
+    await vttStore.postLog({ kind: 'chat', title: 'Shadows stir in the hall.' });
+    expect(vttStore.logs().map((l) => l.id)).toEqual(['log-1', 'log-2']);
+
+    activeUserSig.set({ id: 'player-1', email: 'player-1@example.com' });
+    expect(vttStore.canDeleteLog(vttStore.logs()[0])).toBe(true);
+    expect(vttStore.canDeleteLog(vttStore.logs()[1])).toBe(false);
+
+    await vttStore.deleteLogEntry('log-2');
+    expect(vttStore.logs().map((l) => l.id)).toEqual(['log-1', 'log-2']);
+
+    await vttStore.deleteLogEntry('log-1');
+    expect(deletedLogIds).toEqual(['log-1']);
+    expect(vttStore.logs().map((l) => l.id)).toEqual(['log-2']);
+
+    activeUserSig.set({ id: 'gm-1', email: 'gm-1@example.com' });
+    await vttStore.postLog({ kind: 'chat', title: 'Roll initiative!' });
+    expect(vttStore.logs().length).toBe(2);
+
+    const roomFixture = TestBed.createComponent(VttRoomComponent);
+    const roomComp = roomFixture.componentInstance;
+    roomFixture.detectChanges();
+
+    roomComp.openSettingsModal('general');
+    roomFixture.detectChanges();
+    const generalModalText =
+      (roomFixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(generalModalText).toContain('Token Movement');
+    expect(generalModalText).toContain('Token Travel Speed');
+    expect(generalModalText).toContain('Instant (0)');
+
+    roomComp.closeSettingsModal();
+    roomComp.sidebarTab.set('log');
+    roomFixture.detectChanges();
+    expect(
+      (roomFixture.nativeElement as HTMLElement).textContent ?? ''
+    ).toContain('Clear Log');
+
+    roomComp.requestClearAllLogs();
+    expect(roomComp.confirmClearLogs()).toBe(true);
+    await roomComp.executeClearAllLogs();
+    expect(roomComp.confirmClearLogs()).toBe(false);
+    expect(clearedCampaignIds).toEqual(['camp-speed-1']);
+    expect(vttStore.logs().length).toBe(0);
+  });
+
+  it('should use Supabase RPC bundles, atomic action RPCs, and security_invoker views across Auth, Compendium, Campaigns, VTT, Collections, and User Assets', async () => {
+    const rpcCalls: { fn: string; args?: Record<string, unknown> }[] = [];
+    const fromTables: string[] = [];
+    let simulateCompendiumRpcMissing = false;
+    let simulateCampaignBundleRpcMissing = false;
+    let realtimeTokenUpsertHandler:
+      | ((payload: {
+          eventType: string;
+          new: Record<string, unknown>;
+          old: Record<string, unknown>;
+        }) => void)
+      | null = null;
+
+    const makeQueryBuilder = (table: string) => {
+      const resolveRows = (): { data: unknown; error: null } => {
+        if (table === 'v_user_campaigns') {
+          return {
+            data: [
+              {
+                id: 'camp-view-gm',
+                name: 'GM View Campaign',
+                cover_image_url: null,
+                gm_id: 'gm-user-1',
+                invite_code: 'GMVIEW',
+                last_played_at: null,
+                created_at: '2026-01-01T00:00:00Z',
+                membership_role: 'gm',
+                member_count: 3,
+                scene_count: 2,
+              },
+              {
+                id: 'camp-view-player',
+                name: 'Joined View Campaign',
+                cover_image_url: null,
+                gm_id: 'other-gm',
+                invite_code: 'PLVIEW',
+                last_played_at: null,
+                created_at: '2026-01-02T00:00:00Z',
+                membership_role: 'player',
+                member_count: 4,
+                scene_count: 5,
+              },
+            ],
+            error: null,
+          };
+        }
+        if (table === 'v_vtt_campaign_scenes') {
+          return {
+            data: [
+              {
+                id: 'scene-v-1',
+                campaign_id: 'camp-rpc-1',
+                gm_id: 'gm-user-1',
+                name: 'Citadel Gate',
+                is_active_scene: true,
+                token_count: 4,
+              },
+            ],
+            error: null,
+          };
+        }
+        if (table === 'v_visible_vtt_tokens') {
+          return {
+            data: [
+              {
+                id: 'tok-vis-1',
+                encounter_id: 'scene-rpc-2',
+                name: 'Visible Scout',
+                faction: 'ally',
+                is_hidden: false,
+                x: 2,
+                y: 3,
+              },
+            ],
+            error: null,
+          };
+        }
+        if (table === 'v_user_assets_with_folders') {
+          return {
+            data: [
+              {
+                id: 'asset-view-1',
+                owner_id: 'gm-user-1',
+                folder_id: 'uaf-maps',
+                name: 'keep.png',
+                storage_bucket: 'user-assets',
+                storage_path: 'gm-user-1/maps/keep.png',
+                public_url: 'https://cdn.example.com/keep.png',
+                size_bytes: 1024,
+                created_at: '2026-01-01T00:00:00Z',
+                folder_name: 'Maps',
+                folder_slug: 'maps',
+                folder_color: '#C4491A',
+              },
+            ],
+            error: null,
+          };
+        }
+        return { data: [], error: null };
+      };
+
+      let isMutation = false;
+      const builder: Record<string, unknown> = {
+        select: () => {
+          if (!isMutation) {
+            fromTables.push(table);
+          }
+          return builder;
+        },
+        insert: () => {
+          isMutation = true;
+          return builder;
+        },
+        update: () => {
+          isMutation = true;
+          return builder;
+        },
+        upsert: () => {
+          isMutation = true;
+          return builder;
+        },
+        delete: () => {
+          isMutation = true;
+          return builder;
+        },
+        eq: () => builder,
+        neq: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        maybeSingle: async () => ({ data: null, error: null }),
+        single: async () => ({ data: null, error: null }),
+        then: (
+          onfulfilled?: ((value: { data: unknown; error: null }) => unknown) | null
+        ) => Promise.resolve(resolveRows()).then(onfulfilled ?? undefined),
+      };
+      return builder;
+    };
+
+    const mockChannel = {
+      on: (
+        type: string,
+        filter: Record<string, unknown>,
+        cb: (payload: never) => void
+      ) => {
+        if (type === 'postgres_changes' && filter['table'] === 'vtt_tokens') {
+          realtimeTokenUpsertHandler = cb as unknown as typeof realtimeTokenUpsertHandler;
+        }
+        return mockChannel;
+      },
+      subscribe: () => mockChannel,
+    };
+
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-user-1',
+      email: 'gm@example.com',
+    });
+    const isAdminSig = signal<boolean>(false);
+
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => activeUserSig(),
+            isAdmin: () => isAdminSig(),
+            handle: () => 'gm_warden',
+            displayName: () => 'Warden',
+          },
+        },
+        {
+          provide: SupabaseService,
+          useValue: {
+            client: {
+              from: (table: string) => makeQueryBuilder(table),
+              rpc: async (fn: string, args?: Record<string, unknown>) => {
+                rpcCalls.push({ fn, args });
+                if (fn === 'is_handle_available') {
+                  return {
+                    data: args?.['p_handle'] !== 'taken_handle',
+                    error: null,
+                  };
+                }
+                if (fn === 'get_compendium_bundle') {
+                  if (simulateCompendiumRpcMissing) {
+                    return {
+                      data: null,
+                      error: {
+                        code: 'PGRST202',
+                        message: 'Could not find the function get_compendium_bundle',
+                      },
+                    };
+                  }
+                  return {
+                    data: {
+                      weapons: [],
+                      skillTrees: [],
+                      perkNodes: [],
+                      keywords: [],
+                    },
+                    error: null,
+                  };
+                }
+                if (fn === 'get_user_campaigns_bundle') {
+                  if (simulateCampaignBundleRpcMissing) {
+                    return {
+                      data: null,
+                      error: {
+                        code: 'PGRST202',
+                        message: 'Could not find the function get_user_campaigns_bundle',
+                      },
+                    };
+                  }
+                  return {
+                    data: {
+                      yourGames: [
+                        {
+                          id: 'camp-rpc-1',
+                          name: 'The Iron March',
+                          cover_image_url: null,
+                          gm_id: 'gm-user-1',
+                          invite_code: 'IRON01',
+                          last_played_at: null,
+                          created_at: '2026-01-01T00:00:00Z',
+                          membership_role: 'gm',
+                          member_count: 4,
+                          scene_count: 2,
+                        },
+                      ],
+                      joinedGames: [],
+                    },
+                    error: null,
+                  };
+                }
+                if (fn === 'join_campaign_by_invite') {
+                  if (args?.['p_invite_code'] === 'JOIN99') {
+                    return {
+                      data: {
+                        id: 'camp-joined-99',
+                        name: 'Shattered Crown',
+                        cover_image_url: null,
+                        gm_id: 'other-gm',
+                        invite_code: 'JOIN99',
+                        last_played_at: null,
+                        created_at: '2026-01-03T00:00:00Z',
+                      },
+                      error: null,
+                    };
+                  }
+                  return {
+                    data: null,
+                    error: {
+                      code: 'P0002',
+                      message: `No game found with invite code "${args?.['p_invite_code']}".`,
+                    },
+                  };
+                }
+                if (fn === 'get_vtt_room_bundle') {
+                  return {
+                    data: {
+                      campaign: {
+                        id: 'camp-rpc-1',
+                        name: 'The Iron March',
+                        cover_image_url: null,
+                        gm_id: 'gm-user-1',
+                        invite_code: 'IRON01',
+                        last_played_at: null,
+                        created_at: '2026-01-01T00:00:00Z',
+                      },
+                      activeSceneId: 'scene-rpc-1',
+                      scenes: [
+                        {
+                          id: 'scene-rpc-1',
+                          campaign_id: 'camp-rpc-1',
+                          gm_id: 'gm-user-1',
+                          name: 'Watchtower',
+                          is_active_scene: true,
+                          token_count: 1,
+                        },
+                        {
+                          id: 'scene-rpc-2',
+                          campaign_id: 'camp-rpc-1',
+                          gm_id: 'gm-user-1',
+                          name: 'Undercroft',
+                          is_active_scene: false,
+                          token_count: 1,
+                        },
+                      ],
+                      folders: [
+                        {
+                          id: 'vtt-folder-1',
+                          campaign_id: 'camp-rpc-1',
+                          scope: 'maps',
+                          parent_folder_id: null,
+                          name: 'Act I',
+                          color: '#C4491A',
+                          sort_order: 0,
+                        },
+                      ],
+                      rosterActors: [
+                        {
+                          id: 'ra-1',
+                          campaign_id: 'camp-rpc-1',
+                          actor_kind: 'npc',
+                          name: 'Gate Captain',
+                          faction: 'enemy',
+                        },
+                      ],
+                      tokens: [
+                        {
+                          id: 'tok-bundle-1',
+                          encounter_id: 'scene-rpc-1',
+                          owner_id: 'player-2',
+                          name: 'Vanguard',
+                          faction: 'ally',
+                          is_hidden: false,
+                          x: 4,
+                          y: 4,
+                        },
+                      ],
+                      logs: [
+                        {
+                          id: 'log-bundle-1',
+                          campaign_id: 'camp-rpc-1',
+                          encounter_id: 'scene-rpc-1',
+                          sender_id: 'gm-user-1',
+                          sender_name: 'Warden',
+                          kind: 'system',
+                          title: 'Session opened.',
+                          created_at: '2026-01-01T00:00:00Z',
+                        },
+                      ],
+                      characters: [],
+                    },
+                    error: null,
+                  };
+                }
+                if (fn === 'activate_vtt_scene') {
+                  return { data: null, error: null };
+                }
+                if (fn === 'get_collections_bundle') {
+                  return {
+                    data: {
+                      folders: [
+                        {
+                          id: 'col-f-1',
+                          owner_id: 'gm-user-1',
+                          parent_folder_id: null,
+                          name: 'Bosses',
+                          color: '#C4491A',
+                          sort_order: 0,
+                        },
+                      ],
+                      actors: [
+                        {
+                          id: 'col-a-1',
+                          owner_id: 'gm-user-1',
+                          folder_id: 'col-f-1',
+                          actor_kind: 'npc',
+                          name: 'Dread Knight',
+                          faction: 'enemy',
+                        },
+                      ],
+                    },
+                    error: null,
+                  };
+                }
+                if (fn === 'get_user_assets_bundle') {
+                  return {
+                    data: {
+                      folders: [
+                        {
+                          id: 'uaf-maps',
+                          owner_id: 'gm-user-1',
+                          parent_folder_id: null,
+                          name: 'Maps',
+                          slug: 'maps',
+                          color: '#C4491A',
+                          sort_order: 0,
+                        },
+                        {
+                          id: 'uaf-chars',
+                          owner_id: 'gm-user-1',
+                          parent_folder_id: null,
+                          name: 'Characters',
+                          slug: 'characters',
+                          color: '#38B29A',
+                          sort_order: 1,
+                        },
+                      ],
+                      assets: [
+                        {
+                          id: 'ua-bundle-1',
+                          owner_id: 'gm-user-1',
+                          folder_id: 'uaf-maps',
+                          name: 'citadel.webp',
+                          storage_bucket: 'user-assets',
+                          storage_path: 'gm-user-1/maps/citadel.webp',
+                          public_url: 'https://cdn.example.com/citadel.webp',
+                          size_bytes: 2048,
+                          created_at: '2026-01-01T00:00:00Z',
+                          folder_name: 'Maps',
+                          folder_slug: 'maps',
+                          folder_color: '#C4491A',
+                        },
+                      ],
+                      preferences: {
+                        owner_id: 'gm-user-1',
+                        maps_folder_id: 'uaf-maps',
+                        characters_folder_id: 'uaf-chars',
+                      },
+                    },
+                    error: null,
+                  };
+                }
+                return { data: null, error: null };
+              },
+              channel: () => mockChannel,
+              removeChannel: async () => 'ok',
+            },
+          },
+        },
+      ],
+    });
+
+    const authService = TestBed.inject(AuthService);
+    expect(await authService.isHandleTaken('taken_handle')).toBe(true);
+    expect(await authService.isHandleTaken('fresh_handle')).toBe(false);
+    expect(rpcCalls.some((c) => c.fn === 'is_handle_available')).toBe(true);
+
+    const compendiumService = TestBed.inject(CompendiumService);
+    await compendiumService.fetchFullCompendium(false);
+    expect(rpcCalls.some((c) => c.fn === 'get_compendium_bundle')).toBe(true);
+
+    simulateCompendiumRpcMissing = true;
+    fromTables.length = 0;
+    await compendiumService.fetchFullCompendium(false);
+    expect(fromTables).toEqual([
+      'v_active_weapons',
+      'v_active_skill_trees',
+      'v_active_perk_nodes',
+      'v_active_keywords',
+    ]);
+
+    fromTables.length = 0;
+    await compendiumService.fetchFullCompendium(true);
+    expect(fromTables).toEqual([
+      'weapons',
+      'skill_trees',
+      'perk_nodes',
+      'compendium_keywords',
+    ]);
+    simulateCompendiumRpcMissing = false;
+
+    const campaignStore = TestBed.inject(CampaignStore);
+    const campaignService = TestBed.inject(CampaignService);
+    await campaignStore.loadGames('gm-user-1');
+    expect(rpcCalls.some((c) => c.fn === 'get_user_campaigns_bundle')).toBe(true);
+    expect(campaignStore.yourGames().length).toBe(1);
+    expect(campaignStore.yourGames()[0].scene_count).toBe(2);
+
+    simulateCampaignBundleRpcMissing = true;
+    fromTables.length = 0;
+    const fallbackCampRes = await campaignService.fetchUserCampaigns('gm-user-1');
+    expect(fromTables).toContain('v_user_campaigns');
+    expect(fallbackCampRes.yourGames.map((g) => g.id)).toEqual(['camp-view-gm']);
+    expect(fallbackCampRes.joinedGames.map((g) => g.id)).toEqual([
+      'camp-view-player',
+    ]);
+    simulateCampaignBundleRpcMissing = false;
+
+    fromTables.length = 0;
+    const joinedOk = await campaignStore.joinGameByCode('join99');
+    expect(joinedOk).toBe(true);
+    expect(
+      rpcCalls.some(
+        (c) =>
+          c.fn === 'join_campaign_by_invite' && c.args?.['p_invite_code'] === 'JOIN99'
+      )
+    ).toBe(true);
+    expect(fromTables).not.toContain('campaign_members');
+    expect(campaignStore.joinedGames()[0]?.id).toBe('camp-joined-99');
+
+    const collectionsStore = TestBed.inject(CollectionsStore);
+    fromTables.length = 0;
+    await collectionsStore.loadCollections(true);
+    expect(rpcCalls.some((c) => c.fn === 'get_collections_bundle')).toBe(true);
+    expect(fromTables).not.toContain('collection_folders');
+    expect(collectionsStore.folders()[0]?.name).toBe('Bosses');
+    expect(collectionsStore.actors()[0]?.name).toBe('Dread Knight');
+
+    const userAssetsStore = TestBed.inject(UserAssetsStore);
+    const userAssetsService = TestBed.inject(UserAssetsService);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mot-user-asset-folders-v1-gm-user-1');
+      localStorage.removeItem('mot-user-assets-v1-gm-user-1');
+    }
+    fromTables.length = 0;
+    await userAssetsStore.ensureLoaded(true);
+    expect(rpcCalls.some((c) => c.fn === 'get_user_assets_bundle')).toBe(true);
+    expect(fromTables).not.toContain('user_asset_folders');
+    expect(userAssetsStore.folders().length).toBe(2);
+    expect(userAssetsStore.assets()[0]?.folder_slug).toBe('maps');
+
+    fromTables.length = 0;
+    const viewAssets = await userAssetsService.fetchAssets('gm-user-1');
+    expect(fromTables).toEqual(['v_user_assets_with_folders']);
+    expect(viewAssets.assets[0]?.folder_name).toBe('Maps');
+
+    const vttStore = TestBed.inject(VttStore);
+    const vttService = TestBed.inject(VttService);
+    fromTables.length = 0;
+    await vttStore.enterCampaignRoom('camp-rpc-1');
+    expect(
+      rpcCalls.some(
+        (c) =>
+          c.fn === 'get_vtt_room_bundle' && c.args?.['p_campaign_id'] === 'camp-rpc-1'
+      )
+    ).toBe(true);
+    expect(fromTables).not.toContain('vtt_encounters');
+    expect(fromTables).not.toContain('vtt_tokens');
+    expect(vttStore.scenes().length).toBe(2);
+    expect(vttStore.scenes()[0]?.token_count).toBe(1);
+    expect(vttStore.tokens()[0]?.name).toBe('Vanguard');
+    expect(vttStore.logs()[0]?.title).toBe('Session opened.');
+
+    fromTables.length = 0;
+    await vttStore.selectOrActivateScene('scene-rpc-2', true);
+    expect(fromTables).toEqual(['v_visible_vtt_tokens']);
+    expect(
+      rpcCalls.some(
+        (c) =>
+          c.fn === 'activate_vtt_scene' &&
+          c.args?.['p_campaign_id'] === 'camp-rpc-1' &&
+          c.args?.['p_scene_id'] === 'scene-rpc-2'
+      )
+    ).toBe(true);
+    expect(
+      vttStore.scenes().find((s) => s.id === 'scene-rpc-2')?.is_active_scene
+    ).toBe(true);
+    expect(
+      vttStore.scenes().find((s) => s.id === 'scene-rpc-1')?.is_active_scene
+    ).toBe(false);
+
+    fromTables.length = 0;
+    const directViewScenes = await vttService.fetchCampaignScenes(
+      'camp-rpc-1',
+      'gm-user-1'
+    );
+    expect(fromTables).toEqual(['v_vtt_campaign_scenes']);
+    expect(directViewScenes.scenes[0]?.token_count).toBe(4);
+
+    activeUserSig.set({ id: 'player-3', email: 'player3@example.com' });
+    expect(vttStore.isGm()).toBe(false);
+    expect(realtimeTokenUpsertHandler).toBeTruthy();
+    realtimeTokenUpsertHandler!({
+      eventType: 'UPDATE',
+      new: {
+        id: 'tok-vis-1',
+        encounter_id: 'scene-rpc-2',
+        owner_id: 'gm-user-1',
+        name: 'Ambush Assassin',
+        faction: 'enemy',
+        is_hidden: true,
+        x: 2,
+        y: 3,
+      },
+      old: {},
+    });
+    expect(vttStore.tokens().some((t) => t.id === 'tok-vis-1')).toBe(false);
   });
 });

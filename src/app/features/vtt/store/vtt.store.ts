@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { UserAssetsStore } from '../../../core/assets/user-assets.store';
 import { AuthStore } from '../../../core/auth/auth.store';
 import {
   ActiveCombatTag,
@@ -55,6 +56,7 @@ import {
 } from '../engine/visibility.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
+  DEFAULT_VTT_DARKNESS_LEVEL,
   DEFAULT_VTT_GRID_HEIGHT,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
@@ -160,6 +162,7 @@ export class VttStore {
   private readonly characterStore = inject(CharacterStore);
   private readonly characterService = inject(CharacterService);
   private readonly collectionsStore = inject(CollectionsStore);
+  private readonly userAssetsStore = inject(UserAssetsStore);
   private readonly notifications = inject(NotificationStore);
   private readonly settingsStore = inject(VttSettingsStore);
 
@@ -275,8 +278,10 @@ export class VttStore {
   });
 
   readonly observerTokens = computed<VttTokenModel[]>(() => {
+    const sc = this.activeScene();
+    if (!sc || !sc.token_vision) return [];
+
     const all = this.sceneTokens().filter((t) => !t.is_hidden);
-    const uid = this.authStore.user()?.id;
     const gm = this.isGm();
 
     if (gm) {
@@ -284,24 +289,18 @@ export class VttStore {
         return all.filter((t) => t.faction === 'ally');
       }
       const sel = this.selectedToken();
-      if (sel && sel.faction === 'ally') {
+      if (sel && !sel.is_hidden) {
         return [sel];
       }
       return all.filter((t) => t.faction === 'ally');
     }
 
-    const owned = all.filter((t) => {
-      if (t.owner_id && t.owner_id === uid) return true;
-      if (t.character_id) {
-        const ch = this.characterByIdMap().get(t.character_id);
-        if (ch && ch.owner_id === uid) return true;
-      }
-      return false;
-    });
-
-    return owned.length > 0
-      ? owned
-      : all.filter((t) => t.faction === 'ally');
+    const controlled = all.filter((t) => this.canControlToken(t));
+    const sel = this.selectedToken();
+    if (sel && controlled.some((t) => t.id === sel.id)) {
+      return [sel];
+    }
+    return controlled;
   });
 
   readonly initiativeTokens = computed<VttTokenModel[]>(() => {
@@ -558,38 +557,69 @@ export class VttStore {
       await Promise.all([
         this.compendiumStore.ensureLoaded(),
         this.characterStore.ensureLoaded(),
+        this.collectionsStore.loadCollections(),
       ]);
 
-      const [campRes, visibleChars, loadedFolders, loadedRoster] =
-        await Promise.all([
-          this.vttService.fetchCampaignById(campaignId),
-          this.vttService.fetchAllVisibleCharacters(),
-          this.vttService.fetchCampaignFolders(campaignId),
-          this.vttService.fetchCampaignRosterActors(campaignId),
-          this.collectionsStore.loadCollections(),
-        ]);
+      let campData: GameCardModel | null = null;
+      let loadedScenes: VttSceneModel[] = [];
+      let initialTokens: VttTokenModel[] = [];
+      let initialLogs: VttLogEntry[] = [];
+      let hydratedFromBundle = false;
 
-      if (!campRes.data) {
-        this.error.set(campRes.error ?? 'Campaign not found.');
-        this.isLoading.set(false);
-        return;
+      if (typeof this.vttService.fetchRoomBundle === 'function') {
+        const roomRes = await this.vttService.fetchRoomBundle(campaignId);
+        if (!roomRes.fallback) {
+          if (!roomRes.bundle) {
+            this.error.set(roomRes.error ?? 'Campaign not found.');
+            this.isLoading.set(false);
+            return;
+          }
+
+          hydratedFromBundle = true;
+          campData = roomRes.bundle.campaign;
+          this.campaign.set(campData);
+          this.allCharacters.set(roomRes.bundle.characters);
+          this.folders.set(roomRes.bundle.folders);
+          this.rosterActors.set(roomRes.bundle.rosterActors);
+          this.needsMigration.set(false);
+
+          loadedScenes = roomRes.bundle.scenes;
+          initialTokens = roomRes.bundle.tokens;
+          initialLogs = roomRes.bundle.logs;
+        }
       }
 
-      this.campaign.set(campRes.data);
-      this.allCharacters.set(visibleChars);
-      this.folders.set(loadedFolders);
-      this.rosterActors.set(loadedRoster);
+      if (!hydratedFromBundle) {
+        const [campRes, visibleChars, loadedFolders, loadedRoster] =
+          await Promise.all([
+            this.vttService.fetchCampaignById(campaignId),
+            this.vttService.fetchAllVisibleCharacters(),
+            this.vttService.fetchCampaignFolders(campaignId),
+            this.vttService.fetchCampaignRosterActors(campaignId),
+          ]);
 
-      const scenesRes = await this.vttService.fetchCampaignScenes(
-        campaignId,
-        campRes.data.gm_id
-      );
-      this.needsMigration.set(scenesRes.needsMigration);
+        if (!campRes.data) {
+          this.error.set(campRes.error ?? 'Campaign not found.');
+          this.isLoading.set(false);
+          return;
+        }
 
-      let loadedScenes = scenesRes.scenes;
+        campData = campRes.data;
+        this.campaign.set(campData);
+        this.allCharacters.set(visibleChars);
+        this.folders.set(loadedFolders);
+        this.rosterActors.set(loadedRoster);
+
+        const scenesRes = await this.vttService.fetchCampaignScenes(
+          campaignId,
+          campData.gm_id
+        );
+        this.needsMigration.set(scenesRes.needsMigration);
+        loadedScenes = scenesRes.scenes;
+      }
+
       const uid = this.authStore.user()?.id;
-      const userIsGm =
-        campRes.data.gm_id === uid || this.authStore.isAdmin();
+      const userIsGm = campData!.gm_id === uid || this.authStore.isAdmin();
 
       if (loadedScenes.length === 0 && userIsGm && uid) {
         const initLayout = computeSceneCanvasLayout({
@@ -601,7 +631,7 @@ export class VttStore {
         const created = await this.vttService.createScene({
           campaign_id: campaignId,
           gm_id: uid,
-          name: `${campRes.data.name} — Blank Scene`,
+          name: `${campData!.name} — Blank Scene`,
           is_active_scene: true,
           grid_mode: 'square',
           scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
@@ -626,12 +656,23 @@ export class VttStore {
         loadedScenes.find((s) => s.is_active_scene) ?? loadedScenes[0] ?? null;
       this.activeSceneId.set(initialScene?.id ?? null);
 
-      const [initialTokens, initialLogs] = await Promise.all([
-        initialScene
-          ? this.vttService.fetchSceneTokens(initialScene.id)
-          : Promise.resolve([]),
-        this.vttService.fetchCampaignLogs(campaignId),
-      ]);
+      if (!hydratedFromBundle) {
+        const [fetchedTokens, fetchedLogs] = await Promise.all([
+          initialScene
+            ? this.vttService.fetchSceneTokens(initialScene.id)
+            : Promise.resolve([]),
+          this.vttService.fetchCampaignLogs(campaignId),
+        ]);
+        initialTokens = fetchedTokens;
+        initialLogs = fetchedLogs;
+      } else if (
+        initialScene &&
+        initialTokens.length === 0 &&
+        loadedScenes.length === 1 &&
+        !loadedScenes[0].token_count
+      ) {
+        initialTokens = [];
+      }
 
       this.tokens.set(initialTokens);
       this.logs.set(initialLogs);
@@ -723,6 +764,19 @@ export class VttStore {
             );
           },
           onTokenUpsert: (incomingToken) => {
+            if (
+              incomingToken.is_hidden &&
+              !this.isGm() &&
+              !this.canControlToken(incomingToken)
+            ) {
+              this.tokens.update((curr) =>
+                curr.filter((t) => t.id !== incomingToken.id)
+              );
+              if (this.selectedTokenId() === incomingToken.id) {
+                this.selectedTokenId.set(null);
+              }
+              return;
+            }
             this.tokens.update((curr) => {
               const exists = curr.some((t) => t.id === incomingToken.id);
               return exists
@@ -746,6 +800,9 @@ export class VttStore {
               this.logs.update((curr) => [...curr, entry]);
               this.triggerLogAudioCue(entry.kind);
             }
+          },
+          onLogDelete: (logId) => {
+            this.logs.update((curr) => curr.filter((e) => e.id !== logId));
           },
           onPing: (ping) => {
             this.settingsStore.playUiCue('ping');
@@ -933,8 +990,34 @@ export class VttStore {
     }
 
     if (makePartyActive && this.isGm()) {
-      const all = this.scenes();
-      for (const sc of all) {
+      const prevScenes = this.scenes();
+      const camp = this.campaign();
+
+      if (camp && typeof this.vttService.activateSceneForParty === 'function') {
+        const actRes = await this.vttService.activateSceneForParty(
+          camp.id,
+          sceneId
+        );
+        if (!actRes.fallback) {
+          if (actRes.error) {
+            this.notifications.error('Scene Activation Error', actRes.error);
+            return;
+          }
+          this.scenes.update((curr) =>
+            curr.map((s) => ({
+              ...s,
+              is_active_scene: s.id === sceneId,
+            }))
+          );
+          this.notifications.success(
+            'Party Moved to Scene',
+            'Players are now viewing this scene.'
+          );
+          return;
+        }
+      }
+
+      for (const sc of prevScenes) {
         const nextActive = sc.id === sceneId;
         if (sc.is_active_scene !== nextActive) {
           await this.patchScene(sc.id, { is_active_scene: nextActive });
@@ -990,6 +1073,10 @@ export class VttStore {
       grid_height: initLayout.gridRows,
       grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
       grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      token_vision: true,
+      fog_enabled: true,
+      global_illumination: false,
+      darkness_level: DEFAULT_VTT_DARKNESS_LEVEL,
       sort_order: nextSort,
     });
 
@@ -1078,6 +1165,7 @@ export class VttStore {
       grid_offset_x: source.grid_offset_x,
       grid_offset_y: source.grid_offset_y,
       grid_opacity: source.grid_opacity,
+      token_vision: source.token_vision,
       fog_enabled: source.fog_enabled,
       global_illumination: source.global_illumination,
       darkness_level: source.darkness_level,
@@ -1341,9 +1429,22 @@ export class VttStore {
     }
   }
 
-  async uploadMapFile(file: File): Promise<string | null> {
+  async uploadMapFile(
+    file: File,
+    folderId?: string | null
+  ): Promise<string | null> {
     const camp = this.campaign();
     if (!camp || !this.isGm()) return null;
+
+    if (this.authStore.user()) {
+      const savedAsset = await this.userAssetsStore.uploadAssetFile(file, {
+        purpose: 'maps',
+        folderId,
+      });
+      if (savedAsset) {
+        return savedAsset.public_url;
+      }
+    }
 
     const res = await this.vttService.uploadMapImage(camp.id, file);
     if (res.error || !res.url) {
@@ -1658,26 +1759,27 @@ export class VttStore {
   }
 
   async toggleSceneBooleanField(
-    field: 'fog_enabled' | 'global_illumination'
+    field: 'token_vision' | 'fog_enabled' | 'global_illumination'
   ): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
     const prevValue = sc[field];
     const prevFog = cloneExploredFog(sc.explored_fog);
 
-    this.pushUndoEntry(
-      sc.id,
-      field === 'fog_enabled'
-        ? 'Toggle Dynamic Fog of War'
-        : 'Toggle Global Daylight',
-      {
-        kind: 'scene_patch',
-        previousScenePatch: {
-          [field]: prevValue,
-          explored_fog: prevFog,
-        },
-      }
-    );
+    const undoLabel =
+      field === 'token_vision'
+        ? 'Toggle Token Vision'
+        : field === 'fog_enabled'
+          ? 'Toggle Fog Exploration'
+          : 'Toggle Global Illumination';
+
+    this.pushUndoEntry(sc.id, undoLabel, {
+      kind: 'scene_patch',
+      previousScenePatch: {
+        [field]: prevValue,
+        explored_fog: prevFog,
+      },
+    });
 
     await this.patchScene(sc.id, { [field]: !prevValue });
     this.syncExploredFogFromObservers();
@@ -1697,9 +1799,18 @@ export class VttStore {
     }[]
   ): void {
     const sc = this.activeScene();
-    if (!sc || !sc.fog_enabled || sc.explored_fog?.revealed_all) return;
+    if (
+      !sc ||
+      !sc.token_vision ||
+      !sc.fog_enabled ||
+      sc.explored_fog?.revealed_all
+    ) {
+      return;
+    }
 
-    const observers = this.observerTokens();
+    const observers = this.isGm()
+      ? this.sceneTokens().filter((t) => !t.is_hidden && t.faction === 'ally')
+      : this.observerTokens();
     if (observers.length === 0) return;
 
     const layout = this.sceneLayout();
@@ -2109,11 +2220,6 @@ export class VttStore {
       previousExploredFog: prevFog,
     });
     this.syncExploredFogFromObservers();
-    await this.postLog({
-      kind: 'system',
-      title: `${character.name} entered the battlefield`,
-      detail: `HP ${res.token.current_hp}/${res.token.max_hp} · SP ${res.token.current_sp}/${res.token.max_sp} · Move ${res.token.move_feet} ft`,
-    });
   }
 
   canManageRosterActor(actor: VttRosterActorModel): boolean {
@@ -2573,11 +2679,6 @@ export class VttStore {
       previousExploredFog: prevFog,
     });
     this.syncExploredFogFromObservers();
-    await this.postLog({
-      kind: 'system',
-      title: `${res.token.name} entered the battlefield`,
-      detail: `HP ${res.token.current_hp}/${res.token.max_hp} · SP ${res.token.current_sp}/${res.token.max_sp} · Move ${res.token.move_feet} ft`,
-    });
     return res.token;
   }
 
@@ -3655,6 +3756,44 @@ export class VttStore {
       detail: `${diceDetail} ${modifier >= 0 ? '+' : '−'} ${Math.abs(modifier)}`,
       payload: { roll },
     });
+  }
+
+  canDeleteLog(entry: VttLogEntry): boolean {
+    if (this.isGm()) return true;
+    const uid = this.authStore.user()?.id;
+    return Boolean(uid && entry.sender_id && entry.sender_id === uid);
+  }
+
+  async deleteLogEntry(logId: string): Promise<void> {
+    const target = this.logs().find((e) => e.id === logId);
+    if (!target || !this.canDeleteLog(target)) return;
+
+    this.logs.update((curr) => curr.filter((e) => e.id !== logId));
+    const err = await this.vttService.deleteLog(logId);
+    if (err) {
+      this.logs.update((curr) =>
+        curr.some((e) => e.id === target.id)
+          ? curr
+          : [...curr, target].sort((a, b) =>
+              a.created_at.localeCompare(b.created_at)
+            )
+      );
+      this.notifications.error('Unable to Delete Log', err);
+    }
+  }
+
+  async clearAllLogs(): Promise<void> {
+    const camp = this.campaign();
+    if (!camp || !this.isGm()) return;
+    const previous = this.logs();
+    if (previous.length === 0) return;
+
+    this.logs.set([]);
+    const err = await this.vttService.clearCampaignLogs(camp.id);
+    if (err) {
+      this.logs.set(previous);
+      this.notifications.error('Unable to Clear Logs', err);
+    }
   }
 
   async postLog(input: {

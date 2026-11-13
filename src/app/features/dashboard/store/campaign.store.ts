@@ -172,6 +172,38 @@ export class CampaignStore {
 
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
 
+    if (typeof this.campaignService.joinCampaignByInvite === 'function') {
+      const rpcRes = await this.campaignService.joinCampaignByInvite(code);
+      if (!rpcRes.fallback) {
+        if (rpcRes.error || !rpcRes.data) {
+          this.#state.update((s) => ({
+            ...s,
+            isLoading: false,
+            error: rpcRes.error,
+          }));
+          if ((rpcRes.error ?? '').toLowerCase().includes('no game found')) {
+            this.notifications.error(
+              'Invalid Invite Code',
+              rpcRes.error ?? `No game found matching code "${code}".`
+            );
+          }
+          return false;
+        }
+
+        const joinedCampaign = rpcRes.data;
+        this.#state.update((s) => ({
+          ...s,
+          joinedGames: [joinedCampaign, ...s.joinedGames],
+          isLoading: false,
+        }));
+        this.notifications.success(
+          'Joined Campaign',
+          `You have joined "${joinedCampaign.name}".`
+        );
+        return true;
+      }
+    }
+
     const foundRes = await this.campaignService.findCampaignByInviteCode(code);
 
     if (foundRes.error || !foundRes.data) {

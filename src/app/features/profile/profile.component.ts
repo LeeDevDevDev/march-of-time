@@ -1,6 +1,7 @@
 import { Component, HostListener, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { UserAssetsStore } from '../../core/assets/user-assets.store';
 import { sanitizeHandle } from '../../core/auth/auth.model';
 import { AuthStore } from '../../core/auth/auth.store';
 import { NotificationStore } from '../../core/notifications/notification.store';
@@ -12,21 +13,24 @@ import {
   formatHotkeyBadge,
   normalizeKeyComboFromEvent,
 } from '../../core/settings/vtt-settings.store';
+import { AssetBrowserModalComponent } from '../../shared/asset-browser/asset-browser-modal.component';
 
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, AssetBrowserModalComponent],
   templateUrl: './profile.component.html',
 })
 export class ProfileComponent implements OnInit {
   readonly authStore = inject(AuthStore);
   readonly settingsStore = inject(VttSettingsStore);
+  readonly userAssetsStore = inject(UserAssetsStore);
   private readonly notifications = inject(NotificationStore);
 
   readonly hotkeyMeta = VTT_HOTKEY_META;
   readonly formatBadge = formatHotkeyBadge;
   readonly recordingAction = signal<VttHotkeyAction | null>(null);
+  readonly assetLibraryOpen = signal(false);
 
   displayName = '';
   handle = '';
@@ -35,6 +39,7 @@ export class ProfileComponent implements OnInit {
     this.authStore.clearMessages();
     this.displayName = this.authStore.displayName();
     this.handle = this.authStore.handle() ?? sanitizeHandle(this.displayName);
+    void this.userAssetsStore.ensureLoaded();
   }
 
   onHandleChange(value: string): void {
