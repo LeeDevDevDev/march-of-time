@@ -1085,7 +1085,12 @@
                     }
                   </div>
 
-                  <div class="flex items-center gap-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span
+                      class="rounded border border-[#243B37] bg-[#0B1413] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#A7F3D0]"
+                    >
+                      Sight: {{ getTokenEffectiveSightLabel(tok) }}
+                    </span>
                     <span class="text-[#8AB0AB]">Carried Light:</span>
                     <button
                       type="button"
@@ -3823,14 +3828,68 @@
                   </span>
                 </label>
 
+                <div class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3.5 space-y-2.5">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span class="font-display text-xs font-bold text-white">
+                        Environment Lighting Presets
+                      </span>
+                      <p class="text-[11px] text-[#8AB0AB]">
+                        Quickly switch between bright daylight, open night, forest gloom, or pitch darkness.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+                    @for (preset of sceneLightingPresets; track preset.id) {
+                      <button
+                        type="button"
+                        (click)="applyEditMapLightingPreset(preset)"
+                        [title]="preset.label + ' — ' + preset.subtitle"
+                        class="flex flex-col items-start justify-between rounded-lg border px-2.5 py-2 text-left transition-colors"
+                        [class.border-[#FBBF24]]="isEditMapLightingPresetActive(em, preset) && preset.global_illumination"
+                        [class.bg-[#261D0B]]="isEditMapLightingPresetActive(em, preset) && preset.global_illumination"
+                        [class.border-[#38B29A]]="isEditMapLightingPresetActive(em, preset) && !preset.global_illumination"
+                        [class.bg-[#112A26]]="isEditMapLightingPresetActive(em, preset) && !preset.global_illumination"
+                        [class.border-[#243B37]]="!isEditMapLightingPresetActive(em, preset)"
+                        [class.bg-[#142220]]="!isEditMapLightingPresetActive(em, preset)"
+                      >
+                        <span
+                          class="text-[11px] font-bold leading-tight"
+                          [class.text-[#FDE68A]]="isEditMapLightingPresetActive(em, preset) && preset.global_illumination"
+                          [class.text-[#5EEAD4]]="isEditMapLightingPresetActive(em, preset) && !preset.global_illumination"
+                          [class.text-[#EBF5F3]]="!isEditMapLightingPresetActive(em, preset)"
+                        >
+                          {{ preset.label }}
+                        </span>
+                        <span class="mt-0.5 font-mono-num text-[9px] text-[#8AB0AB]">
+                          {{ preset.subtitle }}
+                        </span>
+                      </button>
+                    }
+                  </div>
+
+                  <div class="rounded-lg border border-[#1E332F] bg-[#0B1413] px-3 py-2 text-[11px]">
+                    <span class="text-[#8AB0AB]">Standard Human Sight (60ft Dim / 10ft Dark): </span>
+                    <span class="font-mono-num font-bold text-[#A7F3D0]">
+                      {{ getEditMapStandardSightPreview(em) }}
+                    </span>
+                  </div>
+                </div>
+
                 <div
                   class="rounded-xl border border-[#243B37] bg-[#101C1A] p-3 space-y-2 transition-opacity"
                   [class.opacity-60]="em.global_illumination"
                 >
                   <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="font-semibold text-[#EBF5F3]">
-                      Ambient Darkness Level ({{ em.darkness_level }})
-                    </span>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-semibold text-[#EBF5F3]">
+                        Ambient Darkness Level ({{ em.darkness_level }})
+                      </span>
+                      <span class="rounded bg-[#142220] px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[#5EEAD4]">
+                        {{ getEditMapAmbientPercent(em) }}% Ambient Light
+                      </span>
+                    </div>
                     <button
                       type="button"
                       (click)="resetEditMapDarknessLevel()"
@@ -4902,9 +4961,9 @@
 
           <div class="space-y-2.5 border-t border-[#243B37] pt-3">
             <span class="block font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-              Vitality &amp; Movement
+              Vitality, Movement &amp; Vision
             </span>
-            <div class="grid grid-cols-3 gap-2.5 font-mono-num sm:grid-cols-6">
+            <div class="grid grid-cols-3 gap-2.5 font-mono-num sm:grid-cols-5">
               <label class="space-y-1">
                 <span class="text-[10px] text-[#8AB0AB]">Max HP</span>
                 <input
@@ -4961,8 +5020,11 @@
                   class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
                 />
               </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Vision (ft)</span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2.5 rounded-xl border border-[#1E332F] bg-[#0B1413] p-2.5 sm:grid-cols-2">
+              <label class="space-y-1 font-mono-num">
+                <span class="text-[10px] font-semibold text-[#A7F3D0]">Dim Vision (ft)</span>
                 <input
                   type="number"
                   name="ramVision"
@@ -4972,6 +5034,24 @@
                   (ngModelChange)="updateRosterActorModalField('vision_feet', $event)"
                   class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
                 />
+                <span class="block font-sans text-[10px] text-[#8AB0AB]">
+                  Ambient night sight — scales with Dusk, Woods, or Storm gloom.
+                </span>
+              </label>
+              <label class="space-y-1 font-mono-num">
+                <span class="text-[10px] font-semibold text-[#5EEAD4]">Darkvision (ft)</span>
+                <input
+                  type="number"
+                  name="ramDarkvision"
+                  step="5"
+                  min="0"
+                  [ngModel]="ram.darkvision_feet"
+                  (ngModelChange)="updateRosterActorModalField('darkvision_feet', $event)"
+                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
+                />
+                <span class="block font-sans text-[10px] text-[#8AB0AB]">
+                  Zero-light sight floor in Pitch Black caves or dungeons.
+                </span>
               </label>
             </div>
           </div>

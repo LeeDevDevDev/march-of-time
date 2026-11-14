@@ -379,7 +379,8 @@ export class VttCanvasComponent implements AfterViewInit {
       this.vttStore.gridGeometry(),
       sc.global_illumination,
       maxDiag,
-      sc.grid_mode
+      sc.grid_mode,
+      sc.darkness_level
     );
   });
 
@@ -2636,11 +2637,12 @@ export class VttCanvasComponent implements AfterViewInit {
     const isGm = this.vttStore.isGm();
     const preview = this.vttStore.previewPlayerVision();
     const playerMode = !isGm || preview;
+    const clampedDarkness = Math.max(0, Math.min(1, sc.darkness_level ?? 0));
     const baseDarkness = playerMode
       ? 0.985
       : sc.global_illumination
         ? 0.28
-        : Math.max(0.28, Math.min(0.62, sc.darkness_level * 0.52));
+        : Math.max(0.32, Math.min(0.64, 0.32 + clampedDarkness * 0.32));
 
     fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     fctx.globalCompositeOperation = 'source-over';
@@ -2725,6 +2727,79 @@ export class VttCanvasComponent implements AfterViewInit {
     }
 
     fctx.restore();
+
+    if (!sc.global_illumination && visions.length > 0) {
+      const nightVeilAlpha = playerMode
+        ? 0.14 + clampedDarkness * 0.2
+        : 0.05 + clampedDarkness * 0.09;
+
+      fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      fctx.globalCompositeOperation = 'destination-over';
+      fctx.fillStyle = `rgba(6, 12, 22, ${nightVeilAlpha})`;
+      fctx.fillRect(0, 0, vw, vh);
+
+      if (lights.length > 0) {
+        fctx.save();
+        fctx.translate(px, py);
+        fctx.scale(z, z);
+        fctx.globalCompositeOperation = 'destination-out';
+
+        for (const obs of visions) {
+          if (obs.unboundedLosPolygon.length < 3) continue;
+          fctx.save();
+          fctx.beginPath();
+          fctx.moveTo(
+            obs.unboundedLosPolygon[0].x,
+            obs.unboundedLosPolygon[0].y
+          );
+          for (let i = 1; i < obs.unboundedLosPolygon.length; i++) {
+            fctx.lineTo(
+              obs.unboundedLosPolygon[i].x,
+              obs.unboundedLosPolygon[i].y
+            );
+          }
+          fctx.closePath();
+          fctx.clip();
+
+          for (const lp of lights) {
+            if (lp.polygon.length < 3 || lp.dimRadiusPx <= 1) continue;
+            const brightStop =
+              lp.brightRadiusPx > 0
+                ? Math.min(0.95, Math.max(0.05, lp.brightRadiusPx / lp.dimRadiusPx))
+                : 0;
+            const burnGrad = fctx.createRadialGradient(
+              lp.origin.x,
+              lp.origin.y,
+              0,
+              lp.origin.x,
+              lp.origin.y,
+              lp.dimRadiusPx
+            );
+            if (brightStop > 0) {
+              burnGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+              burnGrad.addColorStop(brightStop, 'rgba(0, 0, 0, 1)');
+              burnGrad.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
+            } else {
+              burnGrad.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+              burnGrad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+            }
+
+            fctx.beginPath();
+            fctx.moveTo(lp.polygon[0].x, lp.polygon[0].y);
+            for (let i = 1; i < lp.polygon.length; i++) {
+              fctx.lineTo(lp.polygon[i].x, lp.polygon[i].y);
+            }
+            fctx.closePath();
+            fctx.fillStyle = burnGrad;
+            fctx.fill();
+          }
+
+          fctx.restore();
+        }
+
+        fctx.restore();
+      }
+    }
 
     mainCtx.save();
     mainCtx.setTransform(1, 0, 0, 1, 0, 0);

@@ -19,11 +19,14 @@ import {
 import {
   CollectionActorModel,
   CollectionFolderModel,
+  DEFAULT_VTT_DARKVISION_FEET,
+  DEFAULT_VTT_DIM_VISION_FEET,
   VttActorKind,
   VttFaction,
   VttFolderModel,
   VttNpcPreset,
   VttNpcStats,
+  resolveActorDarkvisionFeet,
 } from '../vtt/models/vtt.model';
 import { CollectionsService } from './collections.service';
 
@@ -44,6 +47,7 @@ export interface ActorTemplateDraft {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet?: number;
   light_bright_feet: number;
   light_dim_feet: number;
   light_color: string;
@@ -81,7 +85,8 @@ export function buildActorTemplateFromCharacter(
     armor_dr: stats.armorDr,
     shield_block: stats.shieldBlockTotal,
     move_feet: stats.moveFeet,
-    vision_feet: 60,
+    vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
+    darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
     light_bright_feet: 0,
     light_dim_feet: 0,
     light_color: '#F59E0B',
@@ -122,6 +127,10 @@ export function buildActorTemplateFromNpcPreset(
     shield_block: preset.shield_block,
     move_feet: preset.move_feet,
     vision_feet: preset.vision_feet,
+    darkvision_feet: resolveActorDarkvisionFeet(
+      preset.darkvision_feet,
+      preset.npc_stats
+    ),
     light_bright_feet: 0,
     light_dim_feet: 0,
     light_color: '#F59E0B',
@@ -359,7 +368,14 @@ export class CollectionsStore {
       armor_dr: Math.max(0, Math.round(draft.armor_dr ?? 0)),
       shield_block: Math.max(0, Math.round(draft.shield_block ?? 0)),
       move_feet: Math.max(0, Math.round(draft.move_feet ?? 20)),
-      vision_feet: Math.max(0, Math.round(draft.vision_feet ?? 60)),
+      vision_feet: Math.max(
+        0,
+        Math.round(draft.vision_feet ?? DEFAULT_VTT_DIM_VISION_FEET)
+      ),
+      darkvision_feet: resolveActorDarkvisionFeet(
+        draft.darkvision_feet,
+        draft.npc_stats
+      ),
       light_bright_feet: Math.max(0, Math.round(draft.light_bright_feet ?? 0)),
       light_dim_feet: Math.max(0, Math.round(draft.light_dim_feet ?? 0)),
       light_color: draft.light_color || '#F59E0B',
@@ -457,6 +473,10 @@ export class CollectionsStore {
       shield_block: existing.shield_block,
       move_feet: existing.move_feet,
       vision_feet: existing.vision_feet,
+      darkvision_feet: resolveActorDarkvisionFeet(
+        existing.darkvision_feet,
+        existing.npc_stats
+      ),
       light_bright_feet: existing.light_bright_feet,
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,

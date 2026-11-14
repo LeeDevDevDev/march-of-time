@@ -1,10 +1,13 @@
 import {
+  DEFAULT_VTT_DIM_VISION_FEET,
   HexCoord,
   VttGridMode,
   VttLightSource,
   VttPoint,
   VttTokenModel,
   VttWallSegment,
+  computeEffectiveActorSightFeet,
+  resolveActorDarkvisionFeet,
 } from '../models/vtt.model';
 import {
   HexGridGeometry,
@@ -28,7 +31,12 @@ export interface ComputedLightPolygon {
 export interface ComputedObserverVision {
   tokenId: string;
   origin: VttPoint;
+  dimVisionFeet: number;
+  darkvisionFeet: number;
+  effectiveSightFeet: number;
+  darkvisionPx: number;
   personalVisionPx: number;
+  darkvisionPolygon: VttPoint[];
   personalPolygon: VttPoint[];
   unboundedLosPolygon: VttPoint[];
 }
@@ -214,33 +222,60 @@ export function buildObserverVisions(
   geom: HexGridGeometry,
   globalIllumination: boolean,
   maxWorldDiagPx: number,
-  gridMode: VttGridMode = 'square'
+  gridMode: VttGridMode = 'square',
+  darknessLevel = 0
 ): ComputedObserverVision[] {
   return observers.map((tok) => {
     const origin = getTokenWorldCenter(tok, geom, gridMode);
-    const visionFeet = Math.max(
-      5,
-      tok.vision_feet ?? 60,
+    const dimVisionFeet = Math.max(
+      0,
+      tok.vision_feet ?? DEFAULT_VTT_DIM_VISION_FEET
+    );
+    const darkvisionFeet = resolveActorDarkvisionFeet(
+      tok.darkvision_feet,
+      tok.npc_stats
+    );
+    const sight = computeEffectiveActorSightFeet(
+      dimVisionFeet,
+      darkvisionFeet,
+      darknessLevel
+    );
+    const carriedLightFeet = Math.max(
       tok.light_dim_feet ?? 0,
       tok.light_bright_feet ?? 0
     );
+    const effectiveSightFeet = Math.max(
+      sight.effectiveSightFeet,
+      carriedLightFeet
+    );
+    const darkvisionPx = feetToWorldPixels(darkvisionFeet, geom.gridSizePx);
     const personalPx = globalIllumination
       ? maxWorldDiagPx
-      : feetToWorldPixels(visionFeet, geom.gridSizePx);
+      : feetToWorldPixels(effectiveSightFeet, geom.gridSizePx);
     const unboundedLosPolygon = computeVisibilityPolygon(
       origin,
       maxWorldDiagPx,
       walls,
       64
     );
+    const darkvisionPolygon = globalIllumination
+      ? unboundedLosPolygon
+      : computeVisibilityPolygon(origin, darkvisionPx, walls, 48);
     const personalPolygon = globalIllumination
       ? unboundedLosPolygon
-      : computeVisibilityPolygon(origin, personalPx, walls, 48);
+      : personalPx === darkvisionPx
+        ? darkvisionPolygon
+        : computeVisibilityPolygon(origin, personalPx, walls, 48);
 
     return {
       tokenId: tok.id,
       origin,
+      dimVisionFeet,
+      darkvisionFeet,
+      effectiveSightFeet,
+      darkvisionPx,
       personalVisionPx: personalPx,
+      darkvisionPolygon,
       personalPolygon,
       unboundedLosPolygon,
     };
@@ -266,8 +301,10 @@ export function isWorldPointVisibleToObservers(
 
     const dx = target.x - obs.origin.x;
     const dy = target.y - obs.origin.y;
+    const rangePx =
+      obs.personalVisionPx > 0 ? obs.personalVisionPx + 0.5 : -1;
     const inPersonalRange =
-      dx * dx + dy * dy <= obs.personalVisionPx * obs.personalVisionPx;
+      rangePx > 0 && dx * dx + dy * dy <= rangePx * rangePx;
 
     let inAnyLightRange = false;
     if (!inPersonalRange) {

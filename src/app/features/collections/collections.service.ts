@@ -3,9 +3,11 @@ import { SupabaseService } from '../../core/supabase/supabase.service';
 import {
   CollectionActorModel,
   CollectionFolderModel,
+  DEFAULT_VTT_DIM_VISION_FEET,
   VttActorKind,
   VttFaction,
   VttNpcStats,
+  resolveActorDarkvisionFeet,
 } from '../vtt/models/vtt.model';
 
 function isMissingTableOrColumnError(code?: string, message?: string): boolean {
@@ -137,7 +139,16 @@ export function parseCollectionActorRow(
     armor_dr: Math.max(0, Number(raw['armor_dr'] ?? 0)),
     shield_block: Math.max(0, Number(raw['shield_block'] ?? 0)),
     move_feet: Math.max(0, Number(raw['move_feet'] ?? 20)),
-    vision_feet: Math.max(0, Number(raw['vision_feet'] ?? 60)),
+    vision_feet: Math.max(
+      0,
+      Number(raw['vision_feet'] ?? DEFAULT_VTT_DIM_VISION_FEET)
+    ),
+    darkvision_feet: resolveActorDarkvisionFeet(
+      raw['darkvision_feet'] !== null && raw['darkvision_feet'] !== undefined
+        ? Number(raw['darkvision_feet'])
+        : undefined,
+      npcStats
+    ),
     light_bright_feet: Math.max(0, Number(raw['light_bright_feet'] ?? 0)),
     light_dim_feet: Math.max(0, Number(raw['light_dim_feet'] ?? 0)),
     light_color: raw['light_color'] ? String(raw['light_color']) : '#F59E0B',
@@ -310,17 +321,42 @@ export class CollectionsService {
   async createActor(
     payload: Omit<CollectionActorModel, 'id' | 'created_at' | 'updated_at'>
   ): Promise<{ actor: CollectionActorModel | null; error: string | null }> {
-    const { data, error } = await this.supabase
+    const resolvedDarkvision = resolveActorDarkvisionFeet(
+      payload.darkvision_feet,
+      payload.npc_stats
+    );
+    const enrichedPayload = {
+      ...payload,
+      darkvision_feet: resolvedDarkvision,
+      npc_stats: {
+        ...(payload.npc_stats ?? {}),
+        __darkvision_feet: resolvedDarkvision,
+      },
+    };
+
+    let { data, error } = await this.supabase
       .from('collection_actors')
-      .insert(payload)
+      .insert(enrichedPayload)
       .select('*')
       .single();
+
+    if (error && isMissingTableOrColumnError(error.code, error.message)) {
+      const legacyPayload: Record<string, unknown> = { ...enrichedPayload };
+      delete legacyPayload['darkvision_feet'];
+      const retry = await this.supabase
+        .from('collection_actors')
+        .insert(legacyPayload)
+        .select('*')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       if (isMissingTableOrColumnError(error.code, error.message)) {
         const now = new Date().toISOString();
         const fallback: CollectionActorModel = {
-          ...payload,
+          ...enrichedPayload,
           id: crypto.randomUUID(),
           created_at: now,
           updated_at: now,
@@ -343,17 +379,38 @@ export class CollectionsService {
     ownerId: string,
     patch: Partial<CollectionActorModel>
   ): Promise<{ error: string | null }> {
-    const payload = {
+    const payload: Record<string, unknown> = {
       ...patch,
       updated_at: new Date().toISOString(),
     };
-    const { error } = await this.supabase
+    if (patch.darkvision_feet !== undefined && patch.npc_stats) {
+      payload['npc_stats'] = {
+        ...patch.npc_stats,
+        __darkvision_feet: patch.darkvision_feet,
+      };
+    }
+
+    let { error } = await this.supabase
       .from('collection_actors')
       .update(payload)
       .eq('id', actorId);
 
+    if (
+      error &&
+      payload['darkvision_feet'] !== undefined &&
+      isMissingTableOrColumnError(error.code, error.message)
+    ) {
+      const retryPayload: Record<string, unknown> = { ...payload };
+      delete retryPayload['darkvision_feet'];
+      const retry = await this.supabase
+        .from('collection_actors')
+        .update(retryPayload)
+        .eq('id', actorId);
+      error = retry.error;
+    }
+
     const local = readLocalActors(ownerId).map((a) =>
-      a.id === actorId ? { ...a, ...payload } : a
+      a.id === actorId ? { ...a, ...patch, updated_at: String(payload['updated_at']) } : a
     );
     writeLocalActors(ownerId, local);
 

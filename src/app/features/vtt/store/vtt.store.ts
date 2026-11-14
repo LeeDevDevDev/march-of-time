@@ -75,6 +75,8 @@ import {
 import {
   DEFAULT_VTT_BG_COLOR,
   DEFAULT_VTT_DARKNESS_LEVEL,
+  DEFAULT_VTT_DARKVISION_FEET,
+  DEFAULT_VTT_DIM_VISION_FEET,
   DEFAULT_VTT_GRID_HEIGHT,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
@@ -103,6 +105,7 @@ import {
   VttToolMode,
   VttWallKind,
   VttWallSegment,
+  resolveActorDarkvisionFeet,
 } from '../models/vtt.model';
 import { VttPingBroadcast, VttService } from '../services/vtt.service';
 
@@ -2125,7 +2128,8 @@ export class VttStore {
         geom,
         sc.global_illumination,
         maxDiag,
-        sc.grid_mode
+        sc.grid_mode,
+        sc.darkness_level
       );
       const newlySeen = collectNewlyExploredHexKeys(
         existing,
@@ -2443,7 +2447,8 @@ export class VttStore {
       armor_dr: stats.armorDr,
       shield_block: stats.shieldBlockTotal,
       move_feet: stats.moveFeet,
-      vision_feet: 60,
+      vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
       light_bright_feet: 0,
       light_dim_feet: 0,
       light_color: '#FF9B42',
@@ -2548,11 +2553,24 @@ export class VttStore {
       armor_dr: Math.max(0, Math.round(draft.armor_dr ?? 0)),
       shield_block: Math.max(0, Math.round(draft.shield_block ?? 0)),
       move_feet: Math.max(0, Math.round(draft.move_feet ?? 20)),
-      vision_feet: Math.max(0, Math.round(draft.vision_feet ?? 60)),
+      vision_feet: Math.max(
+        0,
+        Math.round(draft.vision_feet ?? DEFAULT_VTT_DIM_VISION_FEET)
+      ),
+      darkvision_feet: resolveActorDarkvisionFeet(
+        draft.darkvision_feet,
+        draft.npc_stats
+      ),
       light_bright_feet: Math.max(0, Math.round(draft.light_bright_feet ?? 0)),
       light_dim_feet: Math.max(0, Math.round(draft.light_dim_feet ?? 0)),
       light_color: draft.light_color || '#F59E0B',
-      npc_stats: { ...draft.npc_stats },
+      npc_stats: {
+        ...draft.npc_stats,
+        __darkvision_feet: resolveActorDarkvisionFeet(
+          draft.darkvision_feet,
+          draft.npc_stats
+        ),
+      },
       notes: draft.notes ?? '',
       sort_order: nextSort,
     });
@@ -2636,6 +2654,10 @@ export class VttStore {
         shield_block: colActor.shield_block,
         move_feet: colActor.move_feet,
         vision_feet: colActor.vision_feet,
+        darkvision_feet: resolveActorDarkvisionFeet(
+          colActor.darkvision_feet,
+          colActor.npc_stats
+        ),
         light_bright_feet: colActor.light_bright_feet,
         light_dim_feet: colActor.light_dim_feet,
         light_color: colActor.light_color,
@@ -2678,6 +2700,35 @@ export class VttStore {
       this.notifications.error('Actor Update Error', err);
       return false;
     }
+
+    if (
+      patch.vision_feet !== undefined ||
+      patch.darkvision_feet !== undefined ||
+      patch.move_feet !== undefined
+    ) {
+      const tokenPatch: Partial<VttTokenModel> = {};
+      if (patch.vision_feet !== undefined) {
+        tokenPatch.vision_feet = patch.vision_feet;
+      }
+      if (patch.darkvision_feet !== undefined) {
+        tokenPatch.darkvision_feet = patch.darkvision_feet;
+      }
+      if (patch.move_feet !== undefined) {
+        tokenPatch.move_feet = patch.move_feet;
+      }
+      const linkedTokens = this.tokens().filter(
+        (t) =>
+          t.npc_stats?.__roster_actor_id === actorId ||
+          Boolean(target.character_id && t.character_id === target.character_id)
+      );
+      for (const tok of linkedTokens) {
+        await this.patchToken(tok.id, tokenPatch);
+      }
+      if (linkedTokens.length > 0) {
+        this.syncExploredFogFromObservers();
+      }
+    }
+
     return true;
   }
 
@@ -2704,6 +2755,10 @@ export class VttStore {
       shield_block: existing.shield_block,
       move_feet: existing.move_feet,
       vision_feet: existing.vision_feet,
+      darkvision_feet: resolveActorDarkvisionFeet(
+        existing.darkvision_feet,
+        existing.npc_stats
+      ),
       light_bright_feet: existing.light_bright_feet,
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,
@@ -2759,6 +2814,10 @@ export class VttStore {
       shield_block: existing.shield_block,
       move_feet: existing.move_feet,
       vision_feet: existing.vision_feet,
+      darkvision_feet: resolveActorDarkvisionFeet(
+        existing.darkvision_feet,
+        existing.npc_stats
+      ),
       light_bright_feet: existing.light_bright_feet,
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,
@@ -2899,6 +2958,10 @@ export class VttStore {
       shield_block: shieldBlock,
       move_feet: moveFeet,
       vision_feet: actor.vision_feet,
+      darkvision_feet: resolveActorDarkvisionFeet(
+        actor.darkvision_feet,
+        actor.npc_stats
+      ),
       light_bright_feet: actor.light_bright_feet,
       light_dim_feet: actor.light_dim_feet,
       light_color: actor.light_color || '#FF9B42',
@@ -2907,6 +2970,10 @@ export class VttStore {
       statuses: [],
       npc_stats: {
         ...actor.npc_stats,
+        __darkvision_feet: resolveActorDarkvisionFeet(
+          actor.darkvision_feet,
+          actor.npc_stats
+        ),
         __roster_actor_id: actor.id,
         __unsnapped: spawn.unsnappedOnGrid,
       },
@@ -2974,6 +3041,10 @@ export class VttStore {
 
     const spawn = this.findOpenSpawnLocation(preset.faction);
     const axial = offsetToAxial(spawn.col, spawn.row);
+    const resolvedDarkvision = resolveActorDarkvisionFeet(
+      preset.darkvision_feet,
+      preset.npc_stats
+    );
 
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
@@ -3000,13 +3071,17 @@ export class VttStore {
       shield_block: preset.shield_block,
       move_feet: preset.move_feet,
       vision_feet: preset.vision_feet,
+      darkvision_feet: resolvedDarkvision,
       light_bright_feet: 0,
       light_dim_feet: 0,
       light_color: '#FF9B42',
       shield_raised: false,
       is_hidden: false,
       statuses: [],
-      npc_stats: { ...preset.npc_stats },
+      npc_stats: {
+        ...preset.npc_stats,
+        __darkvision_feet: resolvedDarkvision,
+      },
     });
 
     if (res.error || !res.token) {
@@ -3062,6 +3137,7 @@ export class VttStore {
       patch.light_bright_feet !== undefined ||
       patch.light_dim_feet !== undefined ||
       patch.vision_feet !== undefined ||
+      patch.darkvision_feet !== undefined ||
       patch.is_hidden !== undefined;
     const sc = this.scenes().find((s) => s.id === existing.encounter_id);
     const prevFog =

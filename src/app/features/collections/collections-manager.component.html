@@ -618,7 +618,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-6">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
           <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Max HP</label>
           <input type="number" min="1" class="mot-input text-xs font-mono-num" [(ngModel)]="am.maxHp" />
@@ -642,6 +642,14 @@
         <div>
           <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Move (ft)</label>
           <input type="number" min="0" step="5" class="mot-input text-xs font-mono-num" [(ngModel)]="am.moveFeet" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Dim Vision (ft)</label>
+          <input type="number" min="0" step="5" class="mot-input text-xs font-mono-num" [(ngModel)]="am.visionFeet" />
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-[var(--mot-text-muted)]">Darkvision (ft)</label>
+          <input type="number" min="0" step="5" class="mot-input text-xs font-mono-num" [(ngModel)]="am.darkvisionFeet" />
         </div>
       </div>
 

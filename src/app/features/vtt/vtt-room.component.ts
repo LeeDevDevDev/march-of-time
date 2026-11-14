@@ -95,6 +95,8 @@ import { computeSceneCanvasLayout } from './engine/hex-grid.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
   DEFAULT_VTT_DARKNESS_LEVEL,
+  DEFAULT_VTT_DARKVISION_FEET,
+  DEFAULT_VTT_DIM_VISION_FEET,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
   DEFAULT_VTT_SCENE_HEIGHT_PX,
@@ -103,6 +105,7 @@ import {
   CollectionActorModel,
   VTT_ACTOR_COLOR_SWATCHES,
   VTT_NPC_PRESETS,
+  VTT_SCENE_LIGHTING_PRESETS,
   VttActorKind,
   VttDefenseChoice,
   VttDirectoryScope,
@@ -113,10 +116,14 @@ import {
   VttNpcPreset,
   VttRosterActorModel,
   VttRosterDragPayload,
+  VttSceneLightingPreset,
   VttSceneModel,
   VttTokenModel,
   VttToolMode,
   VttWallKind,
+  computeEffectiveActorSightFeet,
+  findMatchingSceneLightingPreset,
+  resolveActorDarkvisionFeet,
 } from './models/vtt.model';
 import {
   VttSpeakerMode,
@@ -158,6 +165,7 @@ export interface RosterActorModalState {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet: number;
   light_bright_feet: number;
   light_dim_feet: number;
   light_color: string;
@@ -247,6 +255,7 @@ export class VttRoomComponent {
     viewChild<ElementRef<HTMLTextAreaElement>>('chatComposerInput');
 
   readonly npcPresets = VTT_NPC_PRESETS;
+  readonly sceneLightingPresets = VTT_SCENE_LIGHTING_PRESETS;
   readonly folderSwatches = FOLDER_COLOR_SWATCHES;
   readonly mapBgSwatches = MAP_BG_COLOR_SWATCHES;
   readonly actorColorSwatches = VTT_ACTOR_COLOR_SWATCHES;
@@ -1449,7 +1458,8 @@ export class VttRoomComponent {
       armor_dr: 1,
       shield_block: 0,
       move_feet: 20,
-      vision_feet: 60,
+      vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
       light_bright_feet: 0,
       light_dim_feet: 0,
       light_color: '#FF9B42',
@@ -1490,6 +1500,10 @@ export class VttRoomComponent {
       shield_block: actor.shield_block,
       move_feet: actor.move_feet,
       vision_feet: actor.vision_feet,
+      darkvision_feet: resolveActorDarkvisionFeet(
+        actor.darkvision_feet,
+        actor.npc_stats
+      ),
       light_bright_feet: actor.light_bright_feet,
       light_dim_feet: actor.light_dim_feet,
       light_color: actor.light_color || '#FF9B42',
@@ -1548,6 +1562,17 @@ export class VttRoomComponent {
       this.expandFolder(modal.folder_id);
     }
 
+    const hasVisionInput =
+      modal.vision_feet !== null &&
+      modal.vision_feet !== undefined &&
+      String(modal.vision_feet).trim() !== '' &&
+      Number.isFinite(Number(modal.vision_feet));
+    const hasDarkvisionInput =
+      modal.darkvision_feet !== null &&
+      modal.darkvision_feet !== undefined &&
+      String(modal.darkvision_feet).trim() !== '' &&
+      Number.isFinite(Number(modal.darkvision_feet));
+
     const draft: ActorTemplateDraft = {
       folder_id: this.vttStore.isGm() ? modal.folder_id || null : null,
       source_character_id: null,
@@ -1564,7 +1589,12 @@ export class VttRoomComponent {
       armor_dr: Math.max(0, Math.round(Number(modal.armor_dr) ?? 0)),
       shield_block: Math.max(0, Math.round(Number(modal.shield_block) ?? 0)),
       move_feet: Math.max(0, Math.round(Number(modal.move_feet) ?? 20)),
-      vision_feet: Math.max(0, Math.round(Number(modal.vision_feet) ?? 60)),
+      vision_feet: hasVisionInput
+        ? Math.max(0, Math.round(Number(modal.vision_feet)))
+        : DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: hasDarkvisionInput
+        ? Math.max(0, Math.round(Number(modal.darkvision_feet)))
+        : DEFAULT_VTT_DARKVISION_FEET,
       light_bright_feet: Math.max(
         0,
         Math.round(Number(modal.light_bright_feet) ?? 0)
@@ -1612,12 +1642,14 @@ export class VttRoomComponent {
         shield_block: draft.shield_block,
         move_feet: draft.move_feet,
         vision_feet: draft.vision_feet,
+        darkvision_feet: draft.darkvision_feet,
         light_bright_feet: draft.light_bright_feet,
         light_dim_feet: draft.light_dim_feet,
         light_color: draft.light_color,
         npc_stats: {
           ...(existing?.npc_stats ?? {}),
           ...draft.npc_stats,
+          __darkvision_feet: draft.darkvision_feet,
         },
         notes: draft.notes,
       });
@@ -2049,6 +2081,79 @@ export class VttRoomComponent {
     });
   }
 
+  applyEditMapLightingPreset(preset: VttSceneLightingPreset): void {
+    const cur = this.editingMapDraft();
+    if (!cur) return;
+    this.editingMapDraft.set({
+      ...cur,
+      global_illumination: preset.global_illumination,
+      darkness_level: preset.darkness_level,
+    });
+  }
+
+  isEditMapLightingPresetActive(
+    draft: EditingMapDraft,
+    preset: VttSceneLightingPreset
+  ): boolean {
+    return (
+      findMatchingSceneLightingPreset(
+        draft.global_illumination,
+        draft.darkness_level
+      ) === preset.id
+    );
+  }
+
+  getEditMapAmbientPercent(draft: EditingMapDraft): number {
+    if (draft.global_illumination) return 100;
+    return computeEffectiveActorSightFeet(
+      DEFAULT_VTT_DIM_VISION_FEET,
+      DEFAULT_VTT_DARKVISION_FEET,
+      draft.darkness_level
+    ).ambientPercent;
+  }
+
+  getEditMapStandardSightPreview(draft: EditingMapDraft): string {
+    if (draft.global_illumination) {
+      return 'Unlimited unobstructed Line of Sight (Bright Daylight)';
+    }
+    const sight = computeEffectiveActorSightFeet(
+      DEFAULT_VTT_DIM_VISION_FEET,
+      DEFAULT_VTT_DARKVISION_FEET,
+      draft.darkness_level
+    );
+    if (sight.ambientPercent === 0) {
+      return `${sight.effectiveSightFeet} ft (Pitch Black — relies on ${DEFAULT_VTT_DARKVISION_FEET} ft Darkvision + Light Sources)`;
+    }
+    if (sight.effectiveSightFeet <= DEFAULT_VTT_DARKVISION_FEET) {
+      return `${sight.effectiveSightFeet} ft (${sight.ambientPercent}% Ambient · floored by ${DEFAULT_VTT_DARKVISION_FEET} ft Darkvision)`;
+    }
+    return `${sight.effectiveSightFeet} ft (${sight.ambientPercent}% of ${DEFAULT_VTT_DIM_VISION_FEET} ft Dim Vision · ${DEFAULT_VTT_DARKVISION_FEET} ft Darkvision floor)`;
+  }
+
+  getTokenEffectiveSightLabel(tok: VttTokenModel): string {
+    const sc = this.vttStore.activeScene();
+    const dimFeet = Math.max(0, tok.vision_feet ?? DEFAULT_VTT_DIM_VISION_FEET);
+    const darkFeet = resolveActorDarkvisionFeet(
+      tok.darkvision_feet,
+      tok.npc_stats
+    );
+    if (!sc || sc.global_illumination) {
+      return `Daylight LoS (Dim ${dimFeet}ft · Dark ${darkFeet}ft)`;
+    }
+    const carriedFeet = Math.max(
+      0,
+      tok.light_dim_feet ?? 0,
+      tok.light_bright_feet ?? 0
+    );
+    const sight = computeEffectiveActorSightFeet(
+      dimFeet,
+      darkFeet,
+      sc.darkness_level
+    );
+    const totalSight = Math.max(sight.effectiveSightFeet, carriedFeet);
+    return `${totalSight}ft (Dim ${dimFeet}ft · Dark ${darkFeet}ft)`;
+  }
+
   matchEditMapToImage(): void {
     const cur = this.editingMapDraft();
     if (!cur) return;
@@ -2199,7 +2304,8 @@ export class VttRoomComponent {
       armor_dr: Math.max(0, Number(this.customNpcDr) || 0),
       shield_block: Math.max(0, Number(this.customNpcBlock) || 0),
       move_feet: Math.max(5, Number(this.customNpcMoveFeet) || 20),
-      vision_feet: 60,
+      vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
       npc_stats: {
         weapon_name: 'Signature Strike',
         attack_ap: 1,

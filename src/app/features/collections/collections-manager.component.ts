@@ -26,11 +26,14 @@ import {
 } from '../vtt/engine/directory-tree.engine';
 import {
   CollectionActorModel,
+  DEFAULT_VTT_DARKVISION_FEET,
+  DEFAULT_VTT_DIM_VISION_FEET,
   VTT_ACTOR_COLOR_SWATCHES,
   VTT_NPC_PRESETS,
   VttActorKind,
   VttFaction,
   VttNpcPreset,
+  resolveActorDarkvisionFeet,
 } from '../vtt/models/vtt.model';
 import {
   ActorTemplateDraft,
@@ -64,6 +67,7 @@ export interface CollectionActorFormState {
   shieldBlock: number;
   moveFeet: number;
   visionFeet: number;
+  darkvisionFeet: number;
   lightBrightFeet: number;
   lightDimFeet: number;
   lightColor: string;
@@ -335,7 +339,8 @@ export class CollectionsManagerComponent implements OnInit {
       armorDr: 1,
       shieldBlock: 0,
       moveFeet: 20,
-      visionFeet: 60,
+      visionFeet: DEFAULT_VTT_DIM_VISION_FEET,
+      darkvisionFeet: DEFAULT_VTT_DARKVISION_FEET,
       lightBrightFeet: 0,
       lightDimFeet: 0,
       lightColor: '#F59E0B',
@@ -394,6 +399,10 @@ export class CollectionsManagerComponent implements OnInit {
       shieldBlock: actor.shield_block,
       moveFeet: actor.move_feet,
       visionFeet: actor.vision_feet,
+      darkvisionFeet: resolveActorDarkvisionFeet(
+        actor.darkvision_feet,
+        actor.npc_stats
+      ),
       lightBrightFeet: actor.light_bright_feet,
       lightDimFeet: actor.light_dim_feet,
       lightColor: actor.light_color || '#F59E0B',
@@ -418,6 +427,17 @@ export class CollectionsManagerComponent implements OnInit {
     const form = this.actorModal();
     if (!form) return;
 
+    const hasVisionInput =
+      form.visionFeet !== null &&
+      form.visionFeet !== undefined &&
+      String(form.visionFeet).trim() !== '' &&
+      Number.isFinite(Number(form.visionFeet));
+    const hasDarkvisionInput =
+      form.darkvisionFeet !== null &&
+      form.darkvisionFeet !== undefined &&
+      String(form.darkvisionFeet).trim() !== '' &&
+      Number.isFinite(Number(form.darkvisionFeet));
+
     const draft: ActorTemplateDraft = {
       folder_id: form.folderId || null,
       source_character_id: form.sourceCharacterId,
@@ -434,7 +454,12 @@ export class CollectionsManagerComponent implements OnInit {
       armor_dr: Math.max(0, Number(form.armorDr) || 0),
       shield_block: Math.max(0, Number(form.shieldBlock) || 0),
       move_feet: Math.max(0, Number(form.moveFeet) || 20),
-      vision_feet: Math.max(0, Number(form.visionFeet) || 60),
+      vision_feet: hasVisionInput
+        ? Math.max(0, Math.round(Number(form.visionFeet)))
+        : DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: hasDarkvisionInput
+        ? Math.max(0, Math.round(Number(form.darkvisionFeet)))
+        : DEFAULT_VTT_DARKVISION_FEET,
       light_bright_feet: Math.max(0, Number(form.lightBrightFeet) || 0),
       light_dim_feet: Math.max(0, Number(form.lightDimFeet) || 0),
       light_color: form.lightColor || '#F59E0B',

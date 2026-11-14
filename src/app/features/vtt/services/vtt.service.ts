@@ -10,6 +10,8 @@ import {
 import { offsetToAxial } from '../engine/hex-grid.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
+  DEFAULT_VTT_DARKNESS_LEVEL,
+  DEFAULT_VTT_DIM_VISION_FEET,
   DEFAULT_VTT_GRID_HEIGHT,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
@@ -32,6 +34,7 @@ import {
   VttSceneModel,
   VttTokenModel,
   VttWallSegment,
+  resolveActorDarkvisionFeet,
 } from '../models/vtt.model';
 
 export interface VttPingBroadcast {
@@ -162,7 +165,9 @@ function normalizeSceneRow(row: Record<string, unknown>): VttSceneModel {
     fog_enabled:
       typeof row['fog_enabled'] === 'boolean' ? row['fog_enabled'] : true,
     global_illumination: Boolean(row['global_illumination'] ?? false),
-    darkness_level: Number(row['darkness_level'] ?? 0.85),
+    darkness_level: Number(
+      row['darkness_level'] ?? DEFAULT_VTT_DARKNESS_LEVEL
+    ),
     walls: Array.isArray(row['walls'])
       ? (row['walls'] as VttWallSegment[])
       : [],
@@ -226,7 +231,16 @@ function normalizeTokenRow(row: Record<string, unknown>): VttTokenModel {
     armor_dr: Number(row['armor_dr'] ?? 0),
     shield_block: Number(row['shield_block'] ?? 0),
     move_feet: Math.max(5, Number(row['move_feet'] ?? 20)),
-    vision_feet: Math.max(0, Number(row['vision_feet'] ?? 60)),
+    vision_feet: Math.max(
+      0,
+      Number(row['vision_feet'] ?? DEFAULT_VTT_DIM_VISION_FEET)
+    ),
+    darkvision_feet: resolveActorDarkvisionFeet(
+      row['darkvision_feet'] !== null && row['darkvision_feet'] !== undefined
+        ? Number(row['darkvision_feet'])
+        : undefined,
+      npcStats
+    ),
     light_bright_feet: Math.max(0, Number(row['light_bright_feet'] ?? 0)),
     light_dim_feet: Math.max(0, Number(row['light_dim_feet'] ?? 0)),
     light_color: String(row['light_color'] ?? '#FF9B42'),
@@ -391,7 +405,16 @@ function normalizeRosterActorRow(
     armor_dr: Math.max(0, Number(row['armor_dr'] ?? 0)),
     shield_block: Math.max(0, Number(row['shield_block'] ?? 0)),
     move_feet: Math.max(0, Number(row['move_feet'] ?? 20)),
-    vision_feet: Math.max(0, Number(row['vision_feet'] ?? 60)),
+    vision_feet: Math.max(
+      0,
+      Number(row['vision_feet'] ?? DEFAULT_VTT_DIM_VISION_FEET)
+    ),
+    darkvision_feet: resolveActorDarkvisionFeet(
+      row['darkvision_feet'] !== null && row['darkvision_feet'] !== undefined
+        ? Number(row['darkvision_feet'])
+        : undefined,
+      npcStats
+    ),
     light_bright_feet: Math.max(0, Number(row['light_bright_feet'] ?? 0)),
     light_dim_feet: Math.max(0, Number(row['light_dim_feet'] ?? 0)),
     light_color: row['light_color'] ? String(row['light_color']) : '#F59E0B',
@@ -748,44 +771,69 @@ export class VttService {
       input.folder_id && !input.folder_id.startsWith('local-folder-')
         ? input.folder_id
         : null;
+    const resolvedDarkvision = resolveActorDarkvisionFeet(
+      input.darkvision_feet,
+      input.npc_stats
+    );
+    const enrichedNpcStats: VttNpcStats = {
+      ...(input.npc_stats ?? {}),
+      __darkvision_feet: resolvedDarkvision,
+    };
 
-    const { data, error } = await this.supabase
+    const insertPayload: Record<string, unknown> = {
+      campaign_id: input.campaign_id,
+      folder_id: safeFolderId,
+      character_id: input.character_id,
+      collection_actor_id: input.collection_actor_id,
+      owner_id: input.owner_id,
+      actor_kind: input.actor_kind,
+      is_unique: input.is_unique,
+      name: input.name,
+      faction: input.faction,
+      size: input.size,
+      icon: input.icon,
+      color: input.color,
+      max_hp: input.max_hp,
+      max_sp: input.max_sp,
+      max_ap: input.max_ap,
+      armor_dr: input.armor_dr,
+      shield_block: input.shield_block,
+      move_feet: input.move_feet,
+      vision_feet: input.vision_feet,
+      darkvision_feet: resolvedDarkvision,
+      light_bright_feet: input.light_bright_feet,
+      light_dim_feet: input.light_dim_feet,
+      light_color: input.light_color,
+      npc_stats: enrichedNpcStats,
+      notes: input.notes,
+      sort_order: input.sort_order,
+    };
+
+    let { data, error } = await this.supabase
       .from('vtt_roster_actors')
-      .insert({
-        campaign_id: input.campaign_id,
-        folder_id: safeFolderId,
-        character_id: input.character_id,
-        collection_actor_id: input.collection_actor_id,
-        owner_id: input.owner_id,
-        actor_kind: input.actor_kind,
-        is_unique: input.is_unique,
-        name: input.name,
-        faction: input.faction,
-        size: input.size,
-        icon: input.icon,
-        color: input.color,
-        max_hp: input.max_hp,
-        max_sp: input.max_sp,
-        max_ap: input.max_ap,
-        armor_dr: input.armor_dr,
-        shield_block: input.shield_block,
-        move_feet: input.move_feet,
-        vision_feet: input.vision_feet,
-        light_bright_feet: input.light_bright_feet,
-        light_dim_feet: input.light_dim_feet,
-        light_color: input.light_color,
-        npc_stats: input.npc_stats,
-        notes: input.notes,
-        sort_order: input.sort_order,
-      })
+      .insert(insertPayload)
       .select('*')
       .single();
+
+    if (error && isMissingColumnOrTableError(error.code, error.message)) {
+      const legacyPayload: Record<string, unknown> = { ...insertPayload };
+      delete legacyPayload['darkvision_feet'];
+      const retry = await this.supabase
+        .from('vtt_roster_actors')
+        .insert(legacyPayload)
+        .select('*')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       if (isMissingColumnOrTableError(error.code, error.message)) {
         const now = new Date().toISOString();
         const localActor: VttRosterActorModel = {
           ...input,
+          darkvision_feet: resolvedDarkvision,
+          npc_stats: enrichedNpcStats,
           id: `local-roster-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           created_at: now,
           updated_at: now,
@@ -829,11 +877,31 @@ export class VttService {
     ) {
       payload['folder_id'] = null;
     }
+    if (patch.darkvision_feet !== undefined && patch.npc_stats) {
+      payload['npc_stats'] = {
+        ...patch.npc_stats,
+        __darkvision_feet: patch.darkvision_feet,
+      };
+    }
 
-    const { error } = await this.supabase
+    let { error } = await this.supabase
       .from('vtt_roster_actors')
       .update(payload)
       .eq('id', actorId);
+
+    if (
+      error &&
+      payload['darkvision_feet'] !== undefined &&
+      isMissingColumnOrTableError(error.code, error.message)
+    ) {
+      const retryPayload: Record<string, unknown> = { ...payload };
+      delete retryPayload['darkvision_feet'];
+      const retry = await this.supabase
+        .from('vtt_roster_actors')
+        .update(retryPayload)
+        .eq('id', actorId);
+      error = retry.error;
+    }
 
     const existing = readLocalRosterActors(campaignId);
     writeLocalRosterActors(
@@ -1010,7 +1078,7 @@ export class VttService {
       grid_opacity: input.grid_opacity ?? DEFAULT_VTT_GRID_OPACITY,
       fog_enabled: input.fog_enabled ?? true,
       global_illumination: input.global_illumination ?? false,
-      darkness_level: input.darkness_level ?? 0.85,
+      darkness_level: input.darkness_level ?? DEFAULT_VTT_DARKNESS_LEVEL,
       walls: input.walls ?? [],
       lights: input.lights ?? [],
       explored_fog: exploredFogWithMeta,
@@ -1319,14 +1387,20 @@ export class VttService {
   async insertToken(
     input: Omit<VttTokenModel, 'id'> & { id?: string }
   ): Promise<{ token: VttTokenModel | null; error: string | null }> {
+    const resolvedDarkvision = resolveActorDarkvisionFeet(
+      input.darkvision_feet,
+      input.npc_stats
+    );
     const npcStatsWithWorld: VttNpcStats = {
       ...(input.npc_stats ?? {}),
       __world_x: input.world_x ?? null,
       __world_y: input.world_y ?? null,
+      __darkvision_feet: resolvedDarkvision,
     };
 
     const fullPayload: Record<string, unknown> = {
       ...input,
+      darkvision_feet: resolvedDarkvision,
       npc_stats: npcStatsWithWorld,
     };
     if (!input.id) {
@@ -1350,6 +1424,7 @@ export class VttService {
       const tier2Payload: Record<string, unknown> = { ...fullPayload };
       delete tier2Payload['world_x'];
       delete tier2Payload['world_y'];
+      delete tier2Payload['darkvision_feet'];
 
       const tier2 = await this.supabase
         .from('vtt_tokens')
@@ -1404,6 +1479,7 @@ export class VttService {
             color: input.color,
             move_feet: input.move_feet,
             vision_feet: input.vision_feet,
+            darkvision_feet: resolvedDarkvision,
             npc_stats: npcStatsWithWorld,
           },
           error: null,
@@ -1432,11 +1508,13 @@ export class VttService {
     delete payload['id'];
 
     if (
-      (patch.world_x !== undefined || patch.world_y !== undefined) &&
+      (patch.world_x !== undefined ||
+        patch.world_y !== undefined ||
+        patch.darkvision_feet !== undefined) &&
       existingToken
     ) {
       const baseStats = patch.npc_stats ?? existingToken.npc_stats ?? {};
-      payload['npc_stats'] = {
+      const nextStats: VttNpcStats = {
         ...baseStats,
         __world_x:
           patch.world_x !== undefined
@@ -1447,6 +1525,12 @@ export class VttService {
             ? patch.world_y
             : existingToken.world_y ?? null,
       };
+      if (patch.darkvision_feet !== undefined) {
+        nextStats.__darkvision_feet = patch.darkvision_feet;
+      } else if (existingToken.darkvision_feet !== undefined) {
+        nextStats.__darkvision_feet = existingToken.darkvision_feet;
+      }
+      payload['npc_stats'] = nextStats;
     }
 
     if (!legacyFallback) {
@@ -1462,6 +1546,7 @@ export class VttService {
       const tier2Payload: Record<string, unknown> = { ...payload };
       delete tier2Payload['world_x'];
       delete tier2Payload['world_y'];
+      delete tier2Payload['darkvision_feet'];
 
       if (Object.keys(tier2Payload).length > 0) {
         const tier2 = await this.supabase

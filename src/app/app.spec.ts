@@ -143,6 +143,8 @@ import {
 } from './features/vtt/engine/visibility.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
+  DEFAULT_VTT_DARKVISION_FEET,
+  DEFAULT_VTT_DIM_VISION_FEET,
   DEFAULT_VTT_GRID_HEIGHT,
   DEFAULT_VTT_GRID_OPACITY,
   DEFAULT_VTT_GRID_SIZE_PX,
@@ -150,6 +152,7 @@ import {
   DEFAULT_VTT_SCENE_HEIGHT_PX,
   DEFAULT_VTT_SCENE_PADDING,
   DEFAULT_VTT_SCENE_WIDTH_PX,
+  VTT_SCENE_LIGHTING_PRESETS,
   VttFolderModel,
   VttLogEntry,
   VttPendingClash,
@@ -157,6 +160,9 @@ import {
   VttSceneModel,
   VttTokenModel,
   VttWallSegment,
+  computeEffectiveActorSightFeet,
+  findMatchingSceneLightingPreset,
+  resolveActorDarkvisionFeet,
 } from './features/vtt/models/vtt.model';
 import { VttCanvasComponent } from './features/vtt/components/vtt-canvas/vtt-canvas.component';
 import { VttService } from './features/vtt/services/vtt.service';
@@ -5086,5 +5092,442 @@ describe('App', () => {
     expect(shorthandOoc.cleared).toBe(true);
     expect(insertedLogs[7].sender_name).toBe('Lyra');
     expect(comp.isOocLog(insertedLogs[7])).toBe(true);
+  });
+
+  it('scales Dim Vision with scene ambient lighting while preserving Darkvision floor and Bright Light burn-through', () => {
+    expect(DEFAULT_VTT_DIM_VISION_FEET).toBe(60);
+    expect(DEFAULT_VTT_DARKVISION_FEET).toBe(10);
+
+    const geom: HexGridGeometry = {
+      gridWidth: 30,
+      gridHeight: 20,
+      gridSizePx: 50,
+      offsetX: 0,
+      offsetY: 0,
+    };
+
+    const observer: VttTokenModel = {
+      id: 'obs-human',
+      encounter_id: 'sc-vision',
+      character_id: null,
+      owner_id: 'player-1',
+      name: 'Watchman',
+      faction: 'ally',
+      x: 2,
+      y: 5,
+      q: 0,
+      r: 0,
+      world_x: null,
+      world_y: null,
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      current_hp: 12,
+      max_hp: 12,
+      current_sp: 6,
+      max_sp: 6,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 1,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {},
+    };
+
+    const pt5ft = hexToWorldCenter({ col: 3, row: 5 }, geom);
+    const pt10ft = hexToWorldCenter({ col: 4, row: 5 }, geom);
+    const pt15ft = hexToWorldCenter({ col: 5, row: 5 }, geom);
+    const pt20ft = hexToWorldCenter({ col: 6, row: 5 }, geom);
+    const pt30ft = hexToWorldCenter({ col: 8, row: 5 }, geom);
+    const pt35ft = hexToWorldCenter({ col: 9, row: 5 }, geom);
+    const pt60ft = hexToWorldCenter({ col: 14, row: 5 }, geom);
+    const pt80ft = hexToWorldCenter({ col: 18, row: 5 }, geom);
+
+    const daylightVisions = buildObserverVisions(
+      [observer],
+      [],
+      geom,
+      true,
+      2000,
+      'square',
+      0
+    );
+    expect(
+      isWorldPointVisibleToObservers(pt80ft, daylightVisions, [], [], true)
+    ).toBe(true);
+
+    const clearNightVisions = buildObserverVisions(
+      [observer],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      0
+    );
+    expect(clearNightVisions[0].effectiveSightFeet).toBe(60);
+    expect(
+      isWorldPointVisibleToObservers(pt60ft, clearNightVisions, [], [], false)
+    ).toBe(true);
+    expect(
+      isWorldPointVisibleToObservers(pt80ft, clearNightVisions, [], [], false)
+    ).toBe(false);
+
+    const distantCampfire = buildLightPolygons(
+      [
+        {
+          id: 'campfire-1',
+          x: pt80ft.x,
+          y: pt80ft.y,
+          bright_feet: 15,
+          dim_feet: 30,
+          color: '#FF9B42',
+        },
+      ],
+      [observer],
+      [],
+      geom,
+      'square'
+    );
+    expect(
+      isWorldPointVisibleToObservers(
+        pt80ft,
+        clearNightVisions,
+        distantCampfire,
+        [],
+        false
+      )
+    ).toBe(true);
+
+    const woodsDuskVisions = buildObserverVisions(
+      [observer],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      0.5
+    );
+    expect(woodsDuskVisions[0].effectiveSightFeet).toBe(30);
+    expect(
+      isWorldPointVisibleToObservers(pt30ft, woodsDuskVisions, [], [], false)
+    ).toBe(true);
+    expect(
+      isWorldPointVisibleToObservers(pt35ft, woodsDuskVisions, [], [], false)
+    ).toBe(false);
+
+    const stormVisions = buildObserverVisions(
+      [observer],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      0.75
+    );
+    expect(stormVisions[0].effectiveSightFeet).toBe(15);
+    expect(
+      isWorldPointVisibleToObservers(pt15ft, stormVisions, [], [], false)
+    ).toBe(true);
+    expect(
+      isWorldPointVisibleToObservers(pt20ft, stormVisions, [], [], false)
+    ).toBe(false);
+
+    const pitchBlackVisions = buildObserverVisions(
+      [observer],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      1
+    );
+    expect(pitchBlackVisions[0].effectiveSightFeet).toBe(10);
+    expect(
+      isWorldPointVisibleToObservers(pt10ft, pitchBlackVisions, [], [], false)
+    ).toBe(true);
+    expect(
+      isWorldPointVisibleToObservers(pt15ft, pitchBlackVisions, [], [], false)
+    ).toBe(false);
+
+    const blindObserver: VttTokenModel = {
+      ...observer,
+      darkvision_feet: 0,
+    };
+    const blindPitchVisions = buildObserverVisions(
+      [blindObserver],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      1
+    );
+    expect(blindPitchVisions[0].effectiveSightFeet).toBe(0);
+    expect(
+      isWorldPointVisibleToObservers(pt5ft, blindPitchVisions, [], [], false)
+    ).toBe(false);
+
+    const torchBearer: VttTokenModel = {
+      ...blindObserver,
+      light_bright_feet: 20,
+      light_dim_feet: 40,
+    };
+    const torchVisions = buildObserverVisions(
+      [torchBearer],
+      [],
+      geom,
+      false,
+      2000,
+      'square',
+      1
+    );
+    expect(torchVisions[0].effectiveSightFeet).toBe(40);
+    expect(
+      isWorldPointVisibleToObservers(pt35ft, torchVisions, [], [], false)
+    ).toBe(true);
+  });
+
+  it('applies Environment Lighting presets in Scene Configuration and syncs Actor Dim Vision and Darkvision onto deployed tokens', async () => {
+    const updatedActors: Partial<VttRosterActorModel>[] = [];
+    const updatedTokens: { id: string; patch: Partial<VttTokenModel> }[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({ id: 'gm-light-1', email: 'gm@example.com' }),
+            displayName: () => 'Warden',
+            handle: () => 'warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            updateRosterActor: async (
+              _cid: string,
+              _aid: string,
+              patch: Partial<VttRosterActorModel>
+            ) => {
+              updatedActors.push(patch);
+              return null;
+            },
+            updateToken: async (
+              tokenId: string,
+              patch: Partial<VttTokenModel>
+            ) => {
+              updatedTokens.push({ id: tokenId, patch });
+              return null;
+            },
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-light-1',
+      name: 'Duskwood Watch',
+      cover_image_url: null,
+      gm_id: 'gm-light-1',
+      invite_code: 'DUSK01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const scene: VttSceneModel = {
+      id: 'scene-light-1',
+      campaign_id: 'camp-light-1',
+      gm_id: 'gm-light-1',
+      folder_id: null,
+      sort_order: 0,
+      name: 'Whispering Pines',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: DEFAULT_VTT_GRID_WIDTH,
+      grid_height: DEFAULT_VTT_GRID_HEIGHT,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: true,
+      fog_enabled: true,
+      global_illumination: false,
+      darkness_level: 0.5,
+      walls: [],
+      lights: [],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+      created_at: new Date().toISOString(),
+    };
+    vttStore.scenes.set([scene]);
+    vttStore.activeSceneId.set('scene-light-1');
+
+    const scoutActor: VttRosterActorModel = {
+      id: 'actor-scout-1',
+      campaign_id: 'camp-light-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: 'gm-light-1',
+      actor_kind: 'character',
+      is_unique: true,
+      name: 'Pine Ranger',
+      faction: 'ally',
+      size: 1,
+      icon: 'longbow',
+      color: '#38B29A',
+      max_hp: 14,
+      max_sp: 8,
+      max_ap: 4,
+      armor_dr: 1,
+      shield_block: 0,
+      move_feet: 25,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: { __darkvision_feet: 10 },
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vttStore.rosterActors.set([scoutActor]);
+
+    const scoutToken: VttTokenModel = {
+      id: 'tok-scout-1',
+      encounter_id: 'scene-light-1',
+      character_id: null,
+      owner_id: 'gm-light-1',
+      name: 'Pine Ranger',
+      faction: 'ally',
+      x: 4,
+      y: 4,
+      q: 0,
+      r: 0,
+      world_x: null,
+      world_y: null,
+      size: 1,
+      icon: 'longbow',
+      color: '#38B29A',
+      current_hp: 14,
+      max_hp: 14,
+      current_sp: 8,
+      max_sp: 8,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 1,
+      shield_block: 0,
+      move_feet: 25,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: { __roster_actor_id: 'actor-scout-1', __darkvision_feet: 10 },
+    };
+    vttStore.tokens.set([scoutToken]);
+    vttStore.selectedTokenId.set('tok-scout-1');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+
+    expect(comp.getTokenEffectiveSightLabel(vttStore.tokens()[0])).toBe(
+      '30ft (Dim 60ft · Dark 10ft)'
+    );
+
+    comp.openEditMapModal('scene-light-1', 'visibility');
+    fixture.detectChanges();
+
+    expect(
+      findMatchingSceneLightingPreset(
+        comp.editingMapDraft()!.global_illumination,
+        comp.editingMapDraft()!.darkness_level
+      )
+    ).toBe('woods-dusk');
+    expect(comp.getEditMapAmbientPercent(comp.editingMapDraft()!)).toBe(50);
+    expect(comp.getEditMapStandardSightPreview(comp.editingMapDraft()!)).toContain(
+      '30 ft'
+    );
+
+    const pitchPreset = VTT_SCENE_LIGHTING_PRESETS.find(
+      (p) => p.id === 'pitch-black'
+    )!;
+    comp.applyEditMapLightingPreset(pitchPreset);
+    expect(comp.editingMapDraft()!.global_illumination).toBe(false);
+    expect(comp.editingMapDraft()!.darkness_level).toBe(1);
+    expect(comp.getEditMapAmbientPercent(comp.editingMapDraft()!)).toBe(0);
+    expect(comp.getEditMapStandardSightPreview(comp.editingMapDraft()!)).toContain(
+      '10 ft'
+    );
+
+    const daylightPreset = VTT_SCENE_LIGHTING_PRESETS.find(
+      (p) => p.id === 'daylight'
+    )!;
+    comp.applyEditMapLightingPreset(daylightPreset);
+    expect(comp.editingMapDraft()!.global_illumination).toBe(true);
+    expect(comp.editingMapDraft()!.darkness_level).toBe(0);
+    expect(comp.getEditMapStandardSightPreview(comp.editingMapDraft()!)).toContain(
+      'Unlimited'
+    );
+
+    comp.openEditRosterActorModal('actor-scout-1');
+    expect(comp.rosterActorModal()?.vision_feet).toBe(60);
+    expect(comp.rosterActorModal()?.darkvision_feet).toBe(10);
+
+    comp.updateRosterActorModalField('vision_feet', 90);
+    comp.updateRosterActorModalField('darkvision_feet', 25);
+    await comp.submitRosterActorModal();
+
+    expect(updatedActors[0].vision_feet).toBe(90);
+    expect(updatedActors[0].darkvision_feet).toBe(25);
+    expect(updatedTokens[0].patch.vision_feet).toBe(90);
+    expect(updatedTokens[0].patch.darkvision_feet).toBe(25);
+    expect(vttStore.tokens()[0].vision_feet).toBe(90);
+    expect(
+      resolveActorDarkvisionFeet(
+        vttStore.tokens()[0].darkvision_feet,
+        vttStore.tokens()[0].npc_stats
+      )
+    ).toBe(25);
+    expect(
+      computeEffectiveActorSightFeet(90, 25, 0.5).effectiveSightFeet
+    ).toBe(45);
+    expect(comp.getTokenEffectiveSightLabel(vttStore.tokens()[0])).toBe(
+      '45ft (Dim 90ft · Dark 25ft)'
+    );
   });
 });

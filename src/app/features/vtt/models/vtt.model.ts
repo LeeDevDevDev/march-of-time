@@ -17,7 +17,136 @@ export const DEFAULT_VTT_SCENE_HEIGHT_PX = 1100;
 export const DEFAULT_VTT_SCENE_PADDING = 0.2;
 export const DEFAULT_VTT_GRID_OPACITY = 0.2;
 export const DEFAULT_VTT_BG_COLOR = '#0E1917';
-export const DEFAULT_VTT_DARKNESS_LEVEL = 0.85;
+export const DEFAULT_VTT_DARKNESS_LEVEL = 0;
+export const DEFAULT_VTT_DIM_VISION_FEET = 60;
+export const DEFAULT_VTT_DARKVISION_FEET = 10;
+
+export type VttSceneLightingPresetId =
+  | 'daylight'
+  | 'clear-night'
+  | 'woods-dusk'
+  | 'heavy-storm'
+  | 'pitch-black';
+
+export interface VttSceneLightingPreset {
+  id: VttSceneLightingPresetId;
+  label: string;
+  subtitle: string;
+  global_illumination: boolean;
+  darkness_level: number;
+  ambient_percent: number;
+}
+
+export const VTT_SCENE_LIGHTING_PRESETS: VttSceneLightingPreset[] = [
+  {
+    id: 'daylight',
+    label: 'Daylight',
+    subtitle: 'Bright · Full LoS',
+    global_illumination: true,
+    darkness_level: 0,
+    ambient_percent: 100,
+  },
+  {
+    id: 'clear-night',
+    label: 'Clear Night',
+    subtitle: '100% Ambient',
+    global_illumination: false,
+    darkness_level: 0,
+    ambient_percent: 100,
+  },
+  {
+    id: 'woods-dusk',
+    label: 'Woods / Dusk',
+    subtitle: '50% Ambient',
+    global_illumination: false,
+    darkness_level: 0.5,
+    ambient_percent: 50,
+  },
+  {
+    id: 'heavy-storm',
+    label: 'Deep Woods / Storm',
+    subtitle: '25% Ambient',
+    global_illumination: false,
+    darkness_level: 0.75,
+    ambient_percent: 25,
+  },
+  {
+    id: 'pitch-black',
+    label: 'Pitch Black',
+    subtitle: '0% Ambient · Cave',
+    global_illumination: false,
+    darkness_level: 1,
+    ambient_percent: 0,
+  },
+];
+
+export function resolveActorDarkvisionFeet(
+  darkvisionFeet: number | null | undefined,
+  npcStats?: VttNpcStats | null
+): number {
+  if (typeof darkvisionFeet === 'number' && Number.isFinite(darkvisionFeet)) {
+    return Math.max(0, Math.round(darkvisionFeet));
+  }
+  if (
+    npcStats &&
+    typeof npcStats.__darkvision_feet === 'number' &&
+    Number.isFinite(npcStats.__darkvision_feet)
+  ) {
+    return Math.max(0, Math.round(npcStats.__darkvision_feet));
+  }
+  return DEFAULT_VTT_DARKVISION_FEET;
+}
+
+export function computeEffectiveActorSightFeet(
+  dimVisionFeet: number,
+  darkvisionFeet: number,
+  darknessLevel = 0
+): {
+  ambientFactor: number;
+  ambientPercent: number;
+  scaledDimFeet: number;
+  darkvisionFeet: number;
+  effectiveSightFeet: number;
+} {
+  const clampedDarkness = Number.isFinite(darknessLevel)
+    ? Math.max(0, Math.min(1, darknessLevel))
+    : 0;
+  const ambientFactor = Math.max(0, Math.min(1, 1 - clampedDarkness));
+  const ambientPercent = Math.round(ambientFactor * 100);
+  const cleanDim = Math.max(0, Number.isFinite(dimVisionFeet) ? dimVisionFeet : 0);
+  const cleanDark = Math.max(
+    0,
+    Number.isFinite(darkvisionFeet) ? darkvisionFeet : 0
+  );
+  const scaledDimFeet = Math.round(cleanDim * ambientFactor * 100) / 100;
+  const effectiveSightFeet = Math.max(cleanDark, scaledDimFeet);
+  return {
+    ambientFactor,
+    ambientPercent,
+    scaledDimFeet,
+    darkvisionFeet: cleanDark,
+    effectiveSightFeet,
+  };
+}
+
+export function findMatchingSceneLightingPreset(
+  globalIllumination: boolean,
+  darknessLevel: number
+): VttSceneLightingPresetId | null {
+  if (globalIllumination) {
+    return 'daylight';
+  }
+  const clamped = Number.isFinite(darknessLevel)
+    ? Math.max(0, Math.min(1, darknessLevel))
+    : 0;
+  for (const preset of VTT_SCENE_LIGHTING_PRESETS) {
+    if (preset.global_illumination) continue;
+    if (Math.abs(preset.darkness_level - clamped) < 0.015) {
+      return preset.id;
+    }
+  }
+  return null;
+}
 
 export interface VttFolderModel {
   id: string;
@@ -114,6 +243,7 @@ export interface VttNpcStats {
   __world_y?: number | null;
   __unsnapped?: boolean;
   __roster_actor_id?: string | null;
+  __darkvision_feet?: number;
 }
 
 export type VttDefenseChoice = 'parry' | 'dodge' | 'take_hit';
@@ -236,6 +366,7 @@ export interface VttTokenModel {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet?: number;
   light_bright_feet: number;
   light_dim_feet: number;
   light_color: string;
@@ -286,6 +417,7 @@ export interface VttNpcPreset {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet?: number;
   npc_stats: VttNpcStats;
 }
 
@@ -303,6 +435,7 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
     shield_block: 0,
     move_feet: 20,
     vision_feet: 60,
+    darkvision_feet: 10,
     npc_stats: {
       weapon_name: 'Jagged Cleaver',
       attack_ap: 1,
@@ -328,6 +461,7 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
     shield_block: 4,
     move_feet: 20,
     vision_feet: 60,
+    darkvision_feet: 10,
     npc_stats: {
       weapon_name: 'Broad Spear',
       attack_ap: 1,
@@ -353,6 +487,7 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
     shield_block: 0,
     move_feet: 20,
     vision_feet: 80,
+    darkvision_feet: 10,
     npc_stats: {
       weapon_name: 'Siege Arbalest',
       attack_ap: 2,
@@ -378,6 +513,7 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
     shield_block: 0,
     move_feet: 25,
     vision_feet: 60,
+    darkvision_feet: 30,
     npc_stats: {
       weapon_name: 'Curved Stilettos',
       attack_ap: 1,
@@ -404,6 +540,7 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
     shield_block: 3,
     move_feet: 20,
     vision_feet: 60,
+    darkvision_feet: 15,
     npc_stats: {
       weapon_name: 'Colossal Maul',
       attack_ap: 2,
@@ -441,6 +578,7 @@ export interface VttRosterActorModel {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet?: number;
   light_bright_feet: number;
   light_dim_feet: number;
   light_color: string;
@@ -480,6 +618,7 @@ export interface CollectionActorModel {
   shield_block: number;
   move_feet: number;
   vision_feet: number;
+  darkvision_feet?: number;
   light_bright_feet: number;
   light_dim_feet: number;
   light_color: string;
