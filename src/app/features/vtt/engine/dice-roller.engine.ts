@@ -862,6 +862,33 @@ export function extractDicePoolFromChatInput(
   return pool;
 }
 
+export type VttQuickRollMode = 'normal' | 'advantage' | 'disadvantage';
+
+function serializeFormulaTerms(
+  diceTerms: ParsedFormulaDieTerm[],
+  netModifier: number
+): string {
+  const parts: string[] = [];
+  for (const term of diceTerms) {
+    if (term.count <= 0) continue;
+    const label = formatParsedTermLabel(term);
+    if (parts.length === 0) {
+      parts.push(term.sign < 0 ? `-${label}` : label);
+    } else {
+      parts.push(term.sign < 0 ? `- ${label}` : `+ ${label}`);
+    }
+  }
+
+  const mod = Math.trunc(Number(netModifier) || 0);
+  if (mod > 0) {
+    parts.push(parts.length > 0 ? `+ ${mod}` : `+ ${mod}`);
+  } else if (mod < 0) {
+    parts.push(parts.length > 0 ? `- ${Math.abs(mod)}` : `- ${Math.abs(mod)}`);
+  }
+
+  return parts.join(' ');
+}
+
 export function applyDieClickToChatInput(
   rawInput: string,
   die: PolyhedralDieType,
@@ -896,70 +923,85 @@ export function applyDieClickToChatInput(
   const tokenized = exprPart ? tokenizeFormulaExpression(exprPart) : null;
   const hasExplicitDice = /\d*d\d+/i.test(exprPart);
 
-  const plainDiceOrder: { dieType: PolyhedralDieType; count: number }[] = [];
-  const preservedTail: string[] = [];
-
-  if (tokenized && tokenized.ok) {
-    for (const term of tokenized.terms) {
-      if (
-        term.kind === 'dice' &&
-        !hasExplicitDice &&
-        term.dieType === 'd10' &&
-        term.count === 2
-      ) {
-        continue;
-      }
-
-      if (term.kind === 'dice' && term.sign > 0 && !term.keepDropMode) {
-        const existing = plainDiceOrder.find((p) => p.dieType === term.dieType);
-        if (existing) {
-          existing.count = Math.min(
-            MAX_DICE_PER_TYPE,
-            existing.count + term.count
-          );
-        } else {
-          plainDiceOrder.push({ dieType: term.dieType, count: term.count });
-        }
-      } else if (term.kind === 'dice') {
-        const label = formatParsedTermLabel(term);
-        preservedTail.push(term.sign < 0 ? `- ${label}` : `+ ${label}`);
-      } else {
-        preservedTail.push(
-          term.sign < 0 ? `- ${term.value}` : `+ ${term.value}`
-        );
-      }
-    }
-  } else if (exprPart) {
+  if (exprPart && tokenized && !tokenized.ok) {
     if (step < 0) return rawInput;
     return `${rawInput.trimEnd()} + ${Math.min(MAX_DICE_PER_TYPE, step)}${die}`;
   }
 
-  const targetEntry = plainDiceOrder.find((p) => p.dieType === die);
-  if (targetEntry) {
-    const nextCount = Math.max(
-      0,
-      Math.min(MAX_DICE_PER_TYPE, targetEntry.count + step)
-    );
-    targetEntry.count = nextCount;
-  } else if (step > 0) {
-    plainDiceOrder.push({
-      dieType: die,
-      count: Math.min(MAX_DICE_PER_TYPE, step),
-    });
-  }
+  const diceTerms: ParsedFormulaDieTerm[] = [];
+  let netMod = 0;
 
-  const activePlain = plainDiceOrder.filter((p) => p.count > 0);
-  const parts: string[] = activePlain.map((p) => `${p.count}${p.dieType}`);
+  if (tokenized && tokenized.ok) {
+    for (const term of tokenized.terms) {
+      if (term.kind === 'mod') {
+        netMod += term.sign * term.value;
+        continue;
+      }
+      if (
+        !hasExplicitDice &&
+        term.dieType === 'd10' &&
+        term.count === 2 &&
+        !term.keepDropMode
+      ) {
+        continue;
+      }
 
-  let rebuiltExpr = parts.join(' + ');
-  if (preservedTail.length > 0) {
-    const tailStr = preservedTail.join(' ');
-    if (rebuiltExpr) {
-      rebuiltExpr = `${rebuiltExpr} ${tailStr}`;
-    } else {
-      rebuiltExpr = tailStr.replace(/^\+\s*/, '').replace(/^-\s*/, '-');
+      if (term.sign > 0 && !term.keepDropMode) {
+        const existingPlain = diceTerms.find(
+          (d) => d.sign > 0 && !d.keepDropMode && d.dieType === term.dieType
+        );
+        if (existingPlain) {
+          existingPlain.count = Math.min(
+            MAX_DICE_PER_TYPE,
+            existingPlain.count + term.count
+          );
+          continue;
+        }
+      }
+
+      diceTerms.push({ ...term });
     }
   }
+
+  const targetPlain = diceTerms.find(
+    (d) => d.sign > 0 && !d.keepDropMode && d.dieType === die
+  );
+  if (targetPlain) {
+    targetPlain.count = Math.max(
+      0,
+      Math.min(MAX_DICE_PER_TYPE, targetPlain.count + step)
+    );
+  } else {
+    const targetKeepDrop = diceTerms.find(
+      (d) =>
+        d.sign > 0 &&
+        (d.keepDropMode === 'kh' || d.keepDropMode === 'kl') &&
+        d.dieType === die
+    );
+    if (targetKeepDrop) {
+      const nextKept = targetKeepDrop.keepDropAmount + step;
+      if (nextKept <= 0) {
+        targetKeepDrop.count = 0;
+      } else {
+        const clampedKept = Math.min(MAX_DICE_PER_TYPE - 1, nextKept);
+        targetKeepDrop.keepDropAmount = clampedKept;
+        targetKeepDrop.count = clampedKept + 1;
+      }
+    } else if (step > 0) {
+      diceTerms.push({
+        kind: 'dice',
+        sign: 1,
+        count: Math.min(MAX_DICE_PER_TYPE, step),
+        sides: POLYHEDRAL_DIE_SIDES[die],
+        dieType: die,
+        keepDropMode: null,
+        keepDropAmount: 0,
+      });
+    }
+  }
+
+  const activeDice = diceTerms.filter((d) => d.count > 0);
+  const rebuiltExpr = serializeFormulaTerms(activeDice, netMod);
 
   if (!rebuiltExpr && !commentSuffix) {
     return '';
@@ -969,5 +1011,220 @@ export function applyDieClickToChatInput(
     return `${trigger}${commentSuffix}`;
   }
 
+  return `${trigger} ${rebuiltExpr}${commentSuffix}`;
+}
+
+export function extractRollModeFromChatInput(
+  rawInput: string,
+  registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
+): VttQuickRollMode {
+  const resolved = resolveSlashCommand(rawInput, registry);
+  if (
+    !resolved ||
+    (resolved.config.action !== 'roll' && resolved.config.action !== 'gm_roll')
+  ) {
+    return 'normal';
+  }
+
+  const hashIdx = resolved.rest.indexOf('#');
+  const exprPart = (
+    hashIdx === -1 ? resolved.rest : resolved.rest.slice(0, hashIdx)
+  ).trim();
+  if (!exprPart) {
+    return 'normal';
+  }
+
+  const tokenized = tokenizeFormulaExpression(exprPart);
+  if (tokenized.ok) {
+    const leadDie = tokenized.terms.find(
+      (t): t is ParsedFormulaDieTerm => t.kind === 'dice' && t.sign > 0
+    );
+    if (leadDie) {
+      if (leadDie.keepDropMode === 'kh' || leadDie.keepDropMode === 'dl') {
+        return 'advantage';
+      }
+      if (leadDie.keepDropMode === 'kl' || leadDie.keepDropMode === 'dh') {
+        return 'disadvantage';
+      }
+    }
+    return 'normal';
+  }
+
+  const firstDieMatch = /\d*d\d+(kh|kl|dh|dl)?\d*/i.exec(exprPart);
+  const kd = firstDieMatch?.[1]?.toLowerCase();
+  if (kd === 'kh' || kd === 'dl') return 'advantage';
+  if (kd === 'kl' || kd === 'dh') return 'disadvantage';
+  return 'normal';
+}
+
+export function applyRollModeToChatInput(
+  rawInput: string,
+  mode: VttQuickRollMode,
+  registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
+): string {
+  const resolved = resolveSlashCommand(rawInput, registry);
+  const isRollCmd =
+    resolved &&
+    (resolved.config.action === 'roll' || resolved.config.action === 'gm_roll');
+
+  if (!isRollCmd) {
+    if (mode === 'normal') {
+      return rawInput;
+    }
+    const trigger = getPrimaryCommandTrigger('roll', registry);
+    return mode === 'advantage'
+      ? `${trigger} 3d10kh2`
+      : `${trigger} 3d10kl2`;
+  }
+
+  const trigger = resolved.matchedTrigger;
+  const hashIdx = resolved.rest.indexOf('#');
+  const exprPart = (
+    hashIdx === -1 ? resolved.rest : resolved.rest.slice(0, hashIdx)
+  ).trim();
+  const commentSuffix =
+    hashIdx === -1 ? '' : ` # ${resolved.rest.slice(hashIdx + 1).trim()}`.trimEnd();
+
+  const tokenized = tokenizeFormulaExpression(exprPart);
+  if (!tokenized.ok) {
+    return rawInput;
+  }
+
+  const diceTerms: ParsedFormulaDieTerm[] = [];
+  let netMod = 0;
+  for (const term of tokenized.terms) {
+    if (term.kind === 'mod') {
+      netMod += term.sign * term.value;
+    } else {
+      diceTerms.push({ ...term });
+    }
+  }
+
+  const leadIdx = diceTerms.findIndex((t) => t.sign > 0);
+  if (leadIdx !== -1) {
+    const lead = diceTerms[leadIdx];
+    const baseKept =
+      lead.keepDropMode === 'kh' || lead.keepDropMode === 'kl'
+        ? lead.keepDropAmount
+        : lead.keepDropMode === 'dh' || lead.keepDropMode === 'dl'
+          ? Math.max(1, lead.count - lead.keepDropAmount)
+          : lead.count;
+
+    if (mode === 'normal') {
+      diceTerms[leadIdx] = {
+        ...lead,
+        count: Math.max(1, Math.min(MAX_DICE_PER_TYPE, baseKept)),
+        keepDropMode: null,
+        keepDropAmount: 0,
+      };
+    } else {
+      const clampedKept = Math.min(
+        MAX_DICE_PER_TYPE - 1,
+        Math.max(1, baseKept)
+      );
+      diceTerms[leadIdx] = {
+        ...lead,
+        count: clampedKept + 1,
+        keepDropMode: mode === 'advantage' ? 'kh' : 'kl',
+        keepDropAmount: clampedKept,
+      };
+    }
+  }
+
+  const rebuiltExpr = serializeFormulaTerms(diceTerms, netMod);
+  return `${trigger} ${rebuiltExpr}${commentSuffix}`;
+}
+
+export function extractModifierFromChatInput(
+  rawInput: string,
+  registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
+): number {
+  const resolved = resolveSlashCommand(rawInput, registry);
+  if (
+    !resolved ||
+    (resolved.config.action !== 'roll' && resolved.config.action !== 'gm_roll')
+  ) {
+    return 0;
+  }
+
+  const hashIdx = resolved.rest.indexOf('#');
+  const exprPart = (
+    hashIdx === -1 ? resolved.rest : resolved.rest.slice(0, hashIdx)
+  ).trim();
+  if (!exprPart) {
+    return 0;
+  }
+
+  const tokenized = tokenizeFormulaExpression(exprPart);
+  if (tokenized.ok) {
+    let sum = 0;
+    for (const term of tokenized.terms) {
+      if (term.kind === 'mod') {
+        sum += term.sign * term.value;
+      }
+    }
+    return sum;
+  }
+
+  const normalized = exprPart.replace(/[\u2212\u2013\u2014]/g, '-');
+  const modRegex = /([+-])\s*(\d+)(?!\s*d)/gi;
+  let fallbackSum = 0;
+  let m: RegExpExecArray | null;
+  while ((m = modRegex.exec(normalized)) !== null) {
+    const val = parseInt(m[2], 10);
+    if (Number.isFinite(val)) {
+      fallbackSum += m[1] === '-' ? -val : val;
+    }
+  }
+  return fallbackSum;
+}
+
+export function applyModifierToChatInput(
+  rawInput: string,
+  nextModifier: number,
+  registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
+): string {
+  const mod = Math.max(
+    -999,
+    Math.min(999, Math.trunc(Number(nextModifier) || 0))
+  );
+  const resolved = resolveSlashCommand(rawInput, registry);
+  const isRollCmd =
+    resolved &&
+    (resolved.config.action === 'roll' || resolved.config.action === 'gm_roll');
+
+  if (!isRollCmd) {
+    if (mod === 0) {
+      return rawInput;
+    }
+    const trigger = getPrimaryCommandTrigger('roll', registry);
+    return mod > 0
+      ? `${trigger} 2d10 + ${mod}`
+      : `${trigger} 2d10 - ${Math.abs(mod)}`;
+  }
+
+  const trigger = resolved.matchedTrigger;
+  const hashIdx = resolved.rest.indexOf('#');
+  const exprPart = (
+    hashIdx === -1 ? resolved.rest : resolved.rest.slice(0, hashIdx)
+  ).trim();
+  const commentSuffix =
+    hashIdx === -1 ? '' : ` # ${resolved.rest.slice(hashIdx + 1).trim()}`.trimEnd();
+
+  const hasExplicitDice = /\d*d\d+/i.test(exprPart);
+  if (!hasExplicitDice && mod === 0 && !commentSuffix) {
+    return '';
+  }
+
+  const tokenized = tokenizeFormulaExpression(exprPart);
+  if (!tokenized.ok) {
+    return rawInput;
+  }
+
+  const diceTerms = tokenized.terms
+    .filter((t): t is ParsedFormulaDieTerm => t.kind === 'dice')
+    .map((t) => ({ ...t }));
+
+  const rebuiltExpr = serializeFormulaTerms(diceTerms, mod);
   return `${trigger} ${rebuiltExpr}${commentSuffix}`;
 }

@@ -106,6 +106,16 @@ import {
 } from '../models/vtt.model';
 import { VttPingBroadcast, VttService } from '../services/vtt.service';
 
+export type VttSpeakerMode = 'user' | 'character';
+
+export interface VttResolvedChatSpeaker {
+  name: string;
+  mode: VttSpeakerMode;
+  tokenId: string | null;
+  characterId: string | null;
+  color: string | null;
+}
+
 export interface VttWhisperTargetOption {
   key: string;
   insertToken: string;
@@ -276,6 +286,9 @@ export class VttStore {
   readonly enforceApOnMove = signal(false);
 
   readonly selectedTokenId = signal<string | null>(null);
+  readonly selectedRosterActorId = signal<string | null>(null);
+  readonly selectedCharacterId = signal<string | null>(null);
+  readonly gmSpeakerMode = signal<VttSpeakerMode>('user');
   readonly selectedLightId = signal<string | null>(null);
   readonly pendingTargetAction = signal<PendingTargetAction | null>(null);
   readonly activePings = signal<VttPingBroadcast[]>([]);
@@ -367,6 +380,129 @@ export class VttStore {
       this.compendiumStore.allPerkNodes()
     );
   });
+
+  readonly activeCharacterSpeaker = computed<
+    Omit<VttResolvedChatSpeaker, 'mode'> | null
+  >(() => {
+    const gm = this.isGm();
+    const pending = this.pendingTargetAction();
+    if (pending?.attackerTokenId) {
+      const attTok =
+        this.sceneTokens().find((t) => t.id === pending.attackerTokenId) ??
+        this.tokens().find((t) => t.id === pending.attackerTokenId) ??
+        null;
+      if (attTok && (gm || this.canControlToken(attTok))) {
+        return {
+          name: attTok.name,
+          tokenId: attTok.id,
+          characterId: attTok.character_id,
+          color: attTok.color || null,
+        };
+      }
+    }
+
+    const selTokId = this.selectedTokenId();
+    if (selTokId) {
+      const tok =
+        this.sceneTokens().find((t) => t.id === selTokId) ??
+        this.tokens().find((t) => t.id === selTokId) ??
+        null;
+      if (tok && (gm || this.canControlToken(tok))) {
+        return {
+          name: tok.name,
+          tokenId: tok.id,
+          characterId: tok.character_id,
+          color: tok.color || null,
+        };
+      }
+    }
+
+    const rosterId = this.selectedRosterActorId();
+    if (rosterId) {
+      const actor = this.rosterActors().find((a) => a.id === rosterId) ?? null;
+      if (actor && (gm || this.canDeployRosterActor(actor))) {
+        return {
+          name: actor.name,
+          tokenId: null,
+          characterId: actor.character_id,
+          color: actor.color || null,
+        };
+      }
+    }
+
+    const charId = this.selectedCharacterId();
+    if (charId) {
+      const ch = this.characterByIdMap().get(charId) ?? null;
+      const uid = this.authStore.user()?.id;
+      if (ch && (gm || Boolean(uid && ch.owner_id === uid))) {
+        return {
+          name: ch.name,
+          tokenId: null,
+          characterId: ch.id,
+          color: '#38B29A',
+        };
+      }
+    }
+
+    return null;
+  });
+
+  readonly effectivePublicSpeaker = computed<VttResolvedChatSpeaker>(() => {
+    const gm = this.isGm();
+    const fallbackUser =
+      this.authStore.displayName() || (gm ? 'GM' : 'Adventurer');
+    const charSpeaker = this.activeCharacterSpeaker();
+
+    if (gm) {
+      if (this.gmSpeakerMode() === 'character' && charSpeaker) {
+        return {
+          ...charSpeaker,
+          mode: 'character',
+        };
+      }
+      return {
+        name: fallbackUser,
+        mode: 'user',
+        tokenId: null,
+        characterId: null,
+        color: null,
+      };
+    }
+
+    if (charSpeaker) {
+      return {
+        ...charSpeaker,
+        mode: 'character',
+      };
+    }
+    return {
+      name: fallbackUser,
+      mode: 'user',
+      tokenId: null,
+      characterId: null,
+      color: null,
+    };
+  });
+
+  setGmSpeakerMode(mode: VttSpeakerMode): void {
+    this.gmSpeakerMode.set(mode);
+  }
+
+  selectRosterActorForSpeech(actorId: string | null): void {
+    this.selectedRosterActorId.set(actorId);
+    if (actorId) {
+      this.selectedCharacterId.set(null);
+      this.selectedTokenId.set(null);
+    }
+  }
+
+  selectCharacterForSpeech(characterId: string | null): void {
+    this.selectedCharacterId.set(characterId);
+    if (characterId) {
+      this.selectedRosterActorId.set(null);
+      this.selectedTokenId.set(null);
+    }
+  }
 
   readonly observerTokens = computed<VttTokenModel[]>(() => {
     const sc = this.activeScene();
@@ -939,6 +1075,9 @@ export class VttStore {
     this.pendingTargetAction.set(null);
     this.draggingRosterPayload.set(null);
     this.selectedTokenId.set(null);
+    this.selectedRosterActorId.set(null);
+    this.selectedCharacterId.set(null);
+    this.gmSpeakerMode.set('user');
     this.selectedLightId.set(null);
     this.activePings.set([]);
     this.activeSceneNaturalSize.set(null);
@@ -4265,14 +4404,51 @@ export class VttStore {
 
     const resolved = resolveSlashCommand(trimmed, registry);
     if (!resolved) {
+      const speaker = this.effectivePublicSpeaker();
       await this.postLog({
         kind: 'chat',
         title: trimmed,
+        senderNameOverride: speaker.name,
+        payload:
+          speaker.mode === 'character'
+            ? {
+                speaker_mode: 'character',
+                ...(speaker.tokenId ? { speaker_token_id: speaker.tokenId } : {}),
+                ...(speaker.characterId
+                  ? { speaker_character_id: speaker.characterId }
+                  : {}),
+                ...(speaker.color ? { speaker_color: speaker.color } : {}),
+              }
+            : this.isGm()
+              ? { speaker_mode: 'gm_user' }
+              : { speaker_mode: 'user' },
       });
       return { cleared: true };
     }
 
     const action = resolved.config.action;
+
+    if (action === 'ooc') {
+      if (!resolved.rest) {
+        this.notifications.error(
+          'Empty OOC Message',
+          'Provide a message after the out-of-character command.'
+        );
+        return { cleared: false };
+      }
+      const userDisplay =
+        this.authStore.displayName() || (this.isGm() ? 'GM' : 'Adventurer');
+      await this.postLog({
+        kind: 'chat',
+        title: resolved.rest,
+        senderNameOverride: userDisplay,
+        payload: {
+          ooc: true,
+          speaker_mode: 'user',
+        },
+      });
+      return { cleared: true };
+    }
 
     if (action === 'roll' || action === 'gm_roll') {
       const parsed = parseAndRollDiceFormula(resolved.rest);
@@ -4282,11 +4458,14 @@ export class VttStore {
       }
 
       const res = parsed.result;
-      const sel = this.selectedToken();
-      const baseActorLabel = sel ? `${sel.name} · Roll` : 'Dice Roll';
+      const speaker = this.effectivePublicSpeaker();
+      const hasCharIdentity = speaker.mode === 'character';
+      const baseActorLabel = hasCharIdentity
+        ? `${speaker.name} · Roll`
+        : 'Dice Roll';
       const rollLabel = parsed.customLabel
-        ? sel
-          ? `${sel.name} · ${parsed.customLabel}`
+        ? hasCharIdentity
+          ? `${speaker.name} · ${parsed.customLabel}`
           : parsed.customLabel
         : baseActorLabel;
 
@@ -4300,6 +4479,7 @@ export class VttStore {
         formula: res.formula,
         total: res.total,
         dice: res.physicalDice,
+        senderNameOverride: speaker.name,
         recipientIds,
       });
       this.enqueueDiceThrow(diceThrow, true);
@@ -4308,6 +4488,7 @@ export class VttStore {
         kind: 'roll',
         title: `${rollLabel} (${res.formula}) → ${res.total}`,
         detail: res.detail,
+        senderNameOverride: speaker.name,
         payload: {
           chips: res.chips,
           groups: res.groups,
@@ -4315,6 +4496,13 @@ export class VttStore {
           modifier: res.modifier,
           total: res.total,
           diceThrow,
+          speaker_mode:
+            speaker.mode === 'character'
+              ? 'character'
+              : this.isGm()
+                ? 'gm_user'
+                : 'user',
+          ...(speaker.color ? { speaker_color: speaker.color } : {}),
           ...(isGmPrivate
             ? {
                 visibility: 'gm_roll',
@@ -4334,13 +4522,21 @@ export class VttStore {
         return { cleared: false };
       }
 
+      const speaker = this.effectivePublicSpeaker();
       await this.postLog({
         kind: 'chat',
         title: parsedWhisper.message,
+        senderNameOverride: speaker.name,
         payload: {
           visibility: 'whisper',
           recipient_ids: parsedWhisper.recipientIds,
           recipient_label: parsedWhisper.recipientLabel,
+          speaker_mode:
+            speaker.mode === 'character'
+              ? 'character'
+              : this.isGm()
+                ? 'gm_user'
+                : 'user',
         },
       });
       return { cleared: true };
@@ -4354,15 +4550,20 @@ export class VttStore {
         );
         return { cleared: false };
       }
-      const actorName =
-        this.selectedToken()?.name ||
-        this.authStore.displayName() ||
-        'Adventurer';
+      const speaker = this.effectivePublicSpeaker();
       await this.postLog({
         kind: 'chat',
-        title: `${actorName} ${resolved.rest}`,
+        title: `${speaker.name} ${resolved.rest}`,
+        senderNameOverride: speaker.name,
         payload: {
           emote: true,
+          speaker_mode:
+            speaker.mode === 'character'
+              ? 'character'
+              : this.isGm()
+                ? 'gm_user'
+                : 'user',
+          ...(speaker.color ? { speaker_color: speaker.color } : {}),
         },
       });
       return { cleared: true };
@@ -4458,14 +4659,19 @@ export class VttStore {
     title: string;
     detail?: string | null;
     payload?: Record<string, unknown>;
+    senderNameOverride?: string;
   }): Promise<void> {
     const camp = this.campaign();
     if (!camp) return;
+    const resolvedSender =
+      input.senderNameOverride?.trim() ||
+      this.authStore.displayName() ||
+      'Adventurer';
     const entry = await this.vttService.insertLog({
       campaign_id: camp.id,
       encounter_id: this.activeScene()?.id ?? null,
       sender_id: this.authStore.user()?.id ?? null,
-      sender_name: this.authStore.displayName() || 'Adventurer',
+      sender_name: resolvedSender,
       kind: input.kind,
       title: input.title,
       detail: input.detail ?? null,

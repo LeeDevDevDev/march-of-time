@@ -2,6 +2,7 @@ export type VttChatCommandAction =
   | 'roll'
   | 'gm_roll'
   | 'whisper'
+  | 'ooc'
   | 'emote'
   | 'clear'
   | 'help';
@@ -36,6 +37,13 @@ export const VTT_CHAT_COMMANDS: readonly VttChatCommandConfig[] = [
     aliases: ['/whisper', '/tell', '/pm'],
     usage: '<gm | player> <message>',
     description: 'Send a private message to the GM or a player',
+  },
+  {
+    action: 'ooc',
+    primary: '/ooc',
+    aliases: ['/o'],
+    usage: '<message>',
+    description: 'Speak out of character using your player name',
   },
   {
     action: 'emote',

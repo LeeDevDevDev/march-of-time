@@ -65,6 +65,7 @@ import {
   VttChatCommandConfig,
   findMatchingSlashCommands,
   getAllCommandTriggers,
+  getPrimaryCommandTrigger,
   resolveSlashCommand,
 } from './config/vtt-commands.config';
 import {
@@ -72,9 +73,14 @@ import {
   POLYHEDRAL_DIE_TYPES,
   PolyhedralDieType,
   RolledDieChip,
+  VttQuickRollMode,
   applyDieClickToChatInput,
+  applyModifierToChatInput,
+  applyRollModeToChatInput,
   extractDicePoolFromChatInput,
   extractLogRollChips,
+  extractModifierFromChatInput,
+  extractRollModeFromChatInput,
   getTotalDiceInPool,
 } from './engine/dice-roller.engine';
 import {
@@ -112,7 +118,11 @@ import {
   VttToolMode,
   VttWallKind,
 } from './models/vtt.model';
-import { VttStore, VttWhisperTargetOption } from './store/vtt.store';
+import {
+  VttSpeakerMode,
+  VttStore,
+  VttWhisperTargetOption,
+} from './store/vtt.store';
 
 export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
 export type VttSettingsModalKind = 'general' | 'dice' | 'controls' | 'invites';
@@ -331,6 +341,12 @@ export class VttRoomComponent {
   readonly customPoolTotalCount = computed<number>(() =>
     getTotalDiceInPool(this.dicePool())
   );
+  readonly activeRollMode = computed<VttQuickRollMode>(() =>
+    extractRollModeFromChatInput(this.chatInput(), this.chatCommandsRegistry)
+  );
+  readonly activeRollModifier = computed<number>(() =>
+    extractModifierFromChatInput(this.chatInput(), this.chatCommandsRegistry)
+  );
   readonly activeSlashCommand = computed(() =>
     resolveSlashCommand(this.chatInput(), this.chatCommandsRegistry)
   );
@@ -343,6 +359,7 @@ export class VttRoomComponent {
     if (act === 'roll') return 'Roll';
     if (act === 'gm_roll') return 'GM Roll';
     if (act === 'whisper') return 'Whisper';
+    if (act === 'ooc') return 'OOC';
     if (act === 'emote') return 'Emote';
     return 'Send';
   });
@@ -2331,6 +2348,111 @@ export class VttRoomComponent {
     queueMicrotask(() => this.resizeComposerTextarea());
   }
 
+  setComposerRollMode(mode: VttQuickRollMode): void {
+    const targetMode: VttQuickRollMode =
+      mode !== 'normal' && this.activeRollMode() === mode ? 'normal' : mode;
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.update((curr) =>
+      applyRollModeToChatInput(curr, targetMode, this.chatCommandsRegistry)
+    );
+    queueMicrotask(() => this.resizeComposerTextarea());
+  }
+
+  stepComposerModifier(delta: number): void {
+    const next = Math.max(
+      -999,
+      Math.min(999, this.activeRollModifier() + Math.trunc(delta))
+    );
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.update((curr) =>
+      applyModifierToChatInput(curr, next, this.chatCommandsRegistry)
+    );
+    queueMicrotask(() => this.resizeComposerTextarea());
+  }
+
+  onComposerModifierInput(val: string | number | null): void {
+    if (val === '-') {
+      return;
+    }
+    if (val === '' || val === null || val === undefined) {
+      this.slashSuggestionsDismissed.set(false);
+      this.chatInput.update((curr) =>
+        applyModifierToChatInput(curr, 0, this.chatCommandsRegistry)
+      );
+      queueMicrotask(() => this.resizeComposerTextarea());
+      return;
+    }
+    const parsed = Number(val);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.update((curr) =>
+      applyModifierToChatInput(
+        curr,
+        Math.trunc(parsed),
+        this.chatCommandsRegistry
+      )
+    );
+    queueMicrotask(() => this.resizeComposerTextarea());
+  }
+
+  setGmSpeakerMode(mode: VttSpeakerMode): void {
+    this.vttStore.setGmSpeakerMode(mode);
+  }
+
+  selectRosterActorRow(
+    actor: VttRosterActorModel,
+    primaryToken: VttTokenModel | null
+  ): void {
+    if (primaryToken) {
+      this.vttStore.selectedRosterActorId.set(null);
+      this.vttStore.selectedCharacterId.set(null);
+      this.vttStore.selectedTokenId.set(primaryToken.id);
+      return;
+    }
+    this.vttStore.selectRosterActorForSpeech(actor.id);
+  }
+
+  selectAvailableCharacterRow(
+    ch: CharacterModel,
+    deployed: VttTokenModel | undefined
+  ): void {
+    if (deployed) {
+      this.vttStore.selectedRosterActorId.set(null);
+      this.vttStore.selectedCharacterId.set(null);
+      this.vttStore.selectedTokenId.set(deployed.id);
+      return;
+    }
+    this.vttStore.selectCharacterForSpeech(ch.id);
+  }
+
+  toggleOocComposer(): void {
+    this.slashSuggestionsDismissed.set(false);
+    const curr = this.chatInput();
+    const resolved = resolveSlashCommand(curr, this.chatCommandsRegistry);
+    let nextVal = '';
+    if (resolved?.config.action === 'ooc') {
+      nextVal = resolved.rest;
+    } else {
+      const oocTrigger = getPrimaryCommandTrigger(
+        'ooc',
+        this.chatCommandsRegistry
+      );
+      const body = resolved ? resolved.rest : curr.trimStart();
+      nextVal = body ? `${oocTrigger} ${body}` : `${oocTrigger} `;
+    }
+    this.chatInput.set(nextVal);
+    queueMicrotask(() => {
+      const el = this.chatComposerEl()?.nativeElement;
+      if (el) {
+        el.focus();
+        el.setSelectionRange?.(nextVal.length, nextVal.length);
+      }
+      this.resizeComposerTextarea();
+    });
+  }
+
   onChatInputChange(val: string): void {
     this.slashSuggestionsDismissed.set(false);
     this.chatInput.set(val ?? '');
@@ -2432,6 +2554,19 @@ export class VttRoomComponent {
 
   isEmoteLog(entry: VttLogEntry): boolean {
     return Boolean(entry.payload?.['emote']);
+  }
+
+  isOocLog(entry: VttLogEntry): boolean {
+    return Boolean(entry.payload?.['ooc']);
+  }
+
+  isGmUserLog(entry: VttLogEntry): boolean {
+    return entry.payload?.['speaker_mode'] === 'gm_user' && !this.isOocLog(entry);
+  }
+
+  getLogSpeakerColor(entry: VttLogEntry): string | null {
+    const raw = entry.payload?.['speaker_color'];
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
   }
 
   getLogPrivacyBadge(entry: VttLogEntry): string | null {

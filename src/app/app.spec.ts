@@ -99,10 +99,14 @@ import {
 import {
   adjustDiePoolCount,
   applyDieClickToChatInput,
+  applyModifierToChatInput,
+  applyRollModeToChatInput,
   buildPhysicalDiceFrom2d10Roll,
   createEmptyDicePool,
   extractDicePoolFromChatInput,
   extractLogRollChips,
+  extractModifierFromChatInput,
+  extractRollModeFromChatInput,
   formatDicePoolFormula,
   getTotalDiceInPool,
   parseAndRollDiceFormula,
@@ -4769,5 +4773,318 @@ describe('App', () => {
     });
     expect(vttStore.visibleLogs().length).toBe(0);
     expect(vttStore.isDiceThrowVisibleToCurrentUser(gmRollThrow!)).toBe(false);
+  });
+
+  it('should sync Advantage/Disadvantage and Mod with /r formulas, support GM User vs Character speaker modes across tokens/actions/actors, support /ooc, and omit the top Entries header', async () => {
+    expect(applyRollModeToChatInput('', 'advantage')).toBe('/r 3d10kh2');
+    expect(applyRollModeToChatInput('', 'disadvantage')).toBe('/r 3d10kl2');
+    expect(extractRollModeFromChatInput('/r 3d10kh2')).toBe('advantage');
+    expect(extractRollModeFromChatInput('/r 3d10kl2')).toBe('disadvantage');
+    expect(applyRollModeToChatInput('/r 3d10kh2', 'normal')).toBe('/r 2d10');
+    expect(applyRollModeToChatInput('/gmr 1d20 + 4 # Save', 'advantage')).toBe(
+      '/gmr 2d20kh1 + 4 # Save'
+    );
+    expect(
+      applyRollModeToChatInput('/gmr 2d20kh1 + 4 # Save', 'disadvantage')
+    ).toBe('/gmr 2d20kl1 + 4 # Save');
+
+    const withBonusDie = applyDieClickToChatInput('/r 3d10kh2 + 3', 'd6', 1);
+    expect(withBonusDie).toBe('/r 3d10kh2 + 1d6 + 3');
+    expect(extractRollModeFromChatInput(withBonusDie)).toBe('advantage');
+    expect(extractModifierFromChatInput(withBonusDie)).toBe(3);
+
+    expect(applyModifierToChatInput('', 2)).toBe('/r 2d10 + 2');
+    expect(applyModifierToChatInput('', -3)).toBe('/r 2d10 - 3');
+    expect(applyModifierToChatInput('/r 3d10kh2 + 2', -1)).toBe(
+      '/r 3d10kh2 - 1'
+    );
+    expect(applyModifierToChatInput('/r 3d10kh2 - 1', 0)).toBe('/r 3d10kh2');
+
+    const activeUserSig = signal({
+      id: 'gm-speaker-1',
+      email: 'gm@example.com',
+      name: 'Warden',
+      handle: 'warden',
+    });
+    const insertedLogs: VttLogEntry[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({
+              id: activeUserSig().id,
+              email: activeUserSig().email,
+            }),
+            handle: () => activeUserSig().handle,
+            displayName: () => activeUserSig().name,
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            effectiveMapsFolderId: () => null,
+            effectiveCharactersFolderId: () => null,
+            getFolderTrailLabel: () => '@warden / Maps',
+            assets: () => [],
+            folders: () => [],
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            insertLog: async (
+              entry: Omit<VttLogEntry, 'id' | 'created_at'>
+            ) => {
+              const saved: VttLogEntry = {
+                ...entry,
+                id: `chat-mod-log-${insertedLogs.length + 1}`,
+                created_at: new Date().toISOString(),
+              };
+              insertedLogs.push(saved);
+              return saved;
+            },
+            clearCampaignLogs: async () => null,
+            sendDiceThrow: async () => undefined,
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-chat-1',
+      gm_id: 'gm-speaker-1',
+      name: 'Hall of Voices',
+      cover_image_url: null,
+      invite_code: 'VOICE1',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-chat-1',
+        campaign_id: 'camp-chat-1',
+        gm_id: 'gm-speaker-1',
+        folder_id: null,
+        sort_order: 0,
+        name: 'Tavern',
+        is_active_scene: true,
+        map_image_url: null,
+        background_color: '#0E1917',
+        grid_mode: 'square',
+        scene_width: 1200,
+        scene_height: 800,
+        padding: 0.25,
+        grid_width: 24,
+        grid_height: 16,
+        grid_size_px: 64,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: 0.25,
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0.85,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: true },
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        pending_clash: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-chat-1');
+
+    const vanceToken: VttTokenModel = {
+      id: 'tok-vance',
+      encounter_id: 'scene-chat-1',
+      character_id: null,
+      owner_id: null,
+      name: 'Captain Vance',
+      faction: 'neutral',
+      x: 2,
+      y: 2,
+      q: 2,
+      r: 2,
+      size: 1,
+      icon: 'bastion-shield',
+      color: '#F59E0B',
+      current_hp: 12,
+      max_hp: 12,
+      current_sp: 6,
+      max_sp: 6,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 2,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {},
+    };
+
+    const oathbreakerToken: VttTokenModel = {
+      ...vanceToken,
+      id: 'tok-oath',
+      name: 'Oathbreaker',
+      faction: 'enemy',
+      color: '#EF4444',
+    };
+
+    const playerHeroToken: VttTokenModel = {
+      ...vanceToken,
+      id: 'tok-vanguard',
+      owner_id: 'player-ooc-1',
+      name: 'Vanguard',
+      faction: 'ally',
+      color: '#38B29A',
+    };
+
+    vttStore.tokens.set([vanceToken, oathbreakerToken, playerHeroToken]);
+    vttStore.rosterActors.set([
+      {
+        id: 'roster-innkeeper',
+        campaign_id: 'camp-chat-1',
+        folder_id: null,
+        character_id: null,
+        collection_actor_id: null,
+        owner_id: 'gm-speaker-1',
+        actor_kind: 'npc',
+        is_unique: true,
+        name: 'Tavern Keeper',
+        faction: 'neutral',
+        size: 1,
+        icon: 'tankard',
+        color: '#D97706',
+        max_hp: 8,
+        max_sp: 4,
+        max_ap: 4,
+        armor_dr: 0,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 60,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        npc_stats: {},
+        notes: '',
+        sort_order: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vttStore.selectedTokenId.set('tok-vance');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+
+    comp.setComposerRollMode('advantage');
+    expect(comp.chatInput()).toBe('/r 3d10kh2');
+    expect(comp.activeRollMode()).toBe('advantage');
+
+    comp.stepComposerModifier(4);
+    expect(comp.chatInput()).toBe('/r 3d10kh2 + 4');
+    expect(comp.activeRollModifier()).toBe(4);
+
+    await comp.sendChatMessage();
+    fixture.detectChanges();
+    expect(comp.chatInput()).toBe('');
+    expect(comp.activeRollMode()).toBe('normal');
+    expect(comp.activeRollModifier()).toBe(0);
+    expect(insertedLogs[0].sender_name).toBe('Warden');
+    expect(insertedLogs[0].title).toContain('Dice Roll (3d10kh2 + 4)');
+
+    const logPanelText = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(logPanelText).not.toContain('1 Entry');
+    expect(logPanelText).not.toContain('Entries');
+    expect(logPanelText).toContain('Clear Log');
+
+    comp.onChatInputChange('Welcome to the session!');
+    await comp.sendChatMessage();
+    expect(insertedLogs[1].sender_name).toBe('Warden');
+    expect(comp.isGmUserLog(insertedLogs[1])).toBe(true);
+
+    comp.setGmSpeakerMode('character');
+    comp.onChatInputChange('State your business at the gate.');
+    await comp.sendChatMessage();
+    expect(insertedLogs[2].sender_name).toBe('Captain Vance');
+    expect(comp.isGmUserLog(insertedLogs[2])).toBe(false);
+
+    vttStore.pendingTargetAction.set({
+      attackerTokenId: 'tok-oath',
+      kind: 'weapon',
+      actionName: 'Blackiron Cleaver',
+      apCost: 1,
+      cooldownRounds: 0,
+      perkId: null,
+      reachFeet: 5,
+      attackMod: 4,
+      flatDamage: 6,
+      combatTags: [],
+      disallowedDefenses: [],
+      bonusSpDamage: 0,
+      ignoreArmorDr: 0,
+      defendedSpChip: 0,
+      pushFeet: 0,
+      selfShiftFeet: 0,
+      inflictStatuses: [],
+    });
+    expect(vttStore.activeCharacterSpeaker()?.name).toBe('Oathbreaker');
+    comp.onChatInputChange('Kneel before the Ash Throne!');
+    await comp.sendChatMessage();
+    expect(insertedLogs[3].sender_name).toBe('Oathbreaker');
+
+    vttStore.pendingTargetAction.set(null);
+    comp.selectRosterActorRow(vttStore.rosterActors()[0], null);
+    expect(vttStore.activeCharacterSpeaker()?.name).toBe('Tavern Keeper');
+    comp.onChatInputChange('Ale is two copper a mug.');
+    await comp.sendChatMessage();
+    expect(insertedLogs[4].sender_name).toBe('Tavern Keeper');
+
+    activeUserSig.set({
+      id: 'player-ooc-1',
+      email: 'lyra@example.com',
+      name: 'Lyra',
+      handle: 'lyra',
+    });
+    vttStore.selectedTokenId.set('tok-vanguard');
+    fixture.detectChanges();
+
+    comp.onChatInputChange('Shields up!');
+    await comp.sendChatMessage();
+    expect(insertedLogs[5].sender_name).toBe('Vanguard');
+    expect(comp.isOocLog(insertedLogs[5])).toBe(false);
+
+    comp.onChatInputChange('/ooc Stepping away for water, back in 1 min');
+    expect(comp.composerSubmitLabel()).toBe('OOC');
+    await comp.sendChatMessage();
+    expect(insertedLogs[6].sender_name).toBe('Lyra');
+    expect(insertedLogs[6].title).toBe('Stepping away for water, back in 1 min');
+    expect(comp.isOocLog(insertedLogs[6])).toBe(true);
+
+    const shorthandOoc = await vttStore.executeChatOrCommand('/o Ready to roll!');
+    expect(shorthandOoc.cleared).toBe(true);
+    expect(insertedLogs[7].sender_name).toBe('Lyra');
+    expect(comp.isOocLog(insertedLogs[7])).toBe(true);
   });
 });
