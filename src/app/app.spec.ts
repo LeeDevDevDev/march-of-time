@@ -82,6 +82,12 @@ import { CampaignService } from './features/dashboard/services/campaign.service'
 import { CampaignStore } from './features/dashboard/store/campaign.store';
 import * as THREE from 'three';
 import {
+  VTT_CHAT_COMMANDS,
+  VttChatCommandConfig,
+  findMatchingSlashCommands,
+  resolveSlashCommand,
+} from './features/vtt/config/vtt-commands.config';
+import {
   getLegalDefenderReactions,
   resolveClashReaction,
   roll2d10Check,
@@ -92,11 +98,14 @@ import {
 } from './features/vtt/engine/dice-3d.engine';
 import {
   adjustDiePoolCount,
+  applyDieClickToChatInput,
   buildPhysicalDiceFrom2d10Roll,
   createEmptyDicePool,
+  extractDicePoolFromChatInput,
   extractLogRollChips,
   formatDicePoolFormula,
   getTotalDiceInPool,
+  parseAndRollDiceFormula,
   rollCustomDicePool,
   sanitizeIncomingDiceThrowPayload,
 } from './features/vtt/engine/dice-roller.engine';
@@ -4512,28 +4521,41 @@ describe('App', () => {
     comp.closeSettingsModal();
     fixture.detectChanges();
 
+    const logTabText = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(logTabText).not.toContain('2d10 Normal');
+
+    comp.incrementDieInPool('d10');
+    expect(comp.chatInput()).toBe('/r 1d10');
     comp.incrementDieInPool('d10');
     comp.incrementDieInPool('d10');
-    comp.incrementDieInPool('d10');
+    expect(comp.chatInput()).toBe('/r 3d10');
     expect(comp.dicePool().d10).toBe(3);
-    expect(comp.customPoolFormula()).toBe('3d10');
 
     const fakeContextEvent = new MouseEvent('contextmenu', { cancelable: true });
     comp.decrementDieInPool(fakeContextEvent, 'd10');
     expect(fakeContextEvent.defaultPrevented).toBe(true);
+    expect(comp.chatInput()).toBe('/r 2d10');
     expect(comp.dicePool().d10).toBe(2);
 
     comp.incrementDieInPool('d8');
-    comp.onDiceModifierChange(2);
-    expect(comp.customPoolFormula()).toBe('1d8 + 2d10 + 2');
+    expect(comp.chatInput()).toBe('/r 2d10 + 1d8');
+    comp.onChatInputChange(`${comp.chatInput()} + 2`);
+    expect(comp.chatInput()).toBe('/r 2d10 + 1d8 + 2');
+    expect(comp.dicePool().d10).toBe(2);
+    expect(comp.dicePool().d8).toBe(1);
+    expect(comp.composerSubmitLabel()).toBe('Roll');
 
-    await comp.triggerQuickDiceRoll();
+    await comp.sendChatMessage();
     fixture.detectChanges();
+
+    expect(comp.chatInput()).toBe('');
+    expect(comp.customPoolTotalCount()).toBe(0);
+    expect(comp.dicePool()).toEqual(createEmptyDicePool());
 
     const thrown = vttStore.latestDiceThrow();
     expect(thrown).toBeTruthy();
-    expect(thrown!.formula).toBe('1d8 + 2d10 + 2');
-    expect(thrown!.dice.map((d) => d.kind)).toEqual(['d8', 'd10', 'd10']);
+    expect(thrown!.formula).toBe('2d10 + 1d8 + 2');
+    expect(thrown!.dice.map((d) => d.kind)).toEqual(['d10', 'd10', 'd8']);
     expect(thrown!.appearance).toEqual({
       presetId: 'custom',
       material: 'gemstone',
@@ -4543,7 +4565,209 @@ describe('App', () => {
 
     expect(insertedLogs.length).toBe(1);
     const chips = extractLogRollChips(insertedLogs[0].payload);
-    expect(chips.map((c) => c.dieType)).toEqual(['d8', 'd10', 'd10']);
+    expect(chips.map((c) => c.dieType)).toEqual(['d10', 'd10', 'd8']);
     expect(comp.getLogRollChips(insertedLogs[0]).length).toBe(3);
+  });
+
+  it('should resolve configurable slash command shorthands from vtt-commands.config.ts and enforce privacy for /gmroll and /whisper', async () => {
+    expect(resolveSlashCommand('/w gm Watch out')?.config.action).toBe('whisper');
+    expect(resolveSlashCommand('/whisper gm Watch out')?.config.action).toBe(
+      'whisper'
+    );
+    expect(resolveSlashCommand('/r 2d10')?.config.action).toBe('roll');
+    expect(resolveSlashCommand('/roll 2d10')?.config.action).toBe('roll');
+    expect(resolveSlashCommand('/gmr 1d20')?.config.action).toBe('gm_roll');
+    expect(resolveSlashCommand('/gmroll 1d20')?.config.action).toBe('gm_roll');
+
+    const customRegistry: VttChatCommandConfig[] = VTT_CHAT_COMMANDS.map((cmd) =>
+      cmd.action === 'roll'
+        ? { ...cmd, primary: '/dice', aliases: ['/roll', '/d'] }
+        : cmd.action === 'whisper'
+          ? { ...cmd, aliases: [...cmd.aliases, '/dm'] }
+          : cmd
+    );
+
+    expect(applyDieClickToChatInput('', 'd10', 1, customRegistry)).toBe(
+      '/dice 1d10'
+    );
+    expect(
+      extractDicePoolFromChatInput('/d 2d6 + 1d12', customRegistry)
+    ).toEqual({
+      ...createEmptyDicePool(),
+      d6: 2,
+      d12: 1,
+    });
+    expect(
+      resolveSlashCommand('/dm @kael Ambush!', customRegistry)?.config.action
+    ).toBe('whisper');
+    expect(
+      findMatchingSlashCommands('/dm', false, customRegistry).map(
+        (c) => c.action
+      )
+    ).toEqual(['whisper']);
+
+    const khQueue = [3, 9, 7];
+    const khOutcome = parseAndRollDiceFormula(
+      '3d10kh2 + 4 # Athletics',
+      () => khQueue.shift() ?? 1
+    );
+    expect(khOutcome.ok).toBe(true);
+    if (khOutcome.ok) {
+      expect(khOutcome.customLabel).toBe('Athletics');
+      expect(khOutcome.result.diceSubtotal).toBe(16);
+      expect(khOutcome.result.total).toBe(20);
+      expect(khOutcome.result.chips.map((c) => Boolean(c.dropped))).toEqual([
+        true,
+        false,
+        false,
+      ]);
+    }
+
+    const activeUserSig = signal({
+      id: 'player-1',
+      email: 'lyra@example.com',
+      name: 'Lyra',
+      handle: 'lyra',
+    });
+    const insertedLogs: VttLogEntry[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({
+              id: activeUserSig().id,
+              email: activeUserSig().email,
+            }),
+            handle: () => activeUserSig().handle,
+            displayName: () => activeUserSig().name,
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            effectiveMapsFolderId: () => null,
+            effectiveCharactersFolderId: () => null,
+            getFolderTrailLabel: () => '@lyra / Maps',
+            assets: () => [],
+            folders: () => [],
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            insertLog: async (
+              entry: Omit<VttLogEntry, 'id' | 'created_at'>
+            ) => {
+              const saved: VttLogEntry = {
+                ...entry,
+                id: `priv-log-${insertedLogs.length + 1}`,
+                created_at: new Date().toISOString(),
+              };
+              insertedLogs.push(saved);
+              return saved;
+            },
+            sendDiceThrow: async () => undefined,
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-priv-1',
+      gm_id: 'gm-user-1',
+      name: 'Whispering Vault',
+      cover_image_url: null,
+      invite_code: 'WHISP1',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.participants.set([
+      {
+        user_id: 'gm-user-1',
+        display_name: 'Warden',
+        handle: 'warden',
+        role: 'gm',
+      },
+      {
+        user_id: 'player-1',
+        display_name: 'Lyra',
+        handle: 'lyra',
+        role: 'player',
+      },
+      {
+        user_id: 'player-2',
+        display_name: 'Kael',
+        handle: 'kael',
+        role: 'player',
+      },
+      {
+        user_id: 'player-3',
+        display_name: 'Bram',
+        handle: 'bram',
+        role: 'player',
+      },
+    ]);
+
+    const wGm = await vttStore.executeChatOrCommand(
+      '/w gm Checking the secret door'
+    );
+    expect(wGm.cleared).toBe(true);
+
+    const wPlayer = await vttStore.executeChatOrCommand(
+      '/whisper @kael Cover my left flank'
+    );
+    expect(wPlayer.cleared).toBe(true);
+
+    const gmRollRes = await vttStore.executeChatOrCommand('/gmroll 2d10 + 3');
+    expect(gmRollRes.cleared).toBe(true);
+    const gmRollThrow = vttStore.latestDiceThrow();
+    expect(gmRollThrow).toBeTruthy();
+    expect(gmRollThrow!.recipientIds).toEqual(['gm-user-1']);
+
+    expect(vttStore.visibleLogs().length).toBe(3);
+
+    activeUserSig.set({
+      id: 'gm-user-1',
+      email: 'gm@example.com',
+      name: 'Warden',
+      handle: 'warden',
+    });
+    expect(vttStore.visibleLogs().map((l) => l.title)).toEqual([
+      'Checking the secret door',
+      insertedLogs[2].title,
+    ]);
+    expect(vttStore.isDiceThrowVisibleToCurrentUser(gmRollThrow!)).toBe(true);
+
+    activeUserSig.set({
+      id: 'player-2',
+      email: 'kael@example.com',
+      name: 'Kael',
+      handle: 'kael',
+    });
+    expect(vttStore.visibleLogs().map((l) => l.title)).toEqual([
+      'Cover my left flank',
+    ]);
+    expect(vttStore.isDiceThrowVisibleToCurrentUser(gmRollThrow!)).toBe(false);
+
+    activeUserSig.set({
+      id: 'player-3',
+      email: 'bram@example.com',
+      name: 'Bram',
+      handle: 'bram',
+    });
+    expect(vttStore.visibleLogs().length).toBe(0);
+    expect(vttStore.isDiceThrowVisibleToCurrentUser(gmRollThrow!)).toBe(false);
   });
 });

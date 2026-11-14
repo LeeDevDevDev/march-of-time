@@ -266,6 +266,13 @@ export interface VttLogEntry {
   created_at: string;
 }
 
+export interface VttParticipant {
+  user_id: string;
+  display_name: string;
+  handle: string | null;
+  role: 'gm' | 'player';
+}
+
 export interface VttNpcPreset {
   id: string;
   name: string;

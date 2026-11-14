@@ -1208,10 +1208,11 @@
 
           @if (sidebarTab() === 'log') {
             <div class="flex flex-1 min-h-0 flex-col">
-              @if (vttStore.isGm() && vttStore.logs().length > 0) {
+              @let visibleEntries = vttStore.visibleLogs();
+              @if (vttStore.isGm() && visibleEntries.length > 0) {
                 <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-3 py-1.5 text-[11px]">
                   <span class="font-mono-num text-[var(--mot-muted)]">
-                    {{ vttStore.logs().length }} {{ vttStore.logs().length === 1 ? 'Entry' : 'Entries' }}
+                    {{ visibleEntries.length }} {{ visibleEntries.length === 1 ? 'Entry' : 'Entries' }}
                   </span>
                   @if (!confirmClearLogs()) {
                     <button
@@ -1247,25 +1248,45 @@
                 #logScroll
                 class="flex-1 overflow-y-auto p-3 space-y-2 text-xs"
               >
-                @if (vttStore.logs().length === 0) {
+                @if (visibleEntries.length === 0) {
                   <p class="py-8 text-center text-xs text-[var(--mot-muted)]">
-                    No rolls or clashes logged yet. Roll 2d10 or attack a target on the grid!
+                    No rolls or clashes logged yet. Click any die below or type /r to roll!
                   </p>
                 } @else {
-                  @for (entry of vttStore.logs(); track entry.id) {
+                  @for (entry of visibleEntries; track entry.id) {
+                    @let whisperCard = isWhisperLog(entry);
+                    @let privacyBadge = getLogPrivacyBadge(entry);
                     <div
                       class="group rounded-xl border p-2.5 space-y-1"
-                      [class.border-[#C4491A]]="entry.kind === 'clash'"
-                      [class.bg-[var(--mot-warn-bg)]]="entry.kind === 'clash'"
-                      [class.border-[var(--mot-hp)]]="entry.kind === 'damage'"
-                      [class.bg-[var(--mot-hp-bg)]]="entry.kind === 'damage'"
-                      [class.border-[var(--mot-jade-border)]]="entry.kind === 'round'"
-                      [class.bg-[var(--mot-jade-bg)]]="entry.kind === 'round'"
-                      [class.border-[var(--mot-border)]]="entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
-                      [class.bg-[var(--mot-well)]]="entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
+                      [class.border-[#8B5CF6]/60]="whisperCard"
+                      [class.bg-[#8B5CF6]/10]="whisperCard"
+                      [class.border-[#C4491A]]="!whisperCard && entry.kind === 'clash'"
+                      [class.bg-[var(--mot-warn-bg)]]="!whisperCard && entry.kind === 'clash'"
+                      [class.border-[var(--mot-hp)]]="!whisperCard && entry.kind === 'damage'"
+                      [class.bg-[var(--mot-hp-bg)]]="!whisperCard && entry.kind === 'damage'"
+                      [class.border-[var(--mot-jade-border)]]="!whisperCard && entry.kind === 'round'"
+                      [class.bg-[var(--mot-jade-bg)]]="!whisperCard && entry.kind === 'round'"
+                      [class.border-[var(--mot-border)]]="!whisperCard && entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
+                      [class.bg-[var(--mot-well)]]="!whisperCard && entry.kind !== 'clash' && entry.kind !== 'damage' && entry.kind !== 'round'"
                     >
                       <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
-                        <span class="truncate font-bold uppercase">{{ entry.sender_name }}</span>
+                        <div class="flex min-w-0 items-center gap-1.5">
+                          <span class="truncate font-bold uppercase">{{ entry.sender_name }}</span>
+                          @if (privacyBadge) {
+                            <span
+                              class="shrink-0 rounded border px-1.5 py-0.25 text-[9px] font-bold"
+                              [class.border-[#8B5CF6]/50]="whisperCard"
+                              [class.bg-[#8B5CF6]/15]="whisperCard"
+                              [class.text-[#C4B5FD]]="whisperCard && themeStore.vttTheme() === 'dark'"
+                              [class.text-[#6D28D9]]="whisperCard && themeStore.vttTheme() === 'light'"
+                              [class.border-[#C4491A]/50]="!whisperCard"
+                              [class.bg-[#C4491A]/15]="!whisperCard"
+                              [class.text-[var(--mot-accent-text)]]="!whisperCard"
+                            >
+                              {{ privacyBadge }}
+                            </span>
+                          }
+                        </div>
                         <div class="flex shrink-0 items-center gap-1.5">
                           <span class="font-mono-num">{{ entry.created_at | date: 'shortTime' }}</span>
                           @if (vttStore.canDeleteLog(entry)) {
@@ -1281,7 +1302,10 @@
                           }
                         </div>
                       </div>
-                      <div class="font-bold text-[var(--mot-text)]">
+                      <div
+                        class="font-bold text-[var(--mot-text)] break-words"
+                        [class.italic]="isEmoteLog(entry)"
+                      >
                         {{ entry.title }}
                       </div>
                       @let rollChips = getLogRollChips(entry);
@@ -1309,7 +1333,7 @@
                         </div>
                       }
                       @if (entry.detail) {
-                        <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                        <div class="whitespace-pre-line font-mono-num text-[11px] text-[var(--mot-muted)]">
                           {{ entry.detail }}
                         </div>
                       }
@@ -1318,14 +1342,14 @@
                 }
               </div>
 
-              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3 space-y-2.5 text-xs">
+              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3 space-y-2 text-xs">
                 <div class="space-y-1.5">
                   <div class="flex items-center justify-between gap-2 text-[10px]">
                     <span class="font-semibold text-[var(--mot-muted)]">
                       Left-click add &middot; Right-click remove
                     </span>
-                    <div class="flex items-center gap-1.5">
-                      @if (customPoolTotalCount() > 0) {
+                    <div class="flex items-center gap-1">
+                      @if (customPoolTotalCount() > 0 || isRollComposerActive()) {
                         <button
                           type="button"
                           (click)="clearDicePool()"
@@ -1334,6 +1358,15 @@
                           Clear
                         </button>
                       }
+                      <button
+                        type="button"
+                        (click)="openSlashCommandsMenu()"
+                        title="Slash Commands"
+                        aria-label="Slash Commands"
+                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-mono-num font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                      >
+                        /
+                      </button>
                       <button
                         type="button"
                         (click)="openSettingsModal('dice')"
@@ -1429,59 +1462,79 @@
                   </div>
                 </div>
 
-                <div class="flex items-center gap-1.5">
-                  @if (customPoolTotalCount() === 0) {
-                    <select
-                      aria-label="Roll Mode"
-                      [(ngModel)]="quickDiceMode"
-                      class="mot-input min-w-0 flex-1 px-2 py-1.5 text-xs font-semibold"
-                    >
-                      <option value="normal">2d10 Normal</option>
-                      <option value="advantage">Advantage</option>
-                      <option value="disadvantage">Disadvantage</option>
-                    </select>
-                  } @else {
-                    <div
-                      class="flex min-w-0 flex-1 items-center rounded-lg border border-[#C4491A]/60 bg-[var(--mot-well)] px-2.5 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)] truncate"
-                      [title]="customPoolFormula()"
-                    >
-                      {{ customPoolFormula() }}
+                @let cmdSuggestions = slashCommandSuggestions();
+                @let targetSuggestions = whisperTargetSuggestions();
+                <form (ngSubmit)="sendChatMessage()" class="relative flex items-end gap-1.5">
+                  @if (cmdSuggestions.length > 0) {
+                    <div class="mot-float absolute bottom-full left-0 right-0 z-30 mb-1.5 max-h-52 overflow-y-auto rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1 shadow-xl space-y-0.5">
+                      @for (cmd of cmdSuggestions; track cmd.action) {
+                        @let aliasesLabel = formatCommandAliasesLabel(cmd);
+                        <button
+                          type="button"
+                          (mousedown)="$event.preventDefault(); applySlashCommandSuggestion(cmd)"
+                          class="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--mot-well)]"
+                        >
+                          <div class="flex w-full items-center justify-between gap-2">
+                            <span class="font-mono-num text-[11px] font-bold text-[var(--mot-text)]">
+                              {{ cmd.primary }}
+                              @if (cmd.usage) {
+                                <span class="font-normal text-[var(--mot-muted)]">{{ cmd.usage }}</span>
+                              }
+                            </span>
+                            @if (aliasesLabel) {
+                              <span class="font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                {{ aliasesLabel }}
+                              </span>
+                            }
+                          </div>
+                          <span class="text-[10px] text-[var(--mot-muted)]">
+                            {{ cmd.description }}
+                          </span>
+                        </button>
+                      }
+                    </div>
+                  } @else if (targetSuggestions.length > 0) {
+                    <div class="mot-float absolute bottom-full left-0 right-0 z-30 mb-1.5 max-h-48 overflow-y-auto rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1 shadow-xl space-y-0.5">
+                      @for (target of targetSuggestions; track target.key) {
+                        <button
+                          type="button"
+                          (mousedown)="$event.preventDefault(); applyWhisperTargetSuggestion(target)"
+                          class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--mot-well)]"
+                        >
+                          <span class="font-bold text-[var(--mot-text)]">{{ target.label }}</span>
+                          <span class="font-mono-num text-[10px] text-[var(--mot-muted)]">{{ target.sublabel }}</span>
+                        </button>
+                      }
                     </div>
                   }
 
-                  <label class="flex items-center gap-1 shrink-0 font-mono-num text-xs">
-                    <span>Mod</span>
-                    <input
-                      type="number"
-                      aria-label="Roll Modifier"
-                      [ngModel]="diceModifier()"
-                      (ngModelChange)="onDiceModifierChange($event)"
-                      class="mot-input w-14 px-2 py-1.5 text-center font-mono-num text-xs font-bold"
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    (click)="triggerQuickDiceRoll()"
-                    class="btn-copper shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
-                  >
-                    Roll
-                  </button>
-                </div>
-
-                <form (ngSubmit)="sendChatMessage()" class="flex items-center gap-1.5">
-                  <input
-                    type="text"
+                  <textarea
+                    #chatComposerInput
+                    rows="1"
                     name="chatText"
-                    [(ngModel)]="chatText"
+                    aria-label="Chat and Command Input"
+                    [ngModel]="chatInput()"
+                    (ngModelChange)="onChatInputChange($event)"
+                    (keydown)="onChatComposerKeydown($event)"
                     placeholder="Message"
-                    class="mot-input px-2.5 py-1.5 text-xs"
-                  />
+                    class="mot-input min-h-[32px] max-h-[84px] flex-1 resize-none overflow-y-auto px-2.5 py-1.5 text-xs leading-snug"
+                    [class.font-mono-num]="isRollComposerActive()"
+                    [class.border-[#C4491A]]="isRollComposerActive()"
+                  ></textarea>
                   <button
                     type="submit"
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    [disabled]="!chatInput().trim()"
+                    class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors disabled:opacity-45"
+                    [class.btn-copper]="isRollComposerActive()"
+                    [class.border]="!isRollComposerActive()"
+                    [class.border-[#8B5CF6]]="activeSlashCommand()?.config?.action === 'whisper'"
+                    [class.bg-[#8B5CF6]/15]="activeSlashCommand()?.config?.action === 'whisper'"
+                    [class.text-[var(--mot-text)]]="!isRollComposerActive()"
+                    [class.border-[var(--mot-border)]]="!isRollComposerActive() && activeSlashCommand()?.config?.action !== 'whisper'"
+                    [class.bg-[var(--mot-well)]]="!isRollComposerActive() && activeSlashCommand()?.config?.action !== 'whisper'"
+                    [class.hover:border-[#C4491A]]="!isRollComposerActive() && activeSlashCommand()?.config?.action !== 'whisper'"
                   >
-                    Send
+                    {{ composerSubmitLabel() }}
                   </button>
                 </form>
               </div>

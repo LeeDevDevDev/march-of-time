@@ -61,14 +61,20 @@ import {
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
 import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
 import {
+  VTT_CHAT_COMMANDS,
+  VttChatCommandConfig,
+  findMatchingSlashCommands,
+  getAllCommandTriggers,
+  resolveSlashCommand,
+} from './config/vtt-commands.config';
+import {
   DicePoolCounts,
   POLYHEDRAL_DIE_TYPES,
   PolyhedralDieType,
   RolledDieChip,
-  adjustDiePoolCount,
-  createEmptyDicePool,
+  applyDieClickToChatInput,
+  extractDicePoolFromChatInput,
   extractLogRollChips,
-  formatDicePoolFormula,
   getTotalDiceInPool,
 } from './engine/dice-roller.engine';
 import {
@@ -106,7 +112,7 @@ import {
   VttToolMode,
   VttWallKind,
 } from './models/vtt.model';
-import { VttStore } from './store/vtt.store';
+import { VttStore, VttWhisperTargetOption } from './store/vtt.store';
 
 export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
 export type VttSettingsModalKind = 'general' | 'dice' | 'controls' | 'invites';
@@ -227,6 +233,8 @@ export class VttRoomComponent {
 
   readonly canvasComp = viewChild<VttCanvasComponent>('vttCanvas');
   readonly logScrollEl = viewChild<ElementRef<HTMLDivElement>>('logScroll');
+  readonly chatComposerEl =
+    viewChild<ElementRef<HTMLTextAreaElement>>('chatComposerInput');
 
   readonly npcPresets = VTT_NPC_PRESETS;
   readonly folderSwatches = FOLDER_COLOR_SWATCHES;
@@ -309,22 +317,80 @@ export class VttRoomComponent {
   );
 
   readonly polyhedralDiceTypes = POLYHEDRAL_DIE_TYPES;
+  readonly chatCommandsRegistry = VTT_CHAT_COMMANDS;
   readonly dicePresets = VTT_DICE_PRESETS;
   readonly diceMaterialOptions = VTT_DICE_MATERIAL_OPTIONS;
   readonly diceBodySwatches = DICE_BODY_COLOR_SWATCHES;
   readonly diceLabelSwatches = DICE_LABEL_COLOR_SWATCHES;
-  readonly dicePool = signal<DicePoolCounts>(createEmptyDicePool());
-  readonly diceModifier = signal<number>(0);
+  readonly chatInput = signal<string>('');
+  readonly slashSuggestionsDismissed = signal<boolean>(false);
+
+  readonly dicePool = computed<DicePoolCounts>(() =>
+    extractDicePoolFromChatInput(this.chatInput(), this.chatCommandsRegistry)
+  );
   readonly customPoolTotalCount = computed<number>(() =>
     getTotalDiceInPool(this.dicePool())
   );
-  readonly customPoolFormula = computed<string>(() =>
-    formatDicePoolFormula(this.dicePool(), this.diceModifier())
+  readonly activeSlashCommand = computed(() =>
+    resolveSlashCommand(this.chatInput(), this.chatCommandsRegistry)
   );
+  readonly isRollComposerActive = computed<boolean>(() => {
+    const act = this.activeSlashCommand()?.config.action;
+    return act === 'roll' || act === 'gm_roll';
+  });
+  readonly composerSubmitLabel = computed<string>(() => {
+    const act = this.activeSlashCommand()?.config.action;
+    if (act === 'roll') return 'Roll';
+    if (act === 'gm_roll') return 'GM Roll';
+    if (act === 'whisper') return 'Whisper';
+    if (act === 'emote') return 'Emote';
+    return 'Send';
+  });
+  readonly slashCommandSuggestions = computed<VttChatCommandConfig[]>(() => {
+    if (this.slashSuggestionsDismissed()) return [];
+    const raw = this.chatInput().trimStart();
+    if (!raw.startsWith('/') || /\s/.test(raw)) {
+      return [];
+    }
+    return findMatchingSlashCommands(
+      raw,
+      this.vttStore.isGm(),
+      this.chatCommandsRegistry
+    );
+  });
+  readonly whisperTargetSuggestions = computed<VttWhisperTargetOption[]>(() => {
+    if (this.slashSuggestionsDismissed()) return [];
+    const raw = this.chatInput().trimStart();
+    const resolved = resolveSlashCommand(raw, this.chatCommandsRegistry);
+    if (!resolved || resolved.config.action !== 'whisper') {
+      return [];
+    }
+    const spaceIdx = raw.search(/\s/);
+    if (spaceIdx === -1) {
+      return [];
+    }
+    const afterCmd = raw.slice(spaceIdx + 1);
+    if (afterCmd.includes(' ')) {
+      return [];
+    }
+    const q = afterCmd.trim().toLowerCase().replace(/^@/, '');
+    const allTargets = this.vttStore.whisperTargets();
+    if (!q) {
+      return allTargets;
+    }
+    return allTargets.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.insertToken.toLowerCase().replace(/^@/, '').includes(q)
+    );
+  });
 
-  quickDiceMod = 0;
-  quickDiceMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
-  chatText = '';
+  get chatText(): string {
+    return this.chatInput();
+  }
+  set chatText(val: string) {
+    this.chatInput.set(val ?? '');
+  }
 
   manualAttackTotalInput: number | null = null;
   manualDefenseTotalInput: number | null = null;
@@ -578,7 +644,7 @@ export class VttRoomComponent {
     });
 
     effect(() => {
-      this.vttStore.logs();
+      this.vttStore.visibleLogs();
       queueMicrotask(() => {
         const el = this.logScrollEl()?.nativeElement;
         if (el) {
@@ -745,6 +811,13 @@ export class VttRoomComponent {
 
       if (this.inGameMenuOpen()) {
         this.inGameMenuOpen.set(false);
+        return;
+      }
+      if (
+        this.slashCommandSuggestions().length > 0 ||
+        this.whisperTargetSuggestions().length > 0
+      ) {
+        this.slashSuggestionsDismissed.set(true);
         return;
       }
       if (this.directoryContextMenu()) {
@@ -2234,25 +2307,150 @@ export class VttRoomComponent {
     });
   }
 
-  onDiceModifierChange(val: string | number | null): void {
-    const parsed = Number(val);
-    const clean = Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
-    this.quickDiceMod = clean;
-    this.diceModifier.set(clean);
-  }
-
   incrementDieInPool(die: PolyhedralDieType): void {
-    this.dicePool.update((curr) => adjustDiePoolCount(curr, die, 1));
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.update((curr) =>
+      applyDieClickToChatInput(curr, die, 1, this.chatCommandsRegistry)
+    );
+    queueMicrotask(() => this.resizeComposerTextarea());
   }
 
   decrementDieInPool(event: MouseEvent, die: PolyhedralDieType): void {
     event.preventDefault();
     event.stopPropagation();
-    this.dicePool.update((curr) => adjustDiePoolCount(curr, die, -1));
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.update((curr) =>
+      applyDieClickToChatInput(curr, die, -1, this.chatCommandsRegistry)
+    );
+    queueMicrotask(() => this.resizeComposerTextarea());
   }
 
   clearDicePool(): void {
-    this.dicePool.set(createEmptyDicePool());
+    this.chatInput.set('');
+    this.slashSuggestionsDismissed.set(false);
+    queueMicrotask(() => this.resizeComposerTextarea());
+  }
+
+  onChatInputChange(val: string): void {
+    this.slashSuggestionsDismissed.set(false);
+    this.chatInput.set(val ?? '');
+    queueMicrotask(() => this.resizeComposerTextarea());
+  }
+
+  openSlashCommandsMenu(): void {
+    this.slashSuggestionsDismissed.set(false);
+    if (!this.chatInput().trim()) {
+      this.chatInput.set('/');
+    }
+    queueMicrotask(() => {
+      const el = this.chatComposerEl()?.nativeElement;
+      if (el) {
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange?.(len, len);
+      }
+      this.resizeComposerTextarea();
+    });
+  }
+
+  applySlashCommandSuggestion(cmd: VttChatCommandConfig): void {
+    this.slashSuggestionsDismissed.set(false);
+    const nextVal = cmd.usage ? `${cmd.primary} ` : cmd.primary;
+    this.chatInput.set(nextVal);
+    queueMicrotask(() => {
+      const el = this.chatComposerEl()?.nativeElement;
+      if (el) {
+        el.focus();
+        el.setSelectionRange?.(nextVal.length, nextVal.length);
+      }
+      this.resizeComposerTextarea();
+    });
+  }
+
+  applyWhisperTargetSuggestion(target: VttWhisperTargetOption): void {
+    this.slashSuggestionsDismissed.set(false);
+    const resolved = resolveSlashCommand(
+      this.chatInput(),
+      this.chatCommandsRegistry
+    );
+    const trigger = resolved?.matchedTrigger || '/w';
+    const nextVal = `${trigger} ${target.insertToken} `;
+    this.chatInput.set(nextVal);
+    queueMicrotask(() => {
+      const el = this.chatComposerEl()?.nativeElement;
+      if (el) {
+        el.focus();
+        el.setSelectionRange?.(nextVal.length, nextVal.length);
+      }
+      this.resizeComposerTextarea();
+    });
+  }
+
+  onChatComposerKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Tab') {
+      const cmds = this.slashCommandSuggestions();
+      if (cmds.length > 0) {
+        event.preventDefault();
+        this.applySlashCommandSuggestion(cmds[0]);
+        return;
+      }
+      const targets = this.whisperTargetSuggestions();
+      if (targets.length > 0) {
+        event.preventDefault();
+        this.applyWhisperTargetSuggestion(targets[0]);
+        return;
+      }
+    }
+
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void this.sendChatMessage();
+    }
+  }
+
+  private resizeComposerTextarea(): void {
+    const el = this.chatComposerEl()?.nativeElement;
+    if (!el) return;
+    el.style.height = 'auto';
+    const clamped = Math.min(84, Math.max(32, el.scrollHeight));
+    el.style.height = `${clamped}px`;
+  }
+
+  formatCommandAliasesLabel(cmd: VttChatCommandConfig): string {
+    return getAllCommandTriggers(cmd)
+      .filter((a) => a !== cmd.primary.toLowerCase())
+      .join(', ');
+  }
+
+  isWhisperLog(entry: VttLogEntry): boolean {
+    return entry.payload?.['visibility'] === 'whisper';
+  }
+
+  isGmRollLog(entry: VttLogEntry): boolean {
+    return entry.payload?.['visibility'] === 'gm_roll';
+  }
+
+  isEmoteLog(entry: VttLogEntry): boolean {
+    return Boolean(entry.payload?.['emote']);
+  }
+
+  getLogPrivacyBadge(entry: VttLogEntry): string | null {
+    const vis = entry.payload?.['visibility'];
+    if (vis === 'whisper') {
+      if (entry.sender_name === 'Command Reference') {
+        return 'Only visible to you';
+      }
+      const myId = this.authStore.user()?.id;
+      const recipLabel = String(entry.payload?.['recipient_label'] ?? 'Player');
+      if (myId && entry.sender_id === myId) {
+        return `Whisper → ${recipLabel}`;
+      }
+      return 'Private Whisper';
+    }
+    if (vis === 'gm_roll') {
+      return 'GM Roll';
+    }
+    return null;
   }
 
   getLogRollChips(entry: VttLogEntry): RolledDieChip[] {
@@ -2296,30 +2494,18 @@ export class VttRoomComponent {
     );
   }
 
-  async triggerQuickDiceRoll(): Promise<void> {
-    const sel = this.vttStore.selectedToken();
-    const mod = Number.isFinite(Number(this.quickDiceMod))
-      ? Math.trunc(Number(this.quickDiceMod))
-      : this.diceModifier();
-
-    if (this.customPoolTotalCount() > 0) {
-      const prefix = sel ? `${sel.name} · Roll` : 'Dice Roll';
-      await this.vttStore.rollCustomDicePool(prefix, this.dicePool(), mod);
-      return;
-    }
-
-    const prefix = sel ? `${sel.name} · Check` : '2d10 Check';
-    await this.vttStore.rollQuickDice(prefix, mod, this.quickDiceMode);
-  }
-
   async sendChatMessage(): Promise<void> {
-    const msg = this.chatText.trim();
-    if (!msg) return;
-    this.chatText = '';
-    await this.vttStore.postLog({
-      kind: 'chat',
-      title: msg,
-    });
+    const raw = this.chatInput().trim();
+    if (!raw) return;
+    const outcome = await this.vttStore.executeChatOrCommand(
+      raw,
+      this.chatCommandsRegistry
+    );
+    if (outcome.cleared) {
+      this.chatInput.set('');
+      this.slashSuggestionsDismissed.set(false);
+      queueMicrotask(() => this.resizeComposerTextarea());
+    }
   }
 
   deleteLogEntry(logId: string): void {

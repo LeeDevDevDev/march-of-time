@@ -25,6 +25,7 @@ import {
   VttLogEntry,
   VttLogKind,
   VttNpcStats,
+  VttParticipant,
   VttPendingClash,
   VttRosterActorModel,
   VttSceneMetaFallback,
@@ -44,6 +45,7 @@ export interface VttPingBroadcast {
 export interface VttRoomBundle {
   campaign: GameCardModel;
   activeSceneId: string | null;
+  participants?: VttParticipant[];
   scenes: VttSceneModel[];
   folders: VttFolderModel[];
   rosterActors: VttRosterActorModel[];
@@ -455,6 +457,7 @@ export class VttService {
       const raw = data as {
         campaign?: GameCardModel | null;
         activeSceneId?: string | null;
+        participants?: Record<string, unknown>[];
         scenes?: Record<string, unknown>[];
         folders?: Record<string, unknown>[];
         rosterActors?: Record<string, unknown>[];
@@ -470,6 +473,20 @@ export class VttService {
           error: 'Campaign not found.',
         };
       }
+
+      const participants: VttParticipant[] = (
+        Array.isArray(raw.participants) ? raw.participants : []
+      )
+        .filter((p) => p && typeof p === 'object' && typeof p['user_id'] === 'string')
+        .map((p) => ({
+          user_id: String(p['user_id']),
+          display_name: String(p['display_name'] ?? 'Adventurer'),
+          handle:
+            typeof p['handle'] === 'string' && p['handle'].trim().length > 0
+              ? p['handle'].trim()
+              : null,
+          role: p['role'] === 'gm' ? 'gm' : 'player',
+        }));
 
       const scenes = (Array.isArray(raw.scenes) ? raw.scenes : []).map(
         normalizeSceneRow
@@ -500,6 +517,7 @@ export class VttService {
         bundle: {
           campaign: raw.campaign,
           activeSceneId: raw.activeSceneId ?? null,
+          participants,
           scenes,
           folders,
           rosterActors,

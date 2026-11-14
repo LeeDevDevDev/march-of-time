@@ -28,6 +28,13 @@ import {
 } from '../../collections/collections.store';
 import { GameCardModel } from '../../dashboard/models/campaign.model';
 import {
+  VTT_CHAT_COMMANDS,
+  VttChatCommandConfig,
+  getAllCommandTriggers,
+  isUnknownSlashCommand,
+  resolveSlashCommand,
+} from '../config/vtt-commands.config';
+import {
   DefenderClashCapabilities,
   createManualRoll,
   getLegalDefenderReactions,
@@ -41,6 +48,7 @@ import {
   buildPhysicalDiceFrom2d10Roll,
   generateThrowSeed,
   getTotalDiceInPool,
+  parseAndRollDiceFormula,
   rollCustomDicePool,
   sanitizeIncomingDiceThrowPayload,
 } from '../engine/dice-roller.engine';
@@ -85,6 +93,7 @@ import {
   VttLightSource,
   VttLogEntry,
   VttNpcPreset,
+  VttParticipant,
   VttPendingClash,
   VttPoint,
   VttRosterActorModel,
@@ -96,6 +105,14 @@ import {
   VttWallSegment,
 } from '../models/vtt.model';
 import { VttPingBroadcast, VttService } from '../services/vtt.service';
+
+export interface VttWhisperTargetOption {
+  key: string;
+  insertToken: string;
+  label: string;
+  sublabel: string;
+  userIds: string[];
+}
 
 export interface PendingTargetAction {
   attackerTokenId: string;
@@ -183,6 +200,7 @@ export class VttStore {
   readonly needsMigration = signal(false);
 
   readonly campaign = signal<GameCardModel | null>(null);
+  readonly participants = signal<VttParticipant[]>([]);
   readonly folders = signal<VttFolderModel[]>([]);
   readonly rosterActors = signal<VttRosterActorModel[]>([]);
   readonly draggingRosterPayload = signal<VttRosterDragPayload | null>(null);
@@ -191,6 +209,66 @@ export class VttStore {
   readonly tokens = signal<VttTokenModel[]>([]);
   readonly logs = signal<VttLogEntry[]>([]);
   readonly allCharacters = signal<CharacterModel[]>([]);
+
+  readonly visibleLogs = computed<VttLogEntry[]>(() =>
+    this.logs().filter((entry) => this.isLogVisibleToCurrentUser(entry))
+  );
+
+  readonly whisperTargets = computed<VttWhisperTargetOption[]>(() => {
+    const camp = this.campaign();
+    const myId = this.authStore.user()?.id ?? null;
+    const list: VttWhisperTargetOption[] = [];
+    const seenUserIds = new Set<string>();
+
+    if (camp?.gm_id) {
+      const gmPart = this.participants().find((p) => p.user_id === camp.gm_id);
+      list.push({
+        key: 'gm',
+        insertToken: 'gm',
+        label: 'GM',
+        sublabel: gmPart?.display_name || 'Game Master',
+        userIds: [camp.gm_id],
+      });
+    }
+
+    for (const part of this.participants()) {
+      if (part.user_id === myId || seenUserIds.has(part.user_id)) continue;
+      seenUserIds.add(part.user_id);
+      const tokenStr = part.handle
+        ? `@${part.handle}`
+        : part.display_name.includes(' ')
+          ? `"${part.display_name}"`
+          : part.display_name;
+      list.push({
+        key: `user-${part.user_id}`,
+        insertToken: tokenStr,
+        label: part.display_name,
+        sublabel: part.handle
+          ? `@${part.handle} · ${part.role === 'gm' ? 'GM' : 'Player'}`
+          : part.role === 'gm'
+            ? 'GM'
+            : 'Player',
+        userIds: [part.user_id],
+      });
+    }
+
+    for (const ch of this.allCharacters()) {
+      if (!ch.owner_id || ch.owner_id === myId || seenUserIds.has(ch.owner_id)) {
+        continue;
+      }
+      seenUserIds.add(ch.owner_id);
+      const tokenStr = ch.name.includes(' ') ? `"${ch.name}"` : ch.name;
+      list.push({
+        key: `char-${ch.id}`,
+        insertToken: tokenStr,
+        label: ch.name,
+        sublabel: 'Character',
+        userIds: [ch.owner_id],
+      });
+    }
+
+    return list;
+  });
 
   readonly activeTool = signal<VttToolMode>('select');
   readonly activeWallKind = signal<VttWallKind>('wall');
@@ -591,6 +669,7 @@ export class VttStore {
           hydratedFromBundle = true;
           campData = roomRes.bundle.campaign;
           this.campaign.set(campData);
+          this.participants.set(roomRes.bundle.participants ?? []);
           this.allCharacters.set(roomRes.bundle.characters);
           this.folders.set(roomRes.bundle.folders);
           this.rosterActors.set(roomRes.bundle.rosterActors);
@@ -808,11 +887,15 @@ export class VttStore {
             }
           },
           onLogInsert: (entry) => {
+            const visible = this.isLogVisibleToCurrentUser(entry);
             const alreadyPresent = this.logs().some((e) => e.id === entry.id);
             if (!alreadyPresent) {
               this.logs.update((curr) => [...curr, entry]);
-              this.triggerLogAudioCue(entry.kind);
+              if (visible) {
+                this.triggerLogAudioCue(entry.kind);
+              }
             }
+            if (!visible) return;
             const embeddedThrow = sanitizeIncomingDiceThrowPayload(
               entry.payload?.['diceThrow']
             );
@@ -852,6 +935,7 @@ export class VttStore {
   leaveRoom(): void {
     this.vttService.unsubscribeChannel(this.realtimeChannel);
     this.realtimeChannel = null;
+    this.participants.set([]);
     this.pendingTargetAction.set(null);
     this.draggingRosterPayload.set(null);
     this.selectedTokenId.set(null);
@@ -3907,6 +3991,7 @@ export class VttStore {
     total: number;
     dice: VttPhysicalDieRoll[];
     senderNameOverride?: string;
+    recipientIds?: string[];
   }): VttDiceThrowPayload {
     return {
       id: `throw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -3922,7 +4007,45 @@ export class VttStore {
       appearance: { ...this.settingsStore.preferences().diceAppearance },
       seed: generateThrowSeed(),
       createdAt: Date.now(),
+      ...(input.recipientIds && input.recipientIds.length > 0
+        ? { recipientIds: input.recipientIds }
+        : {}),
     };
+  }
+
+  isLogVisibleToCurrentUser(entry: VttLogEntry): boolean {
+    const rawRecips = entry.payload?.['recipient_ids'];
+    if (!Array.isArray(rawRecips)) {
+      return true;
+    }
+    if (this.authStore.isAdmin()) {
+      return true;
+    }
+    const uid = this.authStore.user()?.id;
+    if (!uid) {
+      return false;
+    }
+    if (entry.sender_id && entry.sender_id === uid) {
+      return true;
+    }
+    return rawRecips.some((id) => typeof id === 'string' && id === uid);
+  }
+
+  isDiceThrowVisibleToCurrentUser(payload: VttDiceThrowPayload): boolean {
+    if (!Array.isArray(payload.recipientIds) || payload.recipientIds.length === 0) {
+      return true;
+    }
+    if (this.authStore.isAdmin()) {
+      return true;
+    }
+    const uid = this.authStore.user()?.id;
+    if (!uid) {
+      return false;
+    }
+    if (payload.senderId && payload.senderId === uid) {
+      return true;
+    }
+    return payload.recipientIds.includes(uid);
   }
 
   enqueueDiceThrow(
@@ -3939,11 +4062,357 @@ export class VttStore {
       }
     }
     this.seenDiceThrowIds.add(payload.id);
-    this.latestDiceThrow.set(payload);
+
+    if (this.isDiceThrowVisibleToCurrentUser(payload)) {
+      this.latestDiceThrow.set(payload);
+    }
 
     if (broadcastToRoom) {
       void this.vttService.sendDiceThrow?.(this.realtimeChannel, payload);
     }
+  }
+
+  private resolveWhisperCommandArgs(rest: string):
+    | {
+        ok: true;
+        recipientIds: string[];
+        recipientLabel: string;
+        message: string;
+      }
+    | {
+        ok: false;
+        error: string;
+      } {
+    const trimmed = rest.trim();
+    if (!trimmed) {
+      return {
+        ok: false,
+        error: 'Specify a recipient and message, such as gm or @handle followed by your message.',
+      };
+    }
+
+    const camp = this.campaign();
+    const candidates: {
+      names: string[];
+      label: string;
+      userIds: string[];
+    }[] = [];
+
+    if (camp?.gm_id) {
+      const gmPart = this.participants().find((p) => p.user_id === camp.gm_id);
+      const gmNames = ['gm', 'dm', 'warden', 'gamemaster'];
+      if (gmPart?.handle) {
+        gmNames.push(gmPart.handle.toLowerCase(), `@${gmPart.handle.toLowerCase()}`);
+      }
+      if (gmPart?.display_name) {
+        gmNames.push(gmPart.display_name.toLowerCase());
+      }
+      candidates.push({
+        names: gmNames,
+        label: 'GM',
+        userIds: [camp.gm_id],
+      });
+    }
+
+    for (const part of this.participants()) {
+      const names = [part.display_name.toLowerCase()];
+      if (part.handle) {
+        names.push(part.handle.toLowerCase(), `@${part.handle.toLowerCase()}`);
+      }
+      candidates.push({
+        names,
+        label: part.role === 'gm' ? `GM (${part.display_name})` : part.display_name,
+        userIds: [part.user_id],
+      });
+    }
+
+    for (const ch of this.allCharacters()) {
+      if (!ch.owner_id) continue;
+      candidates.push({
+        names: [ch.name.toLowerCase()],
+        label: ch.name,
+        userIds: [ch.owner_id],
+      });
+    }
+
+    for (const tok of this.tokens()) {
+      if (!tok.owner_id) continue;
+      candidates.push({
+        names: [tok.name.toLowerCase()],
+        label: tok.name,
+        userIds: [tok.owner_id],
+      });
+    }
+
+    for (const log of this.logs()) {
+      if (!log.sender_id || !log.sender_name) continue;
+      candidates.push({
+        names: [log.sender_name.toLowerCase()],
+        label: log.sender_name,
+        userIds: [log.sender_id],
+      });
+    }
+
+    let rawTarget = '';
+    let message = '';
+
+    if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+      const quote = trimmed[0];
+      const closeIdx = trimmed.indexOf(quote, 1);
+      if (closeIdx === -1) {
+        return { ok: false, error: 'Unclosed quote around whisper recipient.' };
+      }
+      rawTarget = trimmed.slice(1, closeIdx).trim();
+      message = trimmed.slice(closeIdx + 1).trim();
+    } else {
+      const lowerRest = trimmed.toLowerCase();
+      let matchedMultiWord: {
+        nameLen: number;
+        cand: (typeof candidates)[number];
+      } | null = null;
+
+      for (const cand of candidates) {
+        for (const alias of cand.names) {
+          if (!alias.includes(' ')) continue;
+          if (
+            lowerRest.startsWith(alias + ' ') &&
+            (!matchedMultiWord || alias.length > matchedMultiWord.nameLen)
+          ) {
+            matchedMultiWord = { nameLen: alias.length, cand };
+          }
+        }
+      }
+
+      if (matchedMultiWord) {
+        const msg = trimmed.slice(matchedMultiWord.nameLen).trim();
+        if (!msg) {
+          return { ok: false, error: 'Enter a whisper message after the recipient.' };
+        }
+        return {
+          ok: true,
+          recipientIds: matchedMultiWord.cand.userIds,
+          recipientLabel: matchedMultiWord.cand.label,
+          message: msg,
+        };
+      }
+
+      const spIdx = trimmed.search(/\s/);
+      if (spIdx === -1) {
+        return { ok: false, error: 'Enter a whisper message after the recipient.' };
+      }
+      rawTarget = trimmed.slice(0, spIdx).trim();
+      message = trimmed.slice(spIdx + 1).trim();
+    }
+
+    if (!rawTarget || !message) {
+      return { ok: false, error: 'Specify both a recipient and a whisper message.' };
+    }
+
+    const q = rawTarget.toLowerCase();
+    const qStripped = q.replace(/^@/, '');
+
+    const exact = candidates.find((c) =>
+      c.names.some((n) => n === q || n === qStripped)
+    );
+    if (exact) {
+      return {
+        ok: true,
+        recipientIds: exact.userIds,
+        recipientLabel: exact.label,
+        message,
+      };
+    }
+
+    const prefixMatch = candidates.find((c) =>
+      c.names.some((n) => n.startsWith(qStripped) && qStripped.length >= 2)
+    );
+    if (prefixMatch) {
+      return {
+        ok: true,
+        recipientIds: prefixMatch.userIds,
+        recipientLabel: prefixMatch.label,
+        message,
+      };
+    }
+
+    return {
+      ok: false,
+      error: `Could not find participant "${rawTarget}" in this campaign.`,
+    };
+  }
+
+  async executeChatOrCommand(
+    rawInput: string,
+    registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
+  ): Promise<{ cleared: boolean }> {
+    const trimmed = (rawInput ?? '').trim();
+    if (!trimmed) {
+      return { cleared: false };
+    }
+
+    const unknownCmd = isUnknownSlashCommand(trimmed, registry);
+    if (unknownCmd) {
+      const validList = registry
+        .filter((c) => !c.gmOnly || this.isGm())
+        .map((c) => c.primary)
+        .join(', ');
+      this.notifications.error(
+        'Unknown Command',
+        `"${unknownCmd}" is not recognized. Available commands: ${validList}`
+      );
+      return { cleared: false };
+    }
+
+    const resolved = resolveSlashCommand(trimmed, registry);
+    if (!resolved) {
+      await this.postLog({
+        kind: 'chat',
+        title: trimmed,
+      });
+      return { cleared: true };
+    }
+
+    const action = resolved.config.action;
+
+    if (action === 'roll' || action === 'gm_roll') {
+      const parsed = parseAndRollDiceFormula(resolved.rest);
+      if (!parsed.ok) {
+        this.notifications.error('Invalid Roll Formula', parsed.error);
+        return { cleared: false };
+      }
+
+      const res = parsed.result;
+      const sel = this.selectedToken();
+      const baseActorLabel = sel ? `${sel.name} · Roll` : 'Dice Roll';
+      const rollLabel = parsed.customLabel
+        ? sel
+          ? `${sel.name} · ${parsed.customLabel}`
+          : parsed.customLabel
+        : baseActorLabel;
+
+      const camp = this.campaign();
+      const isGmPrivate = action === 'gm_roll';
+      const recipientIds =
+        isGmPrivate && camp?.gm_id ? [camp.gm_id] : undefined;
+
+      const diceThrow = this.createDiceThrowPayload({
+        label: isGmPrivate ? `${rollLabel} (GM)` : rollLabel,
+        formula: res.formula,
+        total: res.total,
+        dice: res.physicalDice,
+        recipientIds,
+      });
+      this.enqueueDiceThrow(diceThrow, true);
+
+      await this.postLog({
+        kind: 'roll',
+        title: `${rollLabel} (${res.formula}) → ${res.total}`,
+        detail: res.detail,
+        payload: {
+          chips: res.chips,
+          groups: res.groups,
+          formula: res.formula,
+          modifier: res.modifier,
+          total: res.total,
+          diceThrow,
+          ...(isGmPrivate
+            ? {
+                visibility: 'gm_roll',
+                recipient_label: 'GM',
+                ...(recipientIds ? { recipient_ids: recipientIds } : {}),
+              }
+            : {}),
+        },
+      });
+      return { cleared: true };
+    }
+
+    if (action === 'whisper') {
+      const parsedWhisper = this.resolveWhisperCommandArgs(resolved.rest);
+      if (!parsedWhisper.ok) {
+        this.notifications.error('Whisper Failed', parsedWhisper.error);
+        return { cleared: false };
+      }
+
+      await this.postLog({
+        kind: 'chat',
+        title: parsedWhisper.message,
+        payload: {
+          visibility: 'whisper',
+          recipient_ids: parsedWhisper.recipientIds,
+          recipient_label: parsedWhisper.recipientLabel,
+        },
+      });
+      return { cleared: true };
+    }
+
+    if (action === 'emote') {
+      if (!resolved.rest) {
+        this.notifications.error(
+          'Empty Emote',
+          'Provide an action description after the emote command.'
+        );
+        return { cleared: false };
+      }
+      const actorName =
+        this.selectedToken()?.name ||
+        this.authStore.displayName() ||
+        'Adventurer';
+      await this.postLog({
+        kind: 'chat',
+        title: `${actorName} ${resolved.rest}`,
+        payload: {
+          emote: true,
+        },
+      });
+      return { cleared: true };
+    }
+
+    if (action === 'clear') {
+      if (!this.isGm()) {
+        this.notifications.error(
+          'Permission Denied',
+          'Only the Game Master can clear the campaign log.'
+        );
+        return { cleared: false };
+      }
+      await this.clearAllLogs();
+      return { cleared: true };
+    }
+
+    if (action === 'help') {
+      const camp = this.campaign();
+      const lines = registry
+        .filter((c) => !c.gmOnly || this.isGm())
+        .map((c) => {
+          const allTriggers = getAllCommandTriggers(c).join(', ');
+          const usage = c.usage ? ` ${c.usage}` : '';
+          return `${allTriggers}${usage} — ${c.description}`;
+        });
+
+      const helpEntry: VttLogEntry = {
+        id: `local-help-${Date.now()}`,
+        campaign_id: camp?.id ?? 'local',
+        encounter_id: this.activeScene()?.id ?? null,
+        sender_id: this.authStore.user()?.id ?? null,
+        sender_name: 'Command Reference',
+        kind: 'system',
+        title: 'Slash Commands & Shorthands',
+        detail: lines.join('\n'),
+        payload: {
+          visibility: 'whisper',
+          recipient_ids: this.authStore.user()?.id
+            ? [this.authStore.user()!.id]
+            : [],
+          recipient_label: 'You',
+        },
+        created_at: new Date().toISOString(),
+      };
+      this.logs.update((curr) => [...curr, helpEntry]);
+      return { cleared: true };
+    }
+
+    return { cleared: false };
   }
 
   canDeleteLog(entry: VttLogEntry): boolean {
