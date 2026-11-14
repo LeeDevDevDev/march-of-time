@@ -20,6 +20,212 @@ export interface VttHotkeyBindingMeta {
   gmOnly: boolean;
 }
 
+export type VttDiceMaterial =
+  | 'resin'
+  | 'metal'
+  | 'marble'
+  | 'wood'
+  | 'gemstone'
+  | 'matte';
+
+export interface VttDiceAppearance {
+  presetId: string;
+  material: VttDiceMaterial;
+  bodyColor: string;
+  labelColor: string;
+}
+
+export interface VttDicePreset {
+  id: string;
+  label: string;
+  material: VttDiceMaterial;
+  bodyColor: string;
+  labelColor: string;
+}
+
+export interface VttDiceMaterialOption {
+  id: VttDiceMaterial;
+  label: string;
+  description: string;
+}
+
+export const VTT_DICE_MATERIAL_OPTIONS: VttDiceMaterialOption[] = [
+  {
+    id: 'metal',
+    label: 'Brushed Metal',
+    description: 'High metallic luster with fine brushed grain',
+  },
+  {
+    id: 'resin',
+    label: 'Smooth Resin',
+    description: 'Glossy polished tabletop acrylic',
+  },
+  {
+    id: 'marble',
+    label: 'Marble Stone',
+    description: 'Polished mineral stone with natural veining',
+  },
+  {
+    id: 'gemstone',
+    label: 'Gemstone',
+    description: 'Deep crystalline luster with clearcoat sheen',
+  },
+  {
+    id: 'wood',
+    label: 'Wood Grain',
+    description: 'Carved timber grain with warm satin finish',
+  },
+  {
+    id: 'matte',
+    label: 'Matte Bone',
+    description: 'Low-glare carved bone finish',
+  },
+];
+
+export const VTT_DICE_PRESETS: VttDicePreset[] = [
+  {
+    id: 'sunfire-copper',
+    label: 'Sunfire Copper',
+    material: 'metal',
+    bodyColor: '#C4491A',
+    labelColor: '#FFFBEB',
+  },
+  {
+    id: 'obsidian-gold',
+    label: 'Obsidian & Gold',
+    material: 'marble',
+    bodyColor: '#162220',
+    labelColor: '#FBBF24',
+  },
+  {
+    id: 'imperial-jade',
+    label: 'Imperial Jade',
+    material: 'gemstone',
+    bodyColor: '#0F766E',
+    labelColor: '#ECFDF5',
+  },
+  {
+    id: 'carrara-marble',
+    label: 'Marble & Ink',
+    material: 'marble',
+    bodyColor: '#EDE8DF',
+    labelColor: '#1E293B',
+  },
+  {
+    id: 'brushed-steel',
+    label: 'Brushed Steel',
+    material: 'metal',
+    bodyColor: '#475569',
+    labelColor: '#F8FAFC',
+  },
+  {
+    id: 'crimson-gem',
+    label: 'Crimson Gem',
+    material: 'gemstone',
+    bodyColor: '#9F1239',
+    labelColor: '#FDE68A',
+  },
+  {
+    id: 'tavern-oak',
+    label: 'Tavern Oak',
+    material: 'wood',
+    bodyColor: '#78350F',
+    labelColor: '#FEF3C7',
+  },
+  {
+    id: 'carved-bone',
+    label: 'Carved Bone',
+    material: 'matte',
+    bodyColor: '#D6CFC2',
+    labelColor: '#292524',
+  },
+];
+
+export const DEFAULT_DICE_APPEARANCE: VttDiceAppearance = {
+  presetId: VTT_DICE_PRESETS[0].id,
+  material: VTT_DICE_PRESETS[0].material,
+  bodyColor: VTT_DICE_PRESETS[0].bodyColor,
+  labelColor: VTT_DICE_PRESETS[0].labelColor,
+};
+
+export const DICE_BODY_COLOR_SWATCHES: string[] = [
+  '#C4491A',
+  '#162220',
+  '#0F766E',
+  '#EDE8DF',
+  '#475569',
+  '#9F1239',
+  '#6D28D9',
+  '#1D4ED8',
+];
+
+export const DICE_LABEL_COLOR_SWATCHES: string[] = [
+  '#FFFBEB',
+  '#FBBF24',
+  '#F8FAFC',
+  '#ECFDF5',
+  '#7DD3FC',
+  '#FDA4AF',
+  '#1E293B',
+  '#09100F',
+];
+
+const VALID_DICE_MATERIALS = new Set<VttDiceMaterial>([
+  'resin',
+  'metal',
+  'marble',
+  'wood',
+  'gemstone',
+  'matte',
+]);
+
+export function sanitizeDiceHexColor(raw: unknown, fallback: string): string {
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(trimmed)) {
+    return `#${trimmed[0]}${trimmed[0]}${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}`.toUpperCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(trimmed)) {
+    return `#${trimmed}`.toUpperCase();
+  }
+  return fallback;
+}
+
+export function sanitizeDiceAppearance(
+  raw: unknown,
+  fallback: VttDiceAppearance = DEFAULT_DICE_APPEARANCE
+): VttDiceAppearance {
+  if (!raw || typeof raw !== 'object') {
+    return { ...fallback };
+  }
+  const obj = raw as Partial<Record<keyof VttDiceAppearance, unknown>>;
+  const material =
+    typeof obj.material === 'string' &&
+    VALID_DICE_MATERIALS.has(obj.material as VttDiceMaterial)
+      ? (obj.material as VttDiceMaterial)
+      : fallback.material;
+  const bodyColor = sanitizeDiceHexColor(obj.bodyColor, fallback.bodyColor);
+  const labelColor = sanitizeDiceHexColor(obj.labelColor, fallback.labelColor);
+  const matchingPreset = VTT_DICE_PRESETS.find(
+    (p) =>
+      p.material === material &&
+      p.bodyColor.toUpperCase() === bodyColor &&
+      p.labelColor.toUpperCase() === labelColor
+  );
+  const presetId =
+    matchingPreset?.id ??
+    (typeof obj.presetId === 'string' && obj.presetId.trim()
+      ? obj.presetId.trim()
+      : 'custom');
+
+  return {
+    presetId,
+    material,
+    bodyColor,
+    labelColor,
+  };
+}
+
 export interface VttGeneralPreferences {
   masterVolume: number;
   muteAudio: boolean;
@@ -27,6 +233,8 @@ export interface VttGeneralPreferences {
   pingAndTurnSounds: boolean;
   showHotkeyBadges: boolean;
   tokenMoveSpeed: number;
+  enable3dDice: boolean;
+  diceAppearance: VttDiceAppearance;
 }
 
 export const DEFAULT_VTT_PREFERENCES: VttGeneralPreferences = {
@@ -36,6 +244,8 @@ export const DEFAULT_VTT_PREFERENCES: VttGeneralPreferences = {
   pingAndTurnSounds: true,
   showHotkeyBadges: true,
   tokenMoveSpeed: 30,
+  enable3dDice: true,
+  diceAppearance: { ...DEFAULT_DICE_APPEARANCE },
 };
 
 export const DEFAULT_VTT_HOTKEYS: VttHotkeyMap = {
@@ -387,6 +597,14 @@ export class VttSettingsStore {
         tokenMoveSpeed: Number.isFinite(rawSpeed)
           ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
           : fallback.tokenMoveSpeed,
+        enable3dDice:
+          typeof parsed.enable3dDice === 'boolean'
+            ? parsed.enable3dDice
+            : fallback.enable3dDice,
+        diceAppearance: sanitizeDiceAppearance(
+          parsed.diceAppearance,
+          fallback.diceAppearance
+        ),
       };
     } catch {
       return fallback;
@@ -431,15 +649,115 @@ export class VttSettingsStore {
       tokenMoveSpeed: Number.isFinite(rawSpeed)
         ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
         : cur.tokenMoveSpeed,
+      enable3dDice:
+        typeof patch.enable3dDice === 'boolean'
+          ? patch.enable3dDice
+          : cur.enable3dDice,
+      diceAppearance:
+        patch.diceAppearance !== undefined
+          ? sanitizeDiceAppearance(patch.diceAppearance, cur.diceAppearance)
+          : cur.diceAppearance,
     };
     this.preferences.set(next);
     this.persistPreferences(next);
   }
 
+  updateDiceAppearance(patch: Partial<VttDiceAppearance>): void {
+    const cur = this.preferences().diceAppearance;
+    const next = sanitizeDiceAppearance(
+      {
+        ...cur,
+        ...patch,
+        presetId: patch.presetId ?? 'custom',
+      },
+      cur
+    );
+    this.updatePreferences({ diceAppearance: next });
+  }
+
+  applyDicePreset(presetId: string): void {
+    const found = VTT_DICE_PRESETS.find((p) => p.id === presetId);
+    if (!found) return;
+    this.updatePreferences({
+      diceAppearance: {
+        presetId: found.id,
+        material: found.material,
+        bodyColor: found.bodyColor,
+        labelColor: found.labelColor,
+      },
+    });
+  }
+
   resetPreferences(): void {
-    const defaults: VttGeneralPreferences = { ...DEFAULT_VTT_PREFERENCES };
+    const defaults: VttGeneralPreferences = {
+      ...DEFAULT_VTT_PREFERENCES,
+      diceAppearance: { ...DEFAULT_DICE_APPEARANCE },
+    };
     this.preferences.set(defaults);
     this.persistPreferences(defaults);
+  }
+
+  playDiceImpactCue(
+    intensity = 0.6,
+    material: VttDiceMaterial = this.preferences().diceAppearance.material
+  ): void {
+    const prefs = this.preferences();
+    if (prefs.muteAudio || prefs.masterVolume <= 0 || !prefs.diceSounds) return;
+    if (typeof window === 'undefined') return;
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    try {
+      if (!this.audioCtx) {
+        this.audioCtx = new AudioContextCtor();
+      }
+      const ctx = this.audioCtx;
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => undefined);
+      }
+
+      const clamped = Math.max(0.08, Math.min(1, intensity));
+      const now = ctx.currentTime;
+      const gainScale = (prefs.masterVolume / 100) * 0.1 * clamped;
+      const jitter = 0.92 + Math.random() * 0.16;
+
+      if (material === 'metal' || material === 'gemstone') {
+        this.scheduleTone(ctx, 1180 * jitter, now, 0.042, gainScale, 'triangle');
+        this.scheduleTone(
+          ctx,
+          2120 * jitter,
+          now + 0.004,
+          0.032,
+          gainScale * 0.55,
+          'sine'
+        );
+      } else if (material === 'wood' || material === 'matte') {
+        this.scheduleTone(ctx, 290 * jitter, now, 0.035, gainScale * 1.1, 'triangle');
+        this.scheduleTone(
+          ctx,
+          520 * jitter,
+          now + 0.005,
+          0.024,
+          gainScale * 0.5,
+          'sine'
+        );
+      } else {
+        this.scheduleTone(ctx, 540 * jitter, now, 0.036, gainScale, 'triangle');
+        this.scheduleTone(
+          ctx,
+          960 * jitter,
+          now + 0.004,
+          0.026,
+          gainScale * 0.55,
+          'sine'
+        );
+      }
+    } catch {
+      return;
+    }
   }
 
   playUiCue(cue: 'dice' | 'ping' | 'turn'): void {

@@ -30,7 +30,12 @@ import {
 import { NotificationStore } from '../../core/notifications/notification.store';
 import {
   DEFAULT_VTT_HOTKEYS,
+  DICE_BODY_COLOR_SWATCHES,
+  DICE_LABEL_COLOR_SWATCHES,
+  VTT_DICE_MATERIAL_OPTIONS,
+  VTT_DICE_PRESETS,
   VTT_HOTKEY_META,
+  VttDiceMaterial,
   VttGeneralPreferences,
   VttHotkeyAction,
   VttHotkeyBindingMeta,
@@ -54,6 +59,18 @@ import {
   CollectionsStore,
 } from '../collections/collections.store';
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
+import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
+import {
+  DicePoolCounts,
+  POLYHEDRAL_DIE_TYPES,
+  PolyhedralDieType,
+  RolledDieChip,
+  adjustDiePoolCount,
+  createEmptyDicePool,
+  extractLogRollChips,
+  formatDicePoolFormula,
+  getTotalDiceInPool,
+} from './engine/dice-roller.engine';
 import {
   DirectoryFolderNode,
   DirectoryFolderOption,
@@ -80,6 +97,7 @@ import {
   VttFaction,
   VttFolderModel,
   VttGridMode,
+  VttLogEntry,
   VttNpcPreset,
   VttRosterActorModel,
   VttRosterDragPayload,
@@ -91,7 +109,7 @@ import {
 import { VttStore } from './store/vtt.store';
 
 export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
-export type VttSettingsModalKind = 'general' | 'controls' | 'invites';
+export type VttSettingsModalKind = 'general' | 'dice' | 'controls' | 'invites';
 export type EditSceneModalTab = 'general' | 'grid' | 'visibility';
 export type VttRosterImportTab =
   | 'my-characters'
@@ -190,6 +208,7 @@ export interface EditingMapDraft {
     ColorPickerComponent,
     CompendiumIconComponent,
     VttCanvasComponent,
+    VttDiceOverlayComponent,
   ],
   templateUrl: './vtt-room.component.html',
 })
@@ -287,6 +306,20 @@ export class VttRoomComponent {
 
   readonly visibleHotkeyBindings = computed<VttHotkeyBindingMeta[]>(() =>
     VTT_HOTKEY_META.filter((m) => !m.gmOnly || this.vttStore.isGm())
+  );
+
+  readonly polyhedralDiceTypes = POLYHEDRAL_DIE_TYPES;
+  readonly dicePresets = VTT_DICE_PRESETS;
+  readonly diceMaterialOptions = VTT_DICE_MATERIAL_OPTIONS;
+  readonly diceBodySwatches = DICE_BODY_COLOR_SWATCHES;
+  readonly diceLabelSwatches = DICE_LABEL_COLOR_SWATCHES;
+  readonly dicePool = signal<DicePoolCounts>(createEmptyDicePool());
+  readonly diceModifier = signal<number>(0);
+  readonly customPoolTotalCount = computed<number>(() =>
+    getTotalDiceInPool(this.dicePool())
+  );
+  readonly customPoolFormula = computed<string>(() =>
+    formatDicePoolFormula(this.dicePool(), this.diceModifier())
   );
 
   quickDiceMod = 0;
@@ -2201,14 +2234,82 @@ export class VttRoomComponent {
     });
   }
 
+  onDiceModifierChange(val: string | number | null): void {
+    const parsed = Number(val);
+    const clean = Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+    this.quickDiceMod = clean;
+    this.diceModifier.set(clean);
+  }
+
+  incrementDieInPool(die: PolyhedralDieType): void {
+    this.dicePool.update((curr) => adjustDiePoolCount(curr, die, 1));
+  }
+
+  decrementDieInPool(event: MouseEvent, die: PolyhedralDieType): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.dicePool.update((curr) => adjustDiePoolCount(curr, die, -1));
+  }
+
+  clearDicePool(): void {
+    this.dicePool.set(createEmptyDicePool());
+  }
+
+  getLogRollChips(entry: VttLogEntry): RolledDieChip[] {
+    if (entry.kind !== 'roll' && entry.kind !== 'clash') return [];
+    return extractLogRollChips(entry.payload);
+  }
+
+  selectDicePreset(presetId: string): void {
+    this.settingsStore.applyDicePreset(presetId);
+  }
+
+  resetDicePreferences(): void {
+    this.settingsStore.updatePreferences({ enable3dDice: true });
+    this.settingsStore.applyDicePreset('sunfire-copper');
+    this.notifications.info(
+      'Dice Appearance Reset',
+      'Restored default Sunfire Copper 3D dice.'
+    );
+  }
+
+  selectDiceMaterial(material: VttDiceMaterial): void {
+    this.settingsStore.updateDiceAppearance({ material });
+  }
+
+  updateDiceBodyColor(hex: string): void {
+    this.settingsStore.updateDiceAppearance({ bodyColor: hex });
+  }
+
+  updateDiceLabelColor(hex: string): void {
+    this.settingsStore.updateDiceAppearance({ labelColor: hex });
+  }
+
+  test3dDiceRoll(): void {
+    this.vttStore.previewTestDiceRoll();
+  }
+
+  getActiveDiceMaterialLabel(): string {
+    const mat = this.settingsStore.preferences().diceAppearance.material;
+    return (
+      this.diceMaterialOptions.find((m) => m.id === mat)?.label ?? 'Custom'
+    );
+  }
+
   async triggerQuickDiceRoll(): Promise<void> {
     const sel = this.vttStore.selectedToken();
+    const mod = Number.isFinite(Number(this.quickDiceMod))
+      ? Math.trunc(Number(this.quickDiceMod))
+      : this.diceModifier();
+
+    if (this.customPoolTotalCount() > 0) {
+      const prefix = sel ? `${sel.name} · Roll` : 'Dice Roll';
+      await this.vttStore.rollCustomDicePool(prefix, this.dicePool(), mod);
+      return;
+    }
+
     const prefix = sel ? `${sel.name} · Check` : '2d10 Check';
-    await this.vttStore.rollQuickDice(
-      prefix,
-      Number(this.quickDiceMod) || 0,
-      this.quickDiceMode
-    );
+    await this.vttStore.rollQuickDice(prefix, mod, this.quickDiceMode);
   }
 
   async sendChatMessage(): Promise<void> {

@@ -3,6 +3,10 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseService } from '../../../core/supabase/supabase.service';
 import { CharacterModel } from '../../characters/models/character.model';
 import { GameCardModel } from '../../dashboard/models/campaign.model';
+import {
+  VttDiceThrowPayload,
+  sanitizeIncomingDiceThrowPayload,
+} from '../engine/dice-roller.engine';
 import { offsetToAxial } from '../engine/hex-grid.engine';
 import {
   DEFAULT_VTT_BG_COLOR,
@@ -1617,6 +1621,7 @@ export class VttService {
       onLogInsert: (entry: VttLogEntry) => void;
       onLogDelete?: (logId: string) => void;
       onPing: (ping: VttPingBroadcast) => void;
+      onDiceThrow?: (payload: VttDiceThrowPayload) => void;
     }
   ): RealtimeChannel {
     const channel = this.supabase
@@ -1731,6 +1736,12 @@ export class VttService {
           handlers.onPing(msg['payload'] as VttPingBroadcast);
         }
       })
+      .on('broadcast', { event: 'dice_throw' }, (msg) => {
+        const parsed = sanitizeIncomingDiceThrowPayload(msg['payload']);
+        if (parsed) {
+          handlers.onDiceThrow?.(parsed);
+        }
+      })
       .subscribe();
 
     return channel;
@@ -1745,6 +1756,18 @@ export class VttService {
       type: 'broadcast',
       event: 'map_ping',
       payload: ping,
+    });
+  }
+
+  async sendDiceThrow(
+    channel: RealtimeChannel | null,
+    diceThrow: VttDiceThrowPayload
+  ): Promise<void> {
+    if (!channel) return;
+    await channel.send({
+      type: 'broadcast',
+      event: 'dice_throw',
+      payload: diceThrow,
     });
   }
 

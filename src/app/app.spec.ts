@@ -80,11 +80,26 @@ import {
 } from './features/content-manager/content-manager.component';
 import { CampaignService } from './features/dashboard/services/campaign.service';
 import { CampaignStore } from './features/dashboard/store/campaign.store';
+import * as THREE from 'three';
 import {
   getLegalDefenderReactions,
   resolveClashReaction,
   roll2d10Check,
 } from './features/vtt/engine/clash.engine';
+import {
+  getPolyhedronTemplate,
+  preSimulateDeterministicThrow,
+} from './features/vtt/engine/dice-3d.engine';
+import {
+  adjustDiePoolCount,
+  buildPhysicalDiceFrom2d10Roll,
+  createEmptyDicePool,
+  extractLogRollChips,
+  formatDicePoolFormula,
+  getTotalDiceInPool,
+  rollCustomDicePool,
+  sanitizeIncomingDiceThrowPayload,
+} from './features/vtt/engine/dice-roller.engine';
 import {
   buildDirectoryTree,
   canNestFolderInside,
@@ -4269,5 +4284,266 @@ describe('App', () => {
       old: {},
     });
     expect(vttStore.tokens().some((t) => t.id === 'tok-vis-1')).toBe(false);
+  });
+
+  it('should pre-solve deterministic 3D physics throws across all polyhedral dice (d4, d6, d8, d10, d12, d20, d100) so every die settles flat on its exact target value while preserving convex hull symmetry', () => {
+    const mixedSpecs = [
+      { kind: 'd4' as const, targetValue: 4 },
+      { kind: 'd6' as const, targetValue: 6 },
+      { kind: 'd8' as const, targetValue: 8 },
+      { kind: 'd10' as const, targetValue: 10 },
+      { kind: 'd12' as const, targetValue: 12 },
+      { kind: 'd20' as const, targetValue: 20 },
+      { kind: 'd100' as const, targetValue: 70 },
+      { kind: 'd10_units' as const, targetValue: 3 },
+    ];
+
+    const preSim = preSimulateDeterministicThrow(mixedSpecs, 8.5, 5.5, 424242);
+    expect(preSim.initialStates.length).toBe(mixedSpecs.length);
+    expect(preSim.finalStates.length).toBe(mixedSpecs.length);
+    expect(preSim.settledStep).toBeGreaterThan(35);
+
+    const worldUp = new THREE.Vector3(0, 1, 0);
+
+    mixedSpecs.forEach((spec, idx) => {
+      const tpl = getPolyhedronTemplate(spec.kind);
+      const fin = preSim.finalStates[idx];
+      const targetOutcome = tpl.outcomes.find(
+        (o) => o.value === spec.targetValue
+      );
+      expect(targetOutcome).toBeTruthy();
+
+      for (const v of tpl.vertices) {
+        const rotated = v.clone().applyQuaternion(fin.symmetryQuat);
+        let minDist = Infinity;
+        for (const orig of tpl.vertices) {
+          const d = rotated.distanceTo(orig);
+          if (d < minDist) minDist = d;
+        }
+        expect(minDist).toBeLessThan(1e-3);
+      }
+
+      const visualFinalQuat = fin.quat.clone().multiply(fin.symmetryQuat);
+      const worldOutcomeUp = targetOutcome!.upVector
+        .clone()
+        .applyQuaternion(visualFinalQuat)
+        .normalize();
+
+      expect(worldOutcomeUp.dot(worldUp)).toBeGreaterThan(0.9);
+    });
+  });
+
+  it('should support multi-dice polyhedral pool left-click/right-click mixing, d100 tens+units dice, custom dice colors and surface textures, and 3D dice throw broadcasts in VTT Log', async () => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mot_vtt_preferences_v1');
+    }
+
+    let pool = createEmptyDicePool();
+    pool = adjustDiePoolCount(pool, 'd10', 1);
+    pool = adjustDiePoolCount(pool, 'd10', 1);
+    pool = adjustDiePoolCount(pool, 'd10', 1);
+    expect(pool.d10).toBe(3);
+    expect(formatDicePoolFormula(pool, 0)).toBe('3d10');
+
+    pool = adjustDiePoolCount(pool, 'd10', -1);
+    expect(pool.d10).toBe(2);
+
+    pool = adjustDiePoolCount(pool, 'd6', 1);
+    pool = adjustDiePoolCount(pool, 'd100', 1);
+    expect(getTotalDiceInPool(pool)).toBe(4);
+    expect(formatDicePoolFormula(pool, 4)).toBe('1d6 + 2d10 + 1d100 + 4');
+
+    const scriptedValues: Record<number, number[]> = {
+      6: [5],
+      10: [9, 4],
+      100: [73],
+    };
+    const poolResult = rollCustomDicePool(pool, 4, (sides) => {
+      const queue = scriptedValues[sides];
+      return queue?.shift() ?? 1;
+    });
+    expect(poolResult.diceSubtotal).toBe(5 + 9 + 4 + 73);
+    expect(poolResult.total).toBe(95);
+    expect(poolResult.physicalDice).toEqual([
+      { kind: 'd6', targetValue: 5 },
+      { kind: 'd10', targetValue: 9 },
+      { kind: 'd10', targetValue: 4 },
+      { kind: 'd100', targetValue: 70 },
+      { kind: 'd10_units', targetValue: 3 },
+    ]);
+
+    const advPhysical = buildPhysicalDiceFrom2d10Roll({
+      d1: 9,
+      d2: 2,
+      d3: 7,
+      mode: 'advantage',
+      modifier: 3,
+      total: 19,
+    });
+    expect(advPhysical.formula).toBe('3d10kh2 + 3');
+    expect(advPhysical.physicalDice.map((d) => Boolean(d.dropped))).toEqual([
+      false,
+      true,
+      false,
+    ]);
+
+    const sanitizedBroadcast = sanitizeIncomingDiceThrowPayload({
+      id: 'throw-remote-1',
+      senderId: 'player-2',
+      senderName: 'Kael',
+      label: 'Kael · Roll (3d10)',
+      formula: '3d10',
+      total: 21,
+      dice: [
+        { kind: 'd10', targetValue: 8 },
+        { kind: 'd10', targetValue: 7 },
+        { kind: 'd10', targetValue: 6 },
+      ],
+      appearance: {
+        presetId: 'custom',
+        material: 'gemstone',
+        bodyColor: '#7c3aed',
+        labelColor: '#fde68a',
+      },
+      seed: 999,
+      createdAt: 1700000000000,
+    });
+    expect(sanitizedBroadcast).toBeTruthy();
+    expect(sanitizedBroadcast!.appearance.material).toBe('gemstone');
+    expect(sanitizedBroadcast!.appearance.bodyColor).toBe('#7C3AED');
+    expect(sanitizedBroadcast!.appearance.labelColor).toBe('#FDE68A');
+
+    const activeUserSig = signal({ id: 'gm-dice-1', email: 'gm@example.com' });
+    const insertedLogs: VttLogEntry[] = [];
+    const broadcastedThrows: unknown[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: activeUserSig,
+            handle: () => 'warden',
+            displayName: () => 'Warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            effectiveMapsFolderId: () => null,
+            effectiveCharactersFolderId: () => null,
+            getFolderTrailLabel: () => '@warden / Maps',
+            assets: () => [],
+            folders: () => [],
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            insertLog: async (
+              entry: Omit<VttLogEntry, 'id' | 'created_at'>
+            ) => {
+              const saved: VttLogEntry = {
+                ...entry,
+                id: `dice-log-${insertedLogs.length + 1}`,
+                created_at: new Date().toISOString(),
+              };
+              insertedLogs.push(saved);
+              return saved;
+            },
+            sendDiceThrow: async (_ch: unknown, payload: unknown) => {
+              broadcastedThrows.push(payload);
+            },
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const settingsStore = TestBed.inject(VttSettingsStore);
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-dice-1',
+      gm_id: 'gm-dice-1',
+      name: 'Dice Chamber',
+      cover_image_url: null,
+      invite_code: 'DICE20',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+
+    comp.openSettingsModal('dice');
+    fixture.detectChanges();
+    const modalText = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(modalText).toContain('3D Dice & Appearance');
+    expect(modalText).toContain('Starter Presets');
+    expect(modalText).toContain('Surface Texture & Finish');
+    expect(modalText).toContain('Body Color');
+    expect(modalText).toContain('Number / Ink Color');
+
+    comp.selectDicePreset('obsidian-gold');
+    expect(settingsStore.preferences().diceAppearance.presetId).toBe(
+      'obsidian-gold'
+    );
+    expect(settingsStore.preferences().diceAppearance.material).toBe('marble');
+
+    comp.selectDiceMaterial('gemstone');
+    comp.updateDiceBodyColor('#7c3aed');
+    comp.updateDiceLabelColor('#fde68a');
+    expect(settingsStore.preferences().diceAppearance).toEqual({
+      presetId: 'custom',
+      material: 'gemstone',
+      bodyColor: '#7C3AED',
+      labelColor: '#FDE68A',
+    });
+    comp.closeSettingsModal();
+    fixture.detectChanges();
+
+    comp.incrementDieInPool('d10');
+    comp.incrementDieInPool('d10');
+    comp.incrementDieInPool('d10');
+    expect(comp.dicePool().d10).toBe(3);
+    expect(comp.customPoolFormula()).toBe('3d10');
+
+    const fakeContextEvent = new MouseEvent('contextmenu', { cancelable: true });
+    comp.decrementDieInPool(fakeContextEvent, 'd10');
+    expect(fakeContextEvent.defaultPrevented).toBe(true);
+    expect(comp.dicePool().d10).toBe(2);
+
+    comp.incrementDieInPool('d8');
+    comp.onDiceModifierChange(2);
+    expect(comp.customPoolFormula()).toBe('1d8 + 2d10 + 2');
+
+    await comp.triggerQuickDiceRoll();
+    fixture.detectChanges();
+
+    const thrown = vttStore.latestDiceThrow();
+    expect(thrown).toBeTruthy();
+    expect(thrown!.formula).toBe('1d8 + 2d10 + 2');
+    expect(thrown!.dice.map((d) => d.kind)).toEqual(['d8', 'd10', 'd10']);
+    expect(thrown!.appearance).toEqual({
+      presetId: 'custom',
+      material: 'gemstone',
+      bodyColor: '#7C3AED',
+      labelColor: '#FDE68A',
+    });
+
+    expect(insertedLogs.length).toBe(1);
+    const chips = extractLogRollChips(insertedLogs[0].payload);
+    expect(chips.map((c) => c.dieType)).toEqual(['d8', 'd10', 'd10']);
+    expect(comp.getLogRollChips(insertedLogs[0]).length).toBe(3);
   });
 });

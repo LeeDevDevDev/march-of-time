@@ -34,6 +34,16 @@ import {
   resolveClashReaction,
   roll2d10Check,
 } from '../engine/clash.engine';
+import {
+  DicePoolCounts,
+  VttDiceThrowPayload,
+  VttPhysicalDieRoll,
+  buildPhysicalDiceFrom2d10Roll,
+  generateThrowSeed,
+  getTotalDiceInPool,
+  rollCustomDicePool,
+  sanitizeIncomingDiceThrowPayload,
+} from '../engine/dice-roller.engine';
 import { canNestFolderInside } from '../engine/directory-tree.engine';
 import {
   HexGridGeometry,
@@ -200,8 +210,11 @@ export class VttStore {
     'normal'
   );
   readonly manualRollOverride = signal<number | null>(null);
+  readonly latestDiceThrow = signal<VttDiceThrowPayload | null>(null);
   readonly undoStack = signal<VttUndoEntry[]>([]);
   readonly isUndoing = signal(false);
+
+  private readonly seenDiceThrowIds = new Set<string>();
 
   readonly isGm = computed(() => {
     const camp = this.campaign();
@@ -800,6 +813,15 @@ export class VttStore {
               this.logs.update((curr) => [...curr, entry]);
               this.triggerLogAudioCue(entry.kind);
             }
+            const embeddedThrow = sanitizeIncomingDiceThrowPayload(
+              entry.payload?.['diceThrow']
+            );
+            if (
+              embeddedThrow &&
+              Math.abs(Date.now() - embeddedThrow.createdAt) < 20000
+            ) {
+              this.enqueueDiceThrow(embeddedThrow, false);
+            }
           },
           onLogDelete: (logId) => {
             this.logs.update((curr) => curr.filter((e) => e.id !== logId));
@@ -812,6 +834,11 @@ export class VttStore {
                 curr.filter((p) => p.createdAt !== ping.createdAt)
               );
             }, 2400);
+          },
+          onDiceThrow: (incomingThrow) => {
+            if (Math.abs(Date.now() - incomingThrow.createdAt) < 20000) {
+              this.enqueueDiceThrow(incomingThrow, false);
+            }
           },
         }
       );
@@ -831,6 +858,8 @@ export class VttStore {
     this.selectedLightId.set(null);
     this.activePings.set([]);
     this.activeSceneNaturalSize.set(null);
+    this.latestDiceThrow.set(null);
+    this.seenDiceThrowIds.clear();
     this.undoStack.set([]);
   }
 
@@ -3434,11 +3463,28 @@ export class VttStore {
     this.pendingTargetAction.set(null);
     this.manualRollOverride.set(null);
 
+    const built = buildPhysicalDiceFrom2d10Roll(roll);
+    let diceThrow: VttDiceThrowPayload | undefined;
+    if (manual === null) {
+      diceThrow = this.createDiceThrowPayload({
+        label: `${attacker.name} · ${pending.actionName}`,
+        formula: built.formula,
+        total: roll.total,
+        dice: built.physicalDice,
+        senderNameOverride: attacker.name,
+      });
+      this.enqueueDiceThrow(diceThrow, true);
+    }
+
     await this.postLog({
       kind: 'roll',
       title: `${attacker.name} · ${pending.actionName} → ${roll.total}`,
       detail: `2d10 (${roll.d1}+${roll.d2}) + ${roll.modifier} · ${pending.flatDamage} Flat DMG${pending.combatTags.length ? ' · ' + pending.combatTags.join('/') : ''}`,
-      payload: { roll },
+      payload: {
+        roll,
+        chips: built.chips,
+        ...(diceThrow ? { diceThrow } : {}),
+      },
     });
   }
 
@@ -3528,11 +3574,29 @@ export class VttStore {
     this.pendingTargetAction.set(null);
     this.manualRollOverride.set(null);
 
+    const built = buildPhysicalDiceFrom2d10Roll(attackRoll);
+    let diceThrow: VttDiceThrowPayload | undefined;
+    if (manual === null) {
+      diceThrow = this.createDiceThrowPayload({
+        label: `${attacker.name} · ${pending.actionName}`,
+        formula: built.formula,
+        total: attackRoll.total,
+        dice: built.physicalDice,
+        senderNameOverride: attacker.name,
+      });
+      this.enqueueDiceThrow(diceThrow, true);
+    }
+
     await this.patchScene(sc.id, { pending_clash: clash });
     await this.postLog({
       kind: 'clash',
       title: `${attacker.name} attacks ${defender.name} with ${pending.actionName} (Roll ${attackRoll.total})`,
       detail: `Distance ${distFeet} ft · ${pending.flatDamage} Raw DMG${pending.combatTags.length ? ' · [' + pending.combatTags.join(', ') + ']' : ''} — Awaiting ${defender.name}'s reaction`,
+      payload: {
+        roll: attackRoll,
+        chips: built.chips,
+        ...(diceThrow ? { diceThrow } : {}),
+      },
     });
   }
 
@@ -3559,6 +3623,24 @@ export class VttStore {
         : undefined;
 
     const resolution = resolveClashReaction(clash, reaction, caps, customRoll);
+    if (
+      (reaction === 'parry' || reaction === 'dodge') &&
+      customRoll === undefined &&
+      resolution.defenseRoll
+    ) {
+      const built = buildPhysicalDiceFrom2d10Roll(resolution.defenseRoll);
+      const reactionLabel = reaction === 'parry' ? 'Parry' : 'Dodge';
+      const diceThrow = this.createDiceThrowPayload({
+        label: `${defender.name} · ${reactionLabel}`,
+        formula: built.formula,
+        total: resolution.defenseRoll.total,
+        dice: built.physicalDice,
+        senderNameOverride: defender.name,
+      });
+      this.settingsStore.playUiCue('dice');
+      this.enqueueDiceThrow(diceThrow, true);
+    }
+
     await this.patchScene(sc.id, {
       pending_clash: {
         ...clash,
@@ -3746,6 +3828,15 @@ export class VttStore {
     mode: 'normal' | 'advantage' | 'disadvantage' = 'normal'
   ): Promise<void> {
     const roll = roll2d10Check(modifier, mode);
+    const built = buildPhysicalDiceFrom2d10Roll(roll);
+    const diceThrow = this.createDiceThrowPayload({
+      label,
+      formula: built.formula,
+      total: roll.total,
+      dice: built.physicalDice,
+    });
+    this.enqueueDiceThrow(diceThrow, true);
+
     const diceDetail =
       roll.d3 !== undefined
         ? `3d10 (${roll.d1}, ${roll.d2}, ${roll.d3} · ${mode})`
@@ -3754,8 +3845,105 @@ export class VttStore {
       kind: 'roll',
       title: `${label} → ${roll.total}`,
       detail: `${diceDetail} ${modifier >= 0 ? '+' : '−'} ${Math.abs(modifier)}`,
-      payload: { roll },
+      payload: { roll, chips: built.chips, diceThrow },
     });
+  }
+
+  async rollCustomDicePool(
+    label: string,
+    pool: Partial<DicePoolCounts>,
+    modifier = 0
+  ): Promise<void> {
+    if (getTotalDiceInPool(pool) <= 0) {
+      await this.rollQuickDice(label, modifier, 'normal');
+      return;
+    }
+
+    const res = rollCustomDicePool(pool, modifier);
+    const diceThrow = this.createDiceThrowPayload({
+      label,
+      formula: res.formula,
+      total: res.total,
+      dice: res.physicalDice,
+    });
+    this.enqueueDiceThrow(diceThrow, true);
+
+    await this.postLog({
+      kind: 'roll',
+      title: `${label} (${res.formula}) → ${res.total}`,
+      detail: res.detail,
+      payload: {
+        chips: res.chips,
+        groups: res.groups,
+        formula: res.formula,
+        modifier: res.modifier,
+        total: res.total,
+        diceThrow,
+      },
+    });
+  }
+
+  previewTestDiceRoll(): void {
+    if (!this.settingsStore.preferences().enable3dDice) {
+      this.settingsStore.updatePreferences({ enable3dDice: true });
+    }
+    const res = rollCustomDicePool(
+      { d20: 1, d10: 2, d8: 1, d6: 1 },
+      0
+    );
+    const diceThrow = this.createDiceThrowPayload({
+      label: 'Preview Roll',
+      formula: res.formula,
+      total: res.total,
+      dice: res.physicalDice,
+    });
+    this.settingsStore.playUiCue('dice');
+    this.enqueueDiceThrow(diceThrow, false);
+  }
+
+  private createDiceThrowPayload(input: {
+    label: string;
+    formula: string;
+    total: number;
+    dice: VttPhysicalDieRoll[];
+    senderNameOverride?: string;
+  }): VttDiceThrowPayload {
+    return {
+      id: `throw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      senderId: this.authStore.user()?.id ?? null,
+      senderName:
+        input.senderNameOverride ||
+        this.authStore.displayName() ||
+        'Adventurer',
+      label: input.label,
+      formula: input.formula,
+      total: input.total,
+      dice: input.dice,
+      appearance: { ...this.settingsStore.preferences().diceAppearance },
+      seed: generateThrowSeed(),
+      createdAt: Date.now(),
+    };
+  }
+
+  enqueueDiceThrow(
+    payload: VttDiceThrowPayload,
+    broadcastToRoom = false
+  ): void {
+    if (!payload?.id || this.seenDiceThrowIds.has(payload.id)) {
+      return;
+    }
+    if (this.seenDiceThrowIds.size > 200) {
+      const oldest = this.seenDiceThrowIds.values().next().value;
+      if (oldest) {
+        this.seenDiceThrowIds.delete(oldest);
+      }
+    }
+    this.seenDiceThrowIds.add(payload.id);
+    this.latestDiceThrow.set(payload);
+
+    if (broadcastToRoom) {
+      void this.vttService.sendDiceThrow?.(this.realtimeChannel, payload);
+    }
   }
 
   canDeleteLog(entry: VttLogEntry): boolean {

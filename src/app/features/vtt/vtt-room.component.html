@@ -215,6 +215,8 @@
           class="block h-full w-full"
         />
 
+        <app-vtt-dice-overlay />
+
         <div class="pointer-events-none absolute left-3 top-3 z-20 flex items-start gap-2">
           <div
             class="pointer-events-auto flex flex-col gap-1 rounded-xl border border-[#243B37] bg-[#0D1615]/95 p-1.5 text-[#EBF5F3] shadow-xl backdrop-blur-xs"
@@ -1282,6 +1284,30 @@
                       <div class="font-bold text-[var(--mot-text)]">
                         {{ entry.title }}
                       </div>
+                      @let rollChips = getLogRollChips(entry);
+                      @if (rollChips.length > 0) {
+                        <div class="flex flex-wrap items-center gap-1 pt-0.5">
+                          @for (chip of rollChips; track $index) {
+                            <span
+                              class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                              [class.opacity-45]="chip.dropped"
+                              [class.line-through]="chip.dropped"
+                              [class.border-[#38B29A]]="!chip.dropped && chip.isMax"
+                              [class.bg-[var(--mot-jade-bg)]]="!chip.dropped && chip.isMax"
+                              [class.text-[var(--mot-jade-text)]]="!chip.dropped && chip.isMax"
+                              [class.border-[var(--mot-hp)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                              [class.bg-[var(--mot-hp-bg)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                              [class.text-[var(--mot-hp-text)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                              [class.border-[var(--mot-border)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                              [class.bg-[var(--mot-surface)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                              [class.text-[var(--mot-text)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                            >
+                              <span class="text-[9px] font-semibold uppercase text-[var(--mot-muted)]">{{ chip.dieType }}</span>
+                              <span>{{ chip.value }}</span>
+                            </span>
+                          }
+                        </div>
+                      }
                       @if (entry.detail) {
                         <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
                           {{ entry.detail }}
@@ -1293,22 +1319,143 @@
               </div>
 
               <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3 space-y-2.5 text-xs">
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between gap-2 text-[10px]">
+                    <span class="font-semibold text-[var(--mot-muted)]">
+                      Left-click add &middot; Right-click remove
+                    </span>
+                    <div class="flex items-center gap-1.5">
+                      @if (customPoolTotalCount() > 0) {
+                        <button
+                          type="button"
+                          (click)="clearDicePool()"
+                          class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                        >
+                          Clear
+                        </button>
+                      }
+                      <button
+                        type="button"
+                        (click)="openSettingsModal('dice')"
+                        title="Customize 3D Dice Colors &amp; Texture"
+                        aria-label="Customize 3D Dice Colors and Texture"
+                        class="inline-flex items-center gap-1 rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                      >
+                        <span
+                          class="h-2.5 w-2.5 rounded-full border border-white/25"
+                          [style.backgroundColor]="settingsStore.preferences().diceAppearance.bodyColor"
+                        ></span>
+                        <span>Style</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-7 gap-1">
+                    @for (die of polyhedralDiceTypes; track die) {
+                      @let count = dicePool()[die];
+                      <button
+                        type="button"
+                        (click)="incrementDieInPool(die)"
+                        (contextmenu)="decrementDieInPool($event, die)"
+                        [attr.aria-label]="'Add ' + die + ' (' + count + ' selected)'"
+                        title="Left-click to add {{ die }} · Right-click to remove"
+                        class="relative flex flex-col items-center justify-center gap-0.5 rounded-lg border py-1.5 font-mono-num text-[10px] font-bold transition-colors select-none"
+                        [class.border-[#C4491A]]="count > 0"
+                        [class.bg-[var(--mot-surface)]]="count > 0"
+                        [class.text-[var(--mot-text)]]="count > 0"
+                        [class.border-[var(--mot-border)]]="count === 0"
+                        [class.bg-[var(--mot-well)]]="count === 0"
+                        [class.text-[var(--mot-muted)]]="count === 0"
+                        [class.hover:border-[#C4491A]]="count === 0"
+                        [class.hover:text-[var(--mot-text)]]="count === 0"
+                      >
+                        @switch (die) {
+                          @case ('d4') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="12 3 21 19 3 19" />
+                              <line x1="12" y1="3" x2="12" y2="19" />
+                            </svg>
+                          }
+                          @case ('d6') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <rect x="4" y="4" width="16" height="16" rx="2.5" />
+                              <circle cx="9" cy="9" r="1" fill="currentColor" />
+                              <circle cx="15" cy="15" r="1" fill="currentColor" />
+                            </svg>
+                          }
+                          @case ('d8') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="12 2 21 12 12 22 3 12" />
+                              <line x1="3" y1="12" x2="21" y2="12" />
+                            </svg>
+                          }
+                          @case ('d10') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="12 2 21 10 12 22 3 10" />
+                              <polyline points="3 10 12 14 21 10" />
+                              <line x1="12" y1="2" x2="12" y2="14" />
+                            </svg>
+                          }
+                          @case ('d12') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="12 2 21 8.5 17.5 19.5 6.5 19.5 3 8.5" />
+                              <polygon points="12 7 16.5 10.5 14.8 15.8 9.2 15.8 7.5 10.5" />
+                            </svg>
+                          }
+                          @case ('d20') {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="12 2 21 7 21 17 12 22 3 17 3 7" />
+                              <polygon points="12 6.5 17.2 15.5 6.8 15.5" />
+                            </svg>
+                          }
+                          @default {
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85">
+                              <polygon points="9 3 15 9 9 21 3 9" />
+                              <polygon points="15 3 21 9 15 21 11 13" />
+                            </svg>
+                          }
+                        }
+                        <span>{{ die }}</span>
+
+                        @if (count > 0) {
+                          <span
+                            class="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#C4491A] px-1 font-mono-num text-[9px] font-bold text-white shadow-xs"
+                          >
+                            {{ count }}
+                          </span>
+                        }
+                      </button>
+                    }
+                  </div>
+                </div>
+
                 <div class="flex items-center gap-1.5">
-                  <select
-                    aria-label="Roll Mode"
-                    [(ngModel)]="quickDiceMode"
-                    class="mot-input px-2 py-1.5 text-xs font-semibold"
-                  >
-                    <option value="normal">2d10 Normal</option>
-                    <option value="advantage">Advantage</option>
-                    <option value="disadvantage">Disadvantage</option>
-                  </select>
+                  @if (customPoolTotalCount() === 0) {
+                    <select
+                      aria-label="Roll Mode"
+                      [(ngModel)]="quickDiceMode"
+                      class="mot-input min-w-0 flex-1 px-2 py-1.5 text-xs font-semibold"
+                    >
+                      <option value="normal">2d10 Normal</option>
+                      <option value="advantage">Advantage</option>
+                      <option value="disadvantage">Disadvantage</option>
+                    </select>
+                  } @else {
+                    <div
+                      class="flex min-w-0 flex-1 items-center rounded-lg border border-[#C4491A]/60 bg-[var(--mot-well)] px-2.5 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)] truncate"
+                      [title]="customPoolFormula()"
+                    >
+                      {{ customPoolFormula() }}
+                    </div>
+                  }
 
                   <label class="flex items-center gap-1 shrink-0 font-mono-num text-xs">
                     <span>Mod</span>
                     <input
                       type="number"
-                      [(ngModel)]="quickDiceMod"
+                      aria-label="Roll Modifier"
+                      [ngModel]="diceModifier()"
+                      (ngModelChange)="onDiceModifierChange($event)"
                       class="mot-input w-14 px-2 py-1.5 text-center font-mono-num text-xs font-bold"
                     />
                   </label>
@@ -2175,6 +2322,34 @@
                     </div>
                     <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
                       {{ settingsStore.preferences().muteAudio ? 'Muted' : settingsStore.preferences().masterVolume + '%' }}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="openSettingsModal('dice')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border font-mono-num text-[11px] font-extrabold shadow-sm"
+                        [style.backgroundColor]="settingsStore.preferences().diceAppearance.bodyColor"
+                        [style.color]="settingsStore.preferences().diceAppearance.labelColor"
+                        [style.borderColor]="settingsStore.preferences().diceAppearance.labelColor + '44'"
+                      >
+                        d20
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          3D Dice &amp; Appearance
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Customize 3D physics throws, textures &amp; colors
+                        </div>
+                      </div>
+                    </div>
+                    <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-[10px] font-bold text-[var(--mot-muted)]">
+                      {{ settingsStore.preferences().enable3dDice ? getActiveDiceMaterialLabel() : 'Off' }}
                     </span>
                   </button>
 
@@ -3494,7 +3669,8 @@
         aria-modal="true"
         (click)="$event.stopPropagation()"
         class="mot-float flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-xs text-[var(--mot-text)] shadow-2xl"
-        [class.max-w-lg]="settingsModal !== 'invites'"
+        [class.max-w-xl]="settingsModal === 'dice'"
+        [class.max-w-lg]="settingsModal !== 'invites' && settingsModal !== 'dice'"
         [class.max-w-md]="settingsModal === 'invites'"
       >
         <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3.5">
@@ -3502,6 +3678,8 @@
             <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
               @if (settingsModal === 'general') {
                 General Settings
+              } @else if (settingsModal === 'dice') {
+                3D Dice &amp; Appearance
               } @else if (settingsModal === 'controls') {
                 Controls &amp; Hotkeys
               } @else {
@@ -3511,6 +3689,8 @@
             <p class="text-[11px] text-[var(--mot-muted)]">
               @if (settingsModal === 'general') {
                 Configure interface theme, token travel speed, audio volume, and table rules.
+              } @else if (settingsModal === 'dice') {
+                Customize 3D physics throws, surface textures, body colors, and number ink.
               } @else if (settingsModal === 'controls') {
                 Click any shortcut badge to press a new key or key combination.
               } @else {
@@ -3763,6 +3943,35 @@
               </div>
             </section>
 
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                  3D Dice Rolls
+                </span>
+                <button
+                  type="button"
+                  (click)="openSettingsModal('dice')"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                >
+                  Customize Dice Appearance
+                </button>
+              </div>
+              <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                <div>
+                  <div>Throw 3D Dice on Screen</div>
+                  <div class="text-[11px] font-normal text-[var(--mot-muted)]">
+                    Animate polyhedral 3D physics dice across the viewport on checks and combat clashes.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  [ngModel]="settingsStore.preferences().enable3dDice"
+                  (ngModelChange)="updatePreference('enable3dDice', $event)"
+                  class="accent-[#C4491A]"
+                />
+              </label>
+            </section>
+
             @if (vttStore.isGm()) {
               <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5">
                 <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
@@ -3787,6 +3996,171 @@
             <button
               type="button"
               (click)="resetGeneralPreferences()"
+              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+            >
+              Reset Defaults
+            </button>
+            <button
+              type="button"
+              (click)="closeSettingsModal()"
+              class="btn-copper rounded-lg px-4 py-1.5 font-bold"
+            >
+              Done
+            </button>
+          </div>
+        } @else if (settingsModal === 'dice') {
+          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                  @for (badge of ['d4', 'd8', 'd10', 'd12', 'd20']; track badge) {
+                    <span
+                      class="flex h-7 w-7 items-center justify-center rounded-lg border font-mono-num text-[10px] font-extrabold shadow-sm"
+                      [style.backgroundColor]="settingsStore.preferences().diceAppearance.bodyColor"
+                      [style.color]="settingsStore.preferences().diceAppearance.labelColor"
+                      [style.borderColor]="settingsStore.preferences().diceAppearance.labelColor + '4D'"
+                    >
+                      {{ badge }}
+                    </span>
+                  }
+                  <span class="ml-1 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-[10px] font-bold text-[var(--mot-muted)]">
+                    {{ getActiveDiceMaterialLabel() }}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  (click)="test3dDiceRoll()"
+                  [disabled]="!settingsStore.preferences().enable3dDice"
+                  class="btn-copper rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-45"
+                >
+                  Test Roll
+                </button>
+              </div>
+
+              <label class="flex items-center justify-between gap-3 border-t border-[var(--mot-border)] pt-2.5 font-semibold text-[var(--mot-text)]">
+                <div>
+                  <div>Throw 3D Dice on Screen</div>
+                  <div class="text-[11px] font-normal text-[var(--mot-muted)]">
+                    Your personal dice colors and texture are also shown to other players when you roll.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  [ngModel]="settingsStore.preferences().enable3dDice"
+                  (ngModelChange)="updatePreference('enable3dDice', $event)"
+                  class="accent-[#C4491A]"
+                />
+              </label>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+              <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                Starter Presets
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                @for (preset of dicePresets; track preset.id) {
+                  <button
+                    type="button"
+                    (click)="selectDicePreset(preset.id)"
+                    class="flex items-center gap-2 rounded-xl border p-2 text-left transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().diceAppearance.presetId === preset.id"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().diceAppearance.presetId === preset.id"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().diceAppearance.presetId !== preset.id"
+                    [class.hover:border-[#C4491A]]="settingsStore.preferences().diceAppearance.presetId !== preset.id"
+                  >
+                    <span
+                      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border font-mono-num text-[10px] font-extrabold shadow-sm"
+                      [style.backgroundColor]="preset.bodyColor"
+                      [style.color]="preset.labelColor"
+                      [style.borderColor]="preset.labelColor + '4D'"
+                    >
+                      10
+                    </span>
+                    <span class="truncate text-[11px] font-bold text-[var(--mot-text)]">
+                      {{ preset.label }}
+                    </span>
+                  </button>
+                }
+              </div>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+              <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                Surface Texture &amp; Finish
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                @for (mat of diceMaterialOptions; track mat.id) {
+                  <button
+                    type="button"
+                    (click)="selectDiceMaterial(mat.id)"
+                    class="flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors"
+                    [class.border-[#C4491A]]="settingsStore.preferences().diceAppearance.material === mat.id"
+                    [class.bg-[var(--mot-surface)]]="settingsStore.preferences().diceAppearance.material === mat.id"
+                    [class.border-[var(--mot-border)]]="settingsStore.preferences().diceAppearance.material !== mat.id"
+                    [class.hover:border-[#C4491A]]="settingsStore.preferences().diceAppearance.material !== mat.id"
+                  >
+                    <div class="flex w-full items-center justify-between gap-1.5">
+                      <span class="font-bold text-[var(--mot-text)]">{{ mat.label }}</span>
+                      @if (settingsStore.preferences().diceAppearance.material === mat.id) {
+                        <span class="h-2 w-2 shrink-0 rounded-full bg-[#C4491A]"></span>
+                      }
+                    </div>
+                    <span class="text-[10px] leading-snug text-[var(--mot-muted)]">
+                      {{ mat.description }}
+                    </span>
+                  </button>
+                }
+              </div>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
+              <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                Custom Colors
+              </div>
+
+              <div class="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <div class="space-y-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-bold text-[var(--mot-text)]">Body Color</span>
+                    <span class="font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                      {{ settingsStore.preferences().diceAppearance.bodyColor }}
+                    </span>
+                  </div>
+                  <app-color-picker
+                    mode="inline"
+                    surfaceTheme="adaptive"
+                    [color]="settingsStore.preferences().diceAppearance.bodyColor"
+                    [presets]="diceBodySwatches"
+                    (colorChange)="updateDiceBodyColor($event)"
+                  />
+                </div>
+
+                <div class="space-y-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-bold text-[var(--mot-text)]">Number / Ink Color</span>
+                    <span class="font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                      {{ settingsStore.preferences().diceAppearance.labelColor }}
+                    </span>
+                  </div>
+                  <app-color-picker
+                    mode="inline"
+                    surfaceTheme="adaptive"
+                    [color]="settingsStore.preferences().diceAppearance.labelColor"
+                    [presets]="diceLabelSwatches"
+                    (colorChange)="updateDiceLabelColor($event)"
+                  />
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="flex shrink-0 items-center justify-between border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3">
+            <button
+              type="button"
+              (click)="resetDicePreferences()"
               class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
             >
               Reset Defaults
