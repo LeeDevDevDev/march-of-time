@@ -8,7 +8,8 @@ export type VttHotkeyAction =
   | 'tool_light'
   | 'tool_fog'
   | 'fit_scene'
-  | 'undo';
+  | 'undo'
+  | 'delete_tokens';
 
 export type VttHotkeyMap = Record<VttHotkeyAction, string>;
 
@@ -257,6 +258,7 @@ export const DEFAULT_VTT_HOTKEYS: VttHotkeyMap = {
   tool_fog: 'f',
   fit_scene: 'c',
   undo: 'ctrl+z',
+  delete_tokens: 'delete',
 };
 
 export const VTT_HOTKEY_META: VttHotkeyBindingMeta[] = [
@@ -293,6 +295,13 @@ export const VTT_HOTKEY_META: VttHotkeyBindingMeta[] = [
     label: 'Undo Recent Event',
     description: 'Undo your most recent token move, wall, light, or fog change.',
     defaultCombo: DEFAULT_VTT_HOTKEYS.undo,
+    gmOnly: false,
+  },
+  {
+    action: 'delete_tokens',
+    label: 'Remove Selected Tokens',
+    description: 'Remove your currently selected token or tokens from the scene.',
+    defaultCombo: DEFAULT_VTT_HOTKEYS.delete_tokens,
     gmOnly: false,
   },
   {
@@ -345,10 +354,16 @@ export function resolveBaseKeyFromKeyboardEvent(
   if (code === 'Space' || event.key === ' ') {
     return 'space';
   }
+  if (code === 'Delete') {
+    return 'delete';
+  }
 
   const rawKey = (event.key || '').trim().toLowerCase();
   if (!rawKey || MODIFIER_ONLY_KEYS.has(rawKey)) {
     return null;
+  }
+  if (rawKey === 'del') {
+    return 'delete';
   }
   return rawKey;
 }
@@ -464,6 +479,7 @@ export class VttSettingsStore {
       tool_fog: formatHotkeyBadge(map.tool_fog),
       fit_scene: formatHotkeyBadge(map.fit_scene),
       undo: formatHotkeyBadge(map.undo),
+      delete_tokens: formatHotkeyBadge(map.delete_tokens),
     };
   });
 

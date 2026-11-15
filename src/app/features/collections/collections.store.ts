@@ -10,6 +10,7 @@ import { NotificationStore } from '../../core/notifications/notification.store';
 import {
   CharacterModel,
   computeDerivedStats,
+  normalizeInventoryItems,
 } from '../characters/models/character.model';
 import { CharacterStore } from '../characters/store/character.store';
 import {
@@ -21,12 +22,19 @@ import {
   CollectionFolderModel,
   DEFAULT_VTT_DARKVISION_FEET,
   DEFAULT_VTT_DIM_VISION_FEET,
+  TokenAppearanceConfig,
   VttActorKind,
   VttFaction,
   VttFolderModel,
   VttNpcPreset,
   VttNpcStats,
+  enrichNpcStatsWithVisuals,
+  normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
+  sanitizeOptionalImageUrl,
 } from '../vtt/models/vtt.model';
 import { CollectionsService } from './collections.service';
 
@@ -52,6 +60,9 @@ export interface ActorTemplateDraft {
   light_dim_feet: number;
   light_color: string;
   npc_stats: VttNpcStats;
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig;
   notes: string;
 }
 
@@ -68,6 +79,9 @@ export function buildActorTemplateFromCharacter(
   const reachFeet = stats.activeWeapon
     ? Math.max(5, Math.round((stats.activeWeapon.reach_tiles ?? 1) * 5))
     : 5;
+  const portraitUrl = sanitizeOptionalImageUrl(character.portrait_url);
+  const tokenImageUrl = sanitizeOptionalImageUrl(character.token_image_url);
+  const tokenAppearance = normalizeTokenAppearance(character.token_appearance);
 
   return {
     folder_id: folderId,
@@ -90,19 +104,31 @@ export function buildActorTemplateFromCharacter(
     light_bright_feet: 0,
     light_dim_feet: 0,
     light_color: '#F59E0B',
-    npc_stats: {
-      weapon_name: stats.activeWeapon?.name ?? 'Unarmed',
-      attack_ap: 1,
-      attack_mod: stats.attackRollMod,
-      flat_damage: stats.flatWeaponDamage,
-      reach_feet: reachFeet,
-      combat_tag: 'None',
-      parry_mod: stats.parryMod,
-      dodge_mod: stats.dodgeMod,
-      can_dodge: stats.canDodge,
-      enables_martial_parry: stats.enablesMartialParry,
-    },
-    notes: `Level ${character.level} · ${character.equipped_armor} Armor`,
+    npc_stats: enrichNpcStatsWithVisuals(
+      {
+        weapon_name: stats.activeWeapon?.name ?? 'Unarmed',
+        attack_ap: 1,
+        attack_mod: stats.attackRollMod,
+        flat_damage: stats.flatWeaponDamage,
+        reach_feet: reachFeet,
+        combat_tag: 'None',
+        parry_mod: stats.parryMod,
+        dodge_mod: stats.dodgeMod,
+        can_dodge: stats.canDodge,
+        enables_martial_parry: stats.enablesMartialParry,
+        __inventory: normalizeInventoryItems(character.inventory),
+      },
+      portraitUrl,
+      tokenImageUrl,
+      tokenAppearance
+    ),
+    portrait_url: portraitUrl,
+    token_image_url: tokenImageUrl,
+    token_appearance: tokenAppearance,
+    notes:
+      character.notes && character.notes.trim().length > 0
+        ? character.notes
+        : `Level ${character.level} · ${character.equipped_armor} Armor`,
   };
 }
 
@@ -135,6 +161,9 @@ export function buildActorTemplateFromNpcPreset(
     light_dim_feet: 0,
     light_color: '#F59E0B',
     npc_stats: { ...preset.npc_stats },
+    portrait_url: null,
+    token_image_url: null,
+    token_appearance: normalizeTokenAppearance(null),
     notes: '',
   };
 }
@@ -351,6 +380,10 @@ export class CollectionsStore {
     const userId = this.authStore.user()?.id;
     if (!userId) return null;
 
+    const portraitUrl = resolveEntityPortraitUrl(draft);
+    const tokenImageUrl = resolveEntityTokenImageUrl(draft);
+    const tokenAppearance = resolveEntityTokenAppearance(draft);
+
     const res = await this.collectionsService.createActor({
       owner_id: userId,
       folder_id: draft.folder_id || null,
@@ -379,7 +412,15 @@ export class CollectionsStore {
       light_bright_feet: Math.max(0, Math.round(draft.light_bright_feet ?? 0)),
       light_dim_feet: Math.max(0, Math.round(draft.light_dim_feet ?? 0)),
       light_color: draft.light_color || '#F59E0B',
-      npc_stats: { ...draft.npc_stats },
+      npc_stats: enrichNpcStatsWithVisuals(
+        draft.npc_stats,
+        portraitUrl,
+        tokenImageUrl,
+        tokenAppearance
+      ),
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
       notes: draft.notes ?? '',
       sort_order: this.actors().length,
     });
@@ -436,14 +477,51 @@ export class CollectionsStore {
     const existing = this.actors().find((a) => a.id === actorId);
     if (!userId || !existing) return false;
 
+    const hasVisualPatch =
+      patch.portrait_url !== undefined ||
+      patch.token_image_url !== undefined ||
+      patch.token_appearance !== undefined;
+
+    const normalizedPatch: Partial<CollectionActorModel> = { ...patch };
+    if (patch.portrait_url !== undefined) {
+      normalizedPatch.portrait_url = sanitizeOptionalImageUrl(
+        patch.portrait_url
+      );
+    }
+    if (patch.token_image_url !== undefined) {
+      normalizedPatch.token_image_url = sanitizeOptionalImageUrl(
+        patch.token_image_url
+      );
+    }
+    if (patch.token_appearance !== undefined) {
+      normalizedPatch.token_appearance = normalizeTokenAppearance(
+        patch.token_appearance
+      );
+    }
+    if (hasVisualPatch) {
+      const baseStats = patch.npc_stats ?? existing.npc_stats;
+      normalizedPatch.npc_stats = enrichNpcStatsWithVisuals(
+        baseStats,
+        normalizedPatch.portrait_url !== undefined
+          ? normalizedPatch.portrait_url
+          : existing.portrait_url,
+        normalizedPatch.token_image_url !== undefined
+          ? normalizedPatch.token_image_url
+          : existing.token_image_url,
+        normalizedPatch.token_appearance !== undefined
+          ? normalizedPatch.token_appearance
+          : existing.token_appearance
+      );
+    }
+
     this.actors.update((curr) =>
-      curr.map((a) => (a.id === actorId ? { ...a, ...patch } : a))
+      curr.map((a) => (a.id === actorId ? { ...a, ...normalizedPatch } : a))
     );
 
     const res = await this.collectionsService.updateActor(
       actorId,
       userId,
-      patch
+      normalizedPatch
     );
     if (res.error) {
       this.notifications.error('Unable to Update Actor', res.error);
@@ -481,6 +559,9 @@ export class CollectionsStore {
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,
       npc_stats: { ...existing.npc_stats },
+      portrait_url: existing.portrait_url,
+      token_image_url: existing.token_image_url,
+      token_appearance: existing.token_appearance,
       notes: existing.notes,
     });
   }

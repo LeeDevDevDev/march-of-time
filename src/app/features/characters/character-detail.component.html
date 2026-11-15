@@ -6,10 +6,67 @@
       >
         <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div class="flex items-center gap-4">
-            <div
-              class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#C4491A] font-display text-xl font-bold text-white"
-            >
-              {{ char.name.slice(0, 2).toUpperCase() }}
+            <div class="relative shrink-0">
+              @if (char.portrait_url && brokenPortraitUrl() !== char.portrait_url) {
+                <button
+                  type="button"
+                  (click)="canEditCharacter(char) && tokenizerModalOpen.set(true)"
+                  [class.cursor-pointer]="canEditCharacter(char)"
+                  [class.cursor-default]="!canEditCharacter(char)"
+                  [title]="canEditCharacter(char) ? 'Customize Sheet Portrait & Token' : char.name"
+                  class="group relative block h-20 w-16 overflow-hidden rounded-xl border border-[#243B37] bg-[#0D1615] shadow-md transition-colors hover:border-[#C4491A]"
+                >
+                  <img
+                    [src]="char.portrait_url"
+                    [alt]="char.name + ' portrait'"
+                    class="h-full w-full object-cover"
+                    (error)="brokenPortraitUrl.set(char.portrait_url ?? null)"
+                  />
+                </button>
+                @if (hasCustomToken(char)) {
+                  <div
+                    class="pointer-events-none absolute -bottom-1.5 -right-1.5 h-8 w-8 rounded-full bg-[#0D1615] p-0.5 shadow-md"
+                  >
+                    <app-token-avatar
+                      [tokenImageUrl]="char.token_image_url"
+                      [appearance]="char.token_appearance"
+                      icon="user"
+                      color="#38B29A"
+                      faction="ally"
+                      iconSizeClass="h-4 w-4"
+                    />
+                  </div>
+                }
+              } @else if (hasCustomToken(char)) {
+                <button
+                  type="button"
+                  (click)="canEditCharacter(char) && tokenizerModalOpen.set(true)"
+                  [class.cursor-pointer]="canEditCharacter(char)"
+                  [class.cursor-default]="!canEditCharacter(char)"
+                  [title]="canEditCharacter(char) ? 'Customize Sheet Portrait & Token' : char.name"
+                  class="block h-16 w-16 rounded-full"
+                >
+                  <app-token-avatar
+                    [tokenImageUrl]="char.token_image_url"
+                    [appearance]="char.token_appearance"
+                    icon="user"
+                    color="#38B29A"
+                    faction="ally"
+                    iconSizeClass="h-7 w-7"
+                  />
+                </button>
+              } @else {
+                <button
+                  type="button"
+                  (click)="canEditCharacter(char) && tokenizerModalOpen.set(true)"
+                  [class.cursor-pointer]="canEditCharacter(char)"
+                  [class.cursor-default]="!canEditCharacter(char)"
+                  [title]="canEditCharacter(char) ? 'Add Sheet Portrait & Token' : char.name"
+                  class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-[#243B37] bg-[#C4491A] font-display text-xl font-bold text-white transition-transform hover:scale-[1.02]"
+                >
+                  {{ char.name.slice(0, 2).toUpperCase() }}
+                </button>
+              }
             </div>
             <div>
               <div class="flex flex-wrap items-center gap-2.5">
@@ -37,6 +94,20 @@
             >
               All Characters
             </a>
+            @if (canEditCharacter(char)) {
+              <button
+                type="button"
+                (click)="tokenizerModalOpen.set(true)"
+                class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+              >
+                <svg class="h-3.5 w-3.5 text-[#FF8C5A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="9" cy="9" r="2" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+                <span>Portrait &amp; Token</span>
+              </button>
+            }
             <a
               [routerLink]="['/characters', char.id, 'edit']"
               class="inline-flex h-9 items-center justify-center rounded-lg border border-[#243B37] bg-[#0D1615] px-3.5 text-xs font-semibold text-[#FF8C5A] no-underline hover:border-[#C4491A]"
@@ -1051,6 +1122,119 @@
               }
             </div>
           </section>
+
+          <section
+            class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums space-y-4"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                  Inventory &amp; Notes
+                </h2>
+                <p class="text-xs text-[var(--mot-muted)]">
+                  Carried gear, consumables, quest items, and character notes synced with the VTT sheet.
+                </p>
+              </div>
+              @if (canEditCharacter(char)) {
+                <button
+                  type="button"
+                  (click)="addInventoryItem(char)"
+                  class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold"
+                >
+                  + Add Item
+                </button>
+              }
+            </div>
+
+            @let items = getInventoryItems(char);
+            @if (items.length === 0) {
+              <div class="rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-5 text-center text-xs text-[var(--mot-muted)]">
+                No items in inventory yet.
+              </div>
+            } @else {
+              <div class="space-y-2">
+                @for (item of items; track item.id) {
+                  <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 space-y-2">
+                    <div class="flex items-center gap-2">
+                      @if (canEditCharacter(char)) {
+                        <input
+                          type="text"
+                          [value]="item.name"
+                          (change)="updateInventoryItemField(char, item.id, 'name', $any($event.target).value)"
+                          placeholder="Item"
+                          class="min-w-0 flex-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-bold text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
+                        />
+                        <div class="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs">
+                          <button
+                            type="button"
+                            (click)="adjustInventoryItemQuantity(char, item.id, -1)"
+                            class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                          >
+                            &minus;
+                          </button>
+                          <span class="min-w-[1.5rem] text-center font-bold text-[var(--mot-text)]">
+                            {{ item.quantity }}
+                          </span>
+                          <button
+                            type="button"
+                            (click)="adjustInventoryItemQuantity(char, item.id, 1)"
+                            class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          (click)="removeInventoryItem(char, item.id)"
+                          title="Remove Item"
+                          class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                        >
+                          &times;
+                        </button>
+                      } @else {
+                        <span class="flex-1 text-xs font-bold text-[var(--mot-text)]">
+                          {{ item.name || 'Unnamed Item' }}
+                        </span>
+                        <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                          &times;{{ item.quantity }}
+                        </span>
+                      }
+                    </div>
+                    @if (canEditCharacter(char)) {
+                      <input
+                        type="text"
+                        [value]="item.description"
+                        (change)="updateInventoryItemField(char, item.id, 'description', $any($event.target).value)"
+                        placeholder="Description"
+                        class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs text-[var(--mot-muted)] focus:border-[#C4491A] focus:outline-none"
+                      />
+                    } @else if (item.description) {
+                      <p class="text-xs text-[var(--mot-muted)]">{{ item.description }}</p>
+                    }
+                  </div>
+                }
+              </div>
+            }
+
+            <div class="space-y-1.5 border-t border-[var(--mot-border)] pt-3">
+              <span class="block text-xs font-bold text-[var(--mot-text)]">
+                Character Notes
+              </span>
+              @if (canEditCharacter(char)) {
+                <textarea
+                  rows="3"
+                  [value]="char.notes || ''"
+                  (blur)="saveCharacterNotes(char, $any($event.target).value)"
+                  placeholder="Notes"
+                  class="w-full rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-2 text-xs text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
+                ></textarea>
+              } @else {
+                <p class="whitespace-pre-wrap rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-2 text-xs text-[var(--mot-muted)]">
+                  {{ char.notes || 'No notes recorded.' }}
+                </p>
+              }
+            </div>
+          </section>
         </div>
       </div>
 
@@ -1060,10 +1244,11 @@
           role="dialog"
           aria-modal="true"
           aria-labelledby="perk-picker-title"
-          (click)="perkPickerOpen.set(false)"
+          (mousedown)="$event.target === $event.currentTarget && perkPickerOpen.set(false)"
         >
           <div
             class="mot-float flex max-h-[92vh] w-full max-w-[1440px] flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)]"
+            (mousedown)="$event.stopPropagation()"
             (click)="$event.stopPropagation()"
           >
             <div
@@ -1275,6 +1460,58 @@
                   </p>
                 </div>
               }
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (tokenizerModalOpen() && canEditCharacter(char)) {
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Portrait and Token Studio"
+        >
+          <div
+            class="fixed inset-0 bg-black/75 backdrop-blur-xs"
+            (click)="tokenizerModalOpen.set(false)"
+          ></div>
+
+          <div
+            class="relative z-10 flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] shadow-2xl"
+          >
+            <header
+              class="flex items-center justify-between gap-4 border-b border-[#243B37] bg-[#122220] px-6 py-4 text-[#EBF5F3]"
+            >
+              <div>
+                <h2 class="font-display text-lg font-bold text-white">
+                  Portrait &amp; Token Studio · {{ char.name }}
+                </h2>
+                <p class="mt-0.5 text-xs text-[#8AB0AB]">
+                  Keep a separate full-body Sheet Portrait and cropped circular Battlemap Token. Changes sync automatically with VTT campaigns.
+                </p>
+              </div>
+              <button
+                type="button"
+                (click)="tokenizerModalOpen.set(false)"
+                class="rounded-lg border border-[#243B37] bg-[#0D1615] px-3 py-1.5 text-xs font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+              >
+                Done
+              </button>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-6">
+              <app-tokenizer-editor
+                [portraitUrl]="char.portrait_url"
+                [tokenImageUrl]="char.token_image_url"
+                [tokenAppearance]="char.token_appearance"
+                fallbackIcon="user"
+                fallbackColor="#38B29A"
+                faction="ally"
+                [actorName]="char.name"
+                [editable]="canEditCharacter(char)"
+                (visualsChange)="onCharacterVisualsChange(char, $event)"
+              />
             </div>
           </div>
         </div>

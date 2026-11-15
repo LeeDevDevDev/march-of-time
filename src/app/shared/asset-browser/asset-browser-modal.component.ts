@@ -1,6 +1,8 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
+  DestroyRef,
+  HostListener,
   computed,
   effect,
   inject,
@@ -23,6 +25,14 @@ import {
   collectDescendantFolderIds,
 } from '../../features/vtt/engine/directory-tree.engine';
 import { ColorPickerComponent } from '../color-picker/color-picker.component';
+import {
+  allocateFloatingWindowId,
+  clampFloatingWindowCoords,
+  computeFloatingWindowZIndex,
+  computeInitialFloatingWindowCoords,
+  focusFloatingWindow,
+  releaseFloatingWindow,
+} from '../floating-window-stack';
 
 interface AssetFolderFormState {
   mode: 'create' | 'edit';
@@ -41,8 +51,11 @@ interface AssetFolderFormState {
 export class AssetBrowserModalComponent {
   readonly userAssetsStore = inject(UserAssetsStore);
   private readonly notifications = inject(NotificationStore);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly windowId = allocateFloatingWindowId();
 
   readonly open = input<boolean>(false);
+  readonly floating = input<boolean>(false);
   readonly mode = input<'picker' | 'manage'>('picker');
   readonly purpose = input<UserAssetPurpose>('maps');
   readonly initialFolderId = input<string | null | undefined>(undefined);
@@ -67,7 +80,16 @@ export class AssetBrowserModalComponent {
   readonly dragOverFolderTarget = signal<string | null>(null);
   readonly isExternalFileDragOver = signal<boolean>(false);
 
+  readonly minimized = signal<boolean>(false);
+  readonly windowX = signal<number>(96);
+  readonly windowY = signal<number>(64);
+  readonly isDraggingWindow = signal<boolean>(false);
+  readonly zIndex = computed(() => computeFloatingWindowZIndex(this.windowId));
+
+  private dragPointerOffsetX = 0;
+  private dragPointerOffsetY = 0;
   private wasOpen = false;
+  private positionedOnce = false;
 
   readonly modalTitle = computed<string>(() => {
     if (this.mode() === 'manage') return 'Personal Asset Library';
@@ -143,17 +165,109 @@ export class AssetBrowserModalComponent {
   });
 
   constructor() {
+    this.destroyRef.onDestroy(() => {
+      releaseFloatingWindow(this.windowId);
+    });
+
     effect(() => {
       const isOpen = this.open();
       if (isOpen && !this.wasOpen) {
         this.wasOpen = true;
         untracked(() => {
+          this.minimized.set(false);
+          if (this.floating()) {
+            if (!this.positionedOnce) {
+              this.positionedOnce = true;
+              const coords = computeInitialFloatingWindowCoords(960, 720);
+              this.windowX.set(coords.x);
+              this.windowY.set(coords.y);
+            } else {
+              const clamped = clampFloatingWindowCoords(
+                this.windowX(),
+                this.windowY()
+              );
+              this.windowX.set(clamped.x);
+              this.windowY.set(clamped.y);
+            }
+            focusFloatingWindow(this.windowId);
+          }
           void this.initializeOnOpen();
         });
       } else if (!isOpen && this.wasOpen) {
         this.wasOpen = false;
+        untracked(() => {
+          this.isDraggingWindow.set(false);
+          releaseFloatingWindow(this.windowId);
+        });
       }
     });
+  }
+
+  focusWindow(): void {
+    if (this.floating()) {
+      focusFloatingWindow(this.windowId);
+    }
+  }
+
+  toggleMinimize(): void {
+    this.minimized.update((v) => !v);
+  }
+
+  onBackdropMouseDown(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      this.close();
+    }
+  }
+
+  onHeaderPointerDown(event: PointerEvent): void {
+    if (!this.floating()) return;
+    this.focusWindow();
+    if (event.button !== 0) return;
+    const el = event.target as HTMLElement | null;
+    if (el?.closest('button, input, select, textarea, a, label, kbd')) {
+      return;
+    }
+    event.preventDefault();
+    this.isDraggingWindow.set(true);
+    this.dragPointerOffsetX = event.clientX - this.windowX();
+    this.dragPointerOffsetY = event.clientY - this.windowY();
+  }
+
+  @HostListener('window:pointermove', ['$event'])
+  onWindowPointerMove(event: PointerEvent): void {
+    if (!this.isDraggingWindow()) return;
+    const clamped = clampFloatingWindowCoords(
+      event.clientX - this.dragPointerOffsetX,
+      event.clientY - this.dragPointerOffsetY
+    );
+    this.windowX.set(clamped.x);
+    this.windowY.set(clamped.y);
+  }
+
+  @HostListener('window:pointerup')
+  onWindowPointerUp(): void {
+    if (this.isDraggingWindow()) {
+      this.isDraggingWindow.set(false);
+    }
+  }
+
+  @HostListener('window:pointercancel')
+  onWindowPointerCancel(): void {
+    if (this.isDraggingWindow()) {
+      this.isDraggingWindow.set(false);
+    }
+  }
+
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    if (!this.floating() || !this.open()) return;
+    const clamped = clampFloatingWindowCoords(this.windowX(), this.windowY());
+    if (clamped.x !== this.windowX()) {
+      this.windowX.set(clamped.x);
+    }
+    if (clamped.y !== this.windowY()) {
+      this.windowY.set(clamped.y);
+    }
   }
 
   private async initializeOnOpen(): Promise<void> {

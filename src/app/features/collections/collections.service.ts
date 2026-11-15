@@ -4,10 +4,17 @@ import {
   CollectionActorModel,
   CollectionFolderModel,
   DEFAULT_VTT_DIM_VISION_FEET,
+  TokenAppearanceConfig,
   VttActorKind,
   VttFaction,
   VttNpcStats,
+  enrichNpcStatsWithVisuals,
+  normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
+  sanitizeOptionalImageUrl,
 } from '../vtt/models/vtt.model';
 
 function isMissingTableOrColumnError(code?: string, message?: string): boolean {
@@ -116,6 +123,16 @@ export function parseCollectionActorRow(
       ? { ...(rawStats as VttNpcStats) }
       : {};
 
+  const visualCandidate = {
+    portrait_url: raw['portrait_url'] as string | null | undefined,
+    token_image_url: raw['token_image_url'] as string | null | undefined,
+    token_appearance: raw['token_appearance'] as
+      | TokenAppearanceConfig
+      | null
+      | undefined,
+    npc_stats: npcStats,
+  };
+
   return {
     id: String(raw['id'] ?? ''),
     owner_id: String(raw['owner_id'] ?? ''),
@@ -153,6 +170,9 @@ export function parseCollectionActorRow(
     light_dim_feet: Math.max(0, Number(raw['light_dim_feet'] ?? 0)),
     light_color: raw['light_color'] ? String(raw['light_color']) : '#F59E0B',
     npc_stats: npcStats,
+    portrait_url: resolveEntityPortraitUrl(visualCandidate),
+    token_image_url: resolveEntityTokenImageUrl(visualCandidate),
+    token_appearance: resolveEntityTokenAppearance(visualCandidate),
     notes: raw['notes'] ? String(raw['notes']) : '',
     sort_order: Number(raw['sort_order'] ?? 0),
     created_at: raw['created_at'] ? String(raw['created_at']) : undefined,
@@ -325,13 +345,26 @@ export class CollectionsService {
       payload.darkvision_feet,
       payload.npc_stats
     );
-    const enrichedPayload = {
-      ...payload,
-      darkvision_feet: resolvedDarkvision,
-      npc_stats: {
+    const portraitUrl = resolveEntityPortraitUrl(payload);
+    const tokenImageUrl = resolveEntityTokenImageUrl(payload);
+    const tokenAppearance = resolveEntityTokenAppearance(payload);
+    const enrichedStats = enrichNpcStatsWithVisuals(
+      {
         ...(payload.npc_stats ?? {}),
         __darkvision_feet: resolvedDarkvision,
       },
+      portraitUrl,
+      tokenImageUrl,
+      tokenAppearance
+    );
+
+    const enrichedPayload = {
+      ...payload,
+      darkvision_feet: resolvedDarkvision,
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
+      npc_stats: enrichedStats,
     };
 
     let { data, error } = await this.supabase
@@ -343,6 +376,9 @@ export class CollectionsService {
     if (error && isMissingTableOrColumnError(error.code, error.message)) {
       const legacyPayload: Record<string, unknown> = { ...enrichedPayload };
       delete legacyPayload['darkvision_feet'];
+      delete legacyPayload['portrait_url'];
+      delete legacyPayload['token_image_url'];
+      delete legacyPayload['token_appearance'];
       const retry = await this.supabase
         .from('collection_actors')
         .insert(legacyPayload)
@@ -383,11 +419,40 @@ export class CollectionsService {
       ...patch,
       updated_at: new Date().toISOString(),
     };
-    if (patch.darkvision_feet !== undefined && patch.npc_stats) {
-      payload['npc_stats'] = {
-        ...patch.npc_stats,
-        __darkvision_feet: patch.darkvision_feet,
-      };
+    if (patch.portrait_url !== undefined) {
+      payload['portrait_url'] = sanitizeOptionalImageUrl(patch.portrait_url);
+    }
+    if (patch.token_image_url !== undefined) {
+      payload['token_image_url'] = sanitizeOptionalImageUrl(
+        patch.token_image_url
+      );
+    }
+    if (patch.token_appearance !== undefined) {
+      payload['token_appearance'] = normalizeTokenAppearance(
+        patch.token_appearance
+      );
+    }
+    if (patch.npc_stats) {
+      const mergedStats: VttNpcStats = { ...patch.npc_stats };
+      if (patch.darkvision_feet !== undefined) {
+        mergedStats.__darkvision_feet = patch.darkvision_feet;
+      }
+      if (patch.portrait_url !== undefined) {
+        mergedStats.__portrait_url = sanitizeOptionalImageUrl(
+          patch.portrait_url
+        );
+      }
+      if (patch.token_image_url !== undefined) {
+        mergedStats.__token_image_url = sanitizeOptionalImageUrl(
+          patch.token_image_url
+        );
+      }
+      if (patch.token_appearance !== undefined) {
+        mergedStats.__token_appearance = normalizeTokenAppearance(
+          patch.token_appearance
+        );
+      }
+      payload['npc_stats'] = mergedStats;
     }
 
     let { error } = await this.supabase
@@ -397,11 +462,17 @@ export class CollectionsService {
 
     if (
       error &&
-      payload['darkvision_feet'] !== undefined &&
+      (payload['darkvision_feet'] !== undefined ||
+        payload['portrait_url'] !== undefined ||
+        payload['token_image_url'] !== undefined ||
+        payload['token_appearance'] !== undefined) &&
       isMissingTableOrColumnError(error.code, error.message)
     ) {
       const retryPayload: Record<string, unknown> = { ...payload };
       delete retryPayload['darkvision_feet'];
+      delete retryPayload['portrait_url'];
+      delete retryPayload['token_image_url'];
+      delete retryPayload['token_appearance'];
       const retry = await this.supabase
         .from('collection_actors')
         .update(retryPayload)
@@ -410,7 +481,9 @@ export class CollectionsService {
     }
 
     const local = readLocalActors(ownerId).map((a) =>
-      a.id === actorId ? { ...a, ...patch, updated_at: String(payload['updated_at']) } : a
+      a.id === actorId
+        ? { ...a, ...patch, updated_at: String(payload['updated_at']) }
+        : a
     );
     writeLocalActors(ownerId, local);
 

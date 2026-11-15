@@ -1,0 +1,350 @@
+@let imgUrl = cleanImageUrl();
+@let frame = effectiveFrame();
+@let ring = ringColor();
+
+<div
+  data-token-avatar="true"
+  [attr.data-token-frame]="frame"
+  class="relative h-full w-full rounded-full"
+  [class.grayscale]="grayscale()"
+>
+  <div
+    class="absolute overflow-hidden rounded-full"
+    [class.bg-[#09100F]]="frame !== 'none' || !imgUrl"
+    [class.shadow-inner]="frame !== 'none' || !imgUrl"
+    [class.inset-0]="frame === 'none'"
+    [class.inset-[4%]]="frame === 'custom_png'"
+    [class.inset-[5%]]="frame !== 'none' && frame !== 'custom_png'"
+  >
+    <div
+      data-token-art-layer="true"
+      class="flex h-full w-full items-center justify-center"
+      [style.transform]="artTransform()"
+    >
+      @if (imgUrl) {
+        <img
+          data-token-image="true"
+          [src]="imgUrl"
+          alt=""
+          draggable="false"
+          (error)="onTokenImageError()"
+          class="pointer-events-none h-full w-full object-cover select-none"
+          [style.transform]="panZoomTransform()"
+          style="transform-origin: center center"
+        />
+      } @else {
+        <app-compendium-icon
+          [icon]="icon() || 'user'"
+          [color]="emblemColor()"
+          [sizeClass]="iconSizeClass()"
+        />
+      }
+    </div>
+  </div>
+
+  @switch (frame) {
+    @case ('simple') {
+      <svg
+        viewBox="0 0 100 100"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <circle
+          cx="50"
+          cy="50"
+          r="48.4"
+          fill="none"
+          stroke="#060B0A"
+          stroke-width="2.4"
+          opacity="0.88"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="46"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="4.4"
+          [attr.stroke-dasharray]="isHidden() ? '6 4' : null"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="43.6"
+          fill="none"
+          stroke="#FFFFFF"
+          stroke-width="0.85"
+          opacity="0.32"
+        />
+      </svg>
+    }
+
+    @case ('double') {
+      <svg
+        viewBox="0 0 100 100"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <circle
+          cx="50"
+          cy="50"
+          r="45.8"
+          fill="none"
+          stroke="#070D0C"
+          stroke-width="7.2"
+          opacity="0.92"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="48"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="2.4"
+          [attr.stroke-dasharray]="isHidden() ? '6 4' : null"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="43.4"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="2"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="48.2"
+          fill="none"
+          stroke="#FFFFFF"
+          stroke-width="0.6"
+          opacity="0.35"
+        />
+      </svg>
+    }
+
+    @case ('ornate') {
+      <svg
+        viewBox="0 0 100 100"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <circle
+          cx="50"
+          cy="50"
+          r="46"
+          fill="none"
+          stroke="#070D0C"
+          stroke-width="6.8"
+          opacity="0.92"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="46.6"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="3.2"
+          [attr.stroke-dasharray]="isHidden() ? '6 4' : null"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="42.8"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="1.4"
+          stroke-dasharray="1.6 3.1"
+          stroke-linecap="round"
+          opacity="0.9"
+        />
+        <polygon
+          points="50,1.2 53.8,5.6 50,9.4 46.2,5.6"
+          [attr.fill]="ring"
+          stroke="#070D0C"
+          stroke-width="1"
+        />
+        <polygon
+          points="98.8,50 94.4,53.8 90.6,50 94.4,46.2"
+          [attr.fill]="ring"
+          stroke="#070D0C"
+          stroke-width="1"
+        />
+        <polygon
+          points="50,98.8 53.8,94.4 50,90.6 46.2,94.4"
+          [attr.fill]="ring"
+          stroke="#070D0C"
+          stroke-width="1"
+        />
+        <polygon
+          points="1.2,50 5.6,53.8 9.4,50 5.6,46.2"
+          [attr.fill]="ring"
+          stroke="#070D0C"
+          stroke-width="1"
+        />
+      </svg>
+    }
+
+    @case ('iron') {
+      <svg
+        viewBox="0 0 100 100"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <circle
+          cx="50"
+          cy="50"
+          r="46"
+          fill="none"
+          stroke="#070D0C"
+          stroke-width="7.4"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="46"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="5"
+          opacity="0.88"
+          [attr.stroke-dasharray]="isHidden() ? '6 4' : null"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="43"
+          fill="none"
+          stroke="#050908"
+          stroke-width="1.4"
+        />
+        <g fill="#EBF5F3" stroke="#050908" stroke-width="0.9">
+          <circle cx="50" cy="4" r="1.8" />
+          <circle cx="82.5" cy="17.5" r="1.8" />
+          <circle cx="96" cy="50" r="1.8" />
+          <circle cx="82.5" cy="82.5" r="1.8" />
+          <circle cx="50" cy="96" r="1.8" />
+          <circle cx="17.5" cy="82.5" r="1.8" />
+          <circle cx="4" cy="50" r="1.8" />
+          <circle cx="17.5" cy="17.5" r="1.8" />
+        </g>
+      </svg>
+    }
+
+    @case ('boss') {
+      <svg
+        viewBox="0 0 100 100"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <circle
+          cx="50"
+          cy="50"
+          r="45.6"
+          fill="none"
+          stroke="#060A09"
+          stroke-width="8"
+          opacity="0.94"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="47.4"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="3"
+          [attr.stroke-dasharray]="isHidden() ? '6 4' : null"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r="42.6"
+          fill="none"
+          [attr.stroke]="ring"
+          stroke-width="1.8"
+        />
+        <polygon
+          points="50,0.4 54.4,7.6 50,5.8 45.6,7.6"
+          [attr.fill]="ring"
+          stroke="#060A09"
+          stroke-width="0.9"
+        />
+        <polygon
+          points="99.6,50 92.4,54.4 94.2,50 92.4,45.6"
+          [attr.fill]="ring"
+          stroke="#060A09"
+          stroke-width="0.9"
+        />
+        <polygon
+          points="50,99.6 54.4,92.4 50,94.2 45.6,92.4"
+          [attr.fill]="ring"
+          stroke="#060A09"
+          stroke-width="0.9"
+        />
+        <polygon
+          points="0.4,50 7.6,54.4 5.8,50 7.6,45.6"
+          [attr.fill]="ring"
+          stroke="#060A09"
+          stroke-width="0.9"
+        />
+        <g [attr.fill]="ring" stroke="#060A09" stroke-width="0.8">
+          <circle cx="83.5" cy="16.5" r="2.1" />
+          <circle cx="83.5" cy="83.5" r="2.1" />
+          <circle cx="16.5" cy="83.5" r="2.1" />
+          <circle cx="16.5" cy="16.5" r="2.1" />
+        </g>
+      </svg>
+    }
+
+    @case ('custom_png') {
+      @if (customFrameUrl(); as framePng) {
+        <img
+          data-token-custom-frame="true"
+          [src]="framePng"
+          alt=""
+          draggable="false"
+          (error)="onCustomFrameError()"
+          class="pointer-events-none absolute inset-0 h-full w-full rounded-full object-contain select-none"
+        />
+      }
+      @if (isHidden()) {
+        <svg
+          viewBox="0 0 100 100"
+          class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          aria-hidden="true"
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r="48.5"
+            fill="none"
+            [attr.stroke]="ring"
+            stroke-width="1.8"
+            stroke-dasharray="5 4"
+            opacity="0.85"
+          />
+        </svg>
+      }
+    }
+
+    @case ('none') {
+      @if (isHidden()) {
+        <svg
+          viewBox="0 0 100 100"
+          class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          aria-hidden="true"
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r="48"
+            fill="none"
+            [attr.stroke]="ring"
+            stroke-width="2"
+            stroke-dasharray="5 4"
+            opacity="0.8"
+          />
+        </svg>
+      }
+    }
+  }
+</div>

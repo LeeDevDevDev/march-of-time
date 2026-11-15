@@ -1,4 +1,10 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import {
+  Injectable,
+  WritableSignal,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { UserAssetsStore } from '../../../core/assets/user-assets.store';
 import { AuthStore } from '../../../core/auth/auth.store';
@@ -12,11 +18,13 @@ import { CompendiumStore } from '../../../core/compendium/compendium.store';
 import { NotificationStore } from '../../../core/notifications/notification.store';
 import { VttSettingsStore } from '../../../core/settings/vtt-settings.store';
 import {
+  ActorInventoryItem,
   CharacterModel,
   DerivedCharacterStats,
   ResolvedCombatArt,
   UPGRADE_SLOT_PREFIX,
   computeDerivedStats,
+  normalizeInventoryItems,
 } from '../../characters/models/character.model';
 import { CharacterService } from '../../characters/services/character.service';
 import { CharacterStore } from '../../characters/store/character.store';
@@ -86,6 +94,7 @@ import {
   DEFAULT_VTT_SCENE_WIDTH_PX,
   CollectionActorModel,
   HexCoord,
+  VttActorKind,
   VttClashResolution,
   VttDefenseChoice,
   VttDirectoryScope,
@@ -95,6 +104,7 @@ import {
   VttLightSource,
   VttLogEntry,
   VttNpcPreset,
+  VttNpcStats,
   VttParticipant,
   VttPendingClash,
   VttPoint,
@@ -105,11 +115,33 @@ import {
   VttToolMode,
   VttWallKind,
   VttWallSegment,
+  TokenAppearanceConfig,
+  enrichNpcStatsWithVisuals,
+  normalizeTokenAppearance,
+  normalizeTokenRotation,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
+  sanitizeOptionalImageUrl,
 } from '../models/vtt.model';
 import { VttPingBroadcast, VttService } from '../services/vtt.service';
 
 export type VttSpeakerMode = 'user' | 'character';
+
+export interface BatchTokenMoveInput {
+  tokenId: string;
+  distanceFeet: number;
+  freeOverride?: boolean;
+  targetHex?: HexCoord;
+  targetWorld?: VttPoint;
+}
+
+export interface VttOpenSheetTarget {
+  rosterActorId: string | null;
+  characterId: string | null;
+  tokenId: string | null;
+}
 
 export interface VttResolvedChatSpeaker {
   name: string;
@@ -117,6 +149,11 @@ export interface VttResolvedChatSpeaker {
   tokenId: string | null;
   characterId: string | null;
   color: string | null;
+  icon?: string | null;
+  faction?: VttFaction;
+  portraitUrl?: string | null;
+  tokenImageUrl?: string | null;
+  tokenAppearance?: TokenAppearanceConfig;
 }
 
 export interface VttWhisperTargetOption {
@@ -164,6 +201,17 @@ export type VttUndoPayload =
       tokenSnapshot: VttTokenModel;
     }
   | {
+      kind: 'tokens_batch';
+      patches?: {
+        tokenId: string;
+        previousTokenPatch: Partial<VttTokenModel>;
+      }[];
+      removedSnapshots?: VttTokenModel[];
+      previousExploredFog?: VttExploredFog;
+      selectedTokenIdsAfterUndo?: string[];
+      coalesceKey?: string;
+    }
+  | {
       kind: 'scene_patch';
       previousScenePatch: Partial<VttSceneModel>;
       selectedLightIdAfterUndo?: string | null;
@@ -177,6 +225,27 @@ export type VttUndoEntry = VttUndoPayload & {
 };
 
 const MAX_VTT_UNDO_STACK = 30;
+const ROTATION_UNDO_COALESCE_MS = 900;
+
+function createSyncedPrimaryTokenSignal(idsSig: WritableSignal<string[]>): {
+  primarySig: WritableSignal<string | null>;
+  setPrimaryDirect: (val: string | null) => void;
+} {
+  const base = signal<string | null>(null);
+  const rawSet = base.set.bind(base);
+  base.set = (val: string | null) => {
+    rawSet(val);
+    idsSig.set(val ? [val] : []);
+  };
+  base.update = (fn: (value: string | null) => string | null) => {
+    const next = fn(base());
+    base.set(next);
+  };
+  return {
+    primarySig: base,
+    setPrimaryDirect: rawSet,
+  };
+}
 
 function cloneExploredFog(fog: VttExploredFog | undefined): VttExploredFog {
   return {
@@ -283,14 +352,39 @@ export class VttStore {
     return list;
   });
 
+  readonly assignablePlayers = computed<VttParticipant[]>(() => {
+    const camp = this.campaign();
+    const gmId = camp?.gm_id ?? null;
+    const seen = new Set<string>();
+    const list: VttParticipant[] = [];
+
+    for (const part of this.participants()) {
+      if (!part.user_id || part.user_id === gmId || part.role === 'gm') {
+        continue;
+      }
+      if (seen.has(part.user_id)) continue;
+      seen.add(part.user_id);
+      list.push(part);
+    }
+
+    return list;
+  });
+
   readonly activeTool = signal<VttToolMode>('select');
   readonly activeWallKind = signal<VttWallKind>('wall');
   readonly previewPlayerVision = signal(false);
   readonly enforceApOnMove = signal(false);
 
-  readonly selectedTokenId = signal<string | null>(null);
+  private readonly _selectedTokenIds = signal<string[]>([]);
+  private readonly primaryTokenSync = createSyncedPrimaryTokenSignal(
+    this._selectedTokenIds
+  );
+
+  readonly selectedTokenIds = this._selectedTokenIds.asReadonly();
+  readonly selectedTokenId = this.primaryTokenSync.primarySig;
   readonly selectedRosterActorId = signal<string | null>(null);
   readonly selectedCharacterId = signal<string | null>(null);
+  readonly openSheetTarget = signal<VttOpenSheetTarget | null>(null);
   readonly gmSpeakerMode = signal<VttSpeakerMode>('user');
   readonly selectedLightId = signal<string | null>(null);
   readonly pendingTargetAction = signal<PendingTargetAction | null>(null);
@@ -309,6 +403,10 @@ export class VttStore {
   readonly isUndoing = signal(false);
 
   private readonly seenDiceThrowIds = new Set<string>();
+  private readonly inFlightTokenRotationPatches = new Map<
+    string,
+    { inFlight: boolean; queuedPatch: Partial<VttTokenModel> | null }
+  >();
 
   readonly isGm = computed(() => {
     const camp = this.campaign();
@@ -351,18 +449,96 @@ export class VttStore {
     return this.tokens().filter((t) => t.encounter_id === sc.id);
   });
 
+  readonly selectedTokens = computed<VttTokenModel[]>(() => {
+    const ids = this.selectedTokenIds();
+    if (ids.length === 0) return [];
+    const byId = new Map(this.sceneTokens().map((t) => [t.id, t]));
+    const resolved: VttTokenModel[] = [];
+    for (const id of ids) {
+      const tok = byId.get(id);
+      if (tok) {
+        resolved.push(tok);
+      }
+    }
+    return resolved;
+  });
+
+  readonly controllableSelectedTokens = computed<VttTokenModel[]>(() =>
+    this.selectedTokens().filter((t) => this.isGm() || this.canControlToken(t))
+  );
+
   readonly selectedToken = computed<VttTokenModel | null>(() => {
     const id = this.selectedTokenId();
     if (!id) return null;
     return this.sceneTokens().find((t) => t.id === id) ?? null;
   });
 
+  setSelectedTokens(
+    tokenIds: readonly string[],
+    primaryId?: string | null
+  ): void {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const rawId of tokenIds) {
+      const trimmed = rawId?.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      unique.push(trimmed);
+    }
+
+    this._selectedTokenIds.set(unique);
+    if (unique.length === 0) {
+      this.primaryTokenSync.setPrimaryDirect(null);
+      return;
+    }
+
+    const resolvedPrimary =
+      primaryId && seen.has(primaryId)
+        ? primaryId
+        : unique[unique.length - 1];
+    this.primaryTokenSync.setPrimaryDirect(resolvedPrimary);
+  }
+
+  selectSingleToken(tokenId: string | null): void {
+    this.selectedTokenId.set(tokenId);
+  }
+
+  toggleTokenInSelection(tokenId: string): void {
+    const trimmed = tokenId?.trim();
+    if (!trimmed) return;
+    const curr = this._selectedTokenIds();
+    if (curr.includes(trimmed)) {
+      this.setSelectedTokens(curr.filter((id) => id !== trimmed));
+    } else {
+      this.setSelectedTokens([...curr, trimmed], trimmed);
+    }
+  }
+
+  clearTokenSelection(): void {
+    this.selectedTokenId.set(null);
+  }
+
+  isTokenSelected(tokenId: string): boolean {
+    return this._selectedTokenIds().includes(tokenId);
+  }
+
+  private pruneRemovedTokenFromSelection(tokenId: string): void {
+    const curr = this._selectedTokenIds();
+    if (curr.includes(tokenId)) {
+      this.setSelectedTokens(curr.filter((id) => id !== tokenId));
+      return;
+    }
+    if (this.selectedTokenId() === tokenId) {
+      this.selectedTokenId.set(null);
+    }
+  }
+
   readonly characterByIdMap = computed(() => {
     const map = new Map<string, CharacterModel>();
-    for (const c of this.allCharacters()) {
+    for (const c of this.characterStore.characters()) {
       map.set(c.id, c);
     }
-    for (const c of this.characterStore.characters()) {
+    for (const c of this.allCharacters()) {
       map.set(c.id, c);
     }
     return map;
@@ -384,6 +560,142 @@ export class VttStore {
     );
   });
 
+  readonly openSheetRosterActor = computed<VttRosterActorModel | null>(() => {
+    const target = this.openSheetTarget();
+    if (!target) return null;
+    const roster = this.rosterActors();
+    if (target.rosterActorId) {
+      const direct = roster.find((a) => a.id === target.rosterActorId);
+      if (direct) return direct;
+    }
+    if (target.characterId) {
+      const byChar = roster.find((a) => a.character_id === target.characterId);
+      if (byChar) return byChar;
+    }
+    if (target.tokenId) {
+      const tok = this.tokens().find((t) => t.id === target.tokenId);
+      if (tok?.npc_stats?.__roster_actor_id) {
+        const byTokActor = roster.find(
+          (a) => a.id === tok.npc_stats.__roster_actor_id
+        );
+        if (byTokActor) return byTokActor;
+      }
+      if (tok?.character_id) {
+        const byTokChar = roster.find(
+          (a) => a.character_id === tok.character_id
+        );
+        if (byTokChar) return byTokChar;
+      }
+    }
+    return null;
+  });
+
+  readonly openSheetToken = computed<VttTokenModel | null>(() => {
+    const target = this.openSheetTarget();
+    if (!target) return null;
+    if (target.tokenId) {
+      const direct = this.tokens().find((t) => t.id === target.tokenId);
+      if (direct) return direct;
+    }
+    const actor = this.openSheetRosterActor();
+    const charId = target.characterId ?? actor?.character_id ?? null;
+    const sel = this.selectedToken();
+    if (
+      sel &&
+      ((charId && sel.character_id === charId) ||
+        (actor && sel.npc_stats?.__roster_actor_id === actor.id))
+    ) {
+      return sel;
+    }
+    const onScene = this.sceneTokens();
+    if (charId) {
+      const byChar = onScene.find((t) => t.character_id === charId);
+      if (byChar) return byChar;
+    }
+    if (actor) {
+      const byActor = onScene.find(
+        (t) => t.npc_stats?.__roster_actor_id === actor.id
+      );
+      if (byActor) return byActor;
+    }
+    return null;
+  });
+
+  readonly openSheetCharacter = computed<CharacterModel | null>(() => {
+    const target = this.openSheetTarget();
+    if (!target) return null;
+    const actor = this.openSheetRosterActor();
+    const tok = this.openSheetToken();
+    const charId =
+      target.characterId ?? actor?.character_id ?? tok?.character_id ?? null;
+    if (!charId) return null;
+    return (
+      this.characterByIdMap().get(charId) ??
+      this.characterStore.getCharacterById(charId) ??
+      null
+    );
+  });
+
+  readonly openSheetDerived = computed<DerivedCharacterStats | null>(() => {
+    const char = this.openSheetCharacter();
+    if (!char) return null;
+    return computeDerivedStats(
+      char,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes()
+    );
+  });
+
+  resolveRosterActorForToken(
+    tok: VttTokenModel | null | undefined
+  ): VttRosterActorModel | null {
+    if (!tok) return null;
+    const roster = this.rosterActors();
+    if (tok.npc_stats?.__roster_actor_id) {
+      const byId = roster.find((a) => a.id === tok.npc_stats.__roster_actor_id);
+      if (byId) return byId;
+    }
+    if (tok.character_id) {
+      const byChar = roster.find((a) => a.character_id === tok.character_id);
+      if (byChar) return byChar;
+    }
+    return null;
+  }
+
+  resolveTokenVisuals(tok: VttTokenModel): {
+    portraitUrl: string | null;
+    tokenImageUrl: string | null;
+    tokenAppearance: TokenAppearanceConfig;
+  } {
+    const linkedActor = this.resolveRosterActorForToken(tok);
+    const charId = tok.character_id ?? linkedActor?.character_id ?? null;
+    const linkedChar = charId ? (this.characterByIdMap().get(charId) ?? null) : null;
+    return {
+      portraitUrl: resolveEntityPortraitUrl(tok, linkedActor, linkedChar),
+      tokenImageUrl: resolveEntityTokenImageUrl(tok, linkedActor, linkedChar),
+      tokenAppearance: resolveEntityTokenAppearance(
+        tok,
+        linkedActor,
+        linkedChar
+      ),
+    };
+  }
+
+  resolveRosterActorVisuals(actor: VttRosterActorModel): {
+    portraitUrl: string | null;
+    tokenImageUrl: string | null;
+    tokenAppearance: TokenAppearanceConfig;
+  } {
+    const linkedChar = actor.character_id
+      ? (this.characterByIdMap().get(actor.character_id) ?? null)
+      : null;
+    return {
+      portraitUrl: resolveEntityPortraitUrl(actor, linkedChar),
+      tokenImageUrl: resolveEntityTokenImageUrl(actor, linkedChar),
+      tokenAppearance: resolveEntityTokenAppearance(actor, linkedChar),
+    };
+  }
+
   readonly activeCharacterSpeaker = computed<
     Omit<VttResolvedChatSpeaker, 'mode'> | null
   >(() => {
@@ -395,11 +707,17 @@ export class VttStore {
         this.tokens().find((t) => t.id === pending.attackerTokenId) ??
         null;
       if (attTok && (gm || this.canControlToken(attTok))) {
+        const vis = this.resolveTokenVisuals(attTok);
         return {
           name: attTok.name,
           tokenId: attTok.id,
           characterId: attTok.character_id,
           color: attTok.color || null,
+          icon: attTok.icon || 'user',
+          faction: attTok.faction,
+          portraitUrl: vis.portraitUrl,
+          tokenImageUrl: vis.tokenImageUrl,
+          tokenAppearance: vis.tokenAppearance,
         };
       }
     }
@@ -411,11 +729,17 @@ export class VttStore {
         this.tokens().find((t) => t.id === selTokId) ??
         null;
       if (tok && (gm || this.canControlToken(tok))) {
+        const vis = this.resolveTokenVisuals(tok);
         return {
           name: tok.name,
           tokenId: tok.id,
           characterId: tok.character_id,
           color: tok.color || null,
+          icon: tok.icon || 'user',
+          faction: tok.faction,
+          portraitUrl: vis.portraitUrl,
+          tokenImageUrl: vis.tokenImageUrl,
+          tokenAppearance: vis.tokenAppearance,
         };
       }
     }
@@ -424,11 +748,17 @@ export class VttStore {
     if (rosterId) {
       const actor = this.rosterActors().find((a) => a.id === rosterId) ?? null;
       if (actor && (gm || this.canDeployRosterActor(actor))) {
+        const vis = this.resolveRosterActorVisuals(actor);
         return {
           name: actor.name,
           tokenId: null,
           characterId: actor.character_id,
           color: actor.color || null,
+          icon: actor.icon || 'user',
+          faction: actor.faction,
+          portraitUrl: vis.portraitUrl,
+          tokenImageUrl: vis.tokenImageUrl,
+          tokenAppearance: vis.tokenAppearance,
         };
       }
     }
@@ -436,13 +766,17 @@ export class VttStore {
     const charId = this.selectedCharacterId();
     if (charId) {
       const ch = this.characterByIdMap().get(charId) ?? null;
-      const uid = this.authStore.user()?.id;
-      if (ch && (gm || Boolean(uid && ch.owner_id === uid))) {
+      if (ch && this.canEditCharacterInVtt(charId)) {
         return {
           name: ch.name,
           tokenId: null,
           characterId: ch.id,
           color: '#38B29A',
+          icon: 'user',
+          faction: 'ally',
+          portraitUrl: resolveEntityPortraitUrl(ch),
+          tokenImageUrl: resolveEntityTokenImageUrl(ch),
+          tokenAppearance: resolveEntityTokenAppearance(ch),
         };
       }
     }
@@ -518,17 +852,20 @@ export class VttStore {
       if (!this.previewPlayerVision()) {
         return all.filter((t) => t.faction === 'ally');
       }
-      const sel = this.selectedToken();
-      if (sel && !sel.is_hidden) {
-        return [sel];
+      const selList = this.selectedTokens().filter((t) => !t.is_hidden);
+      if (selList.length > 0) {
+        return selList;
       }
       return all.filter((t) => t.faction === 'ally');
     }
 
     const controlled = all.filter((t) => this.canControlToken(t));
-    const sel = this.selectedToken();
-    if (sel && controlled.some((t) => t.id === sel.id)) {
-      return [sel];
+    const controlledIdSet = new Set(controlled.map((t) => t.id));
+    const selList = this.selectedTokens().filter((t) =>
+      controlledIdSet.has(t.id)
+    );
+    if (selList.length > 0) {
+      return selList;
     }
     return controlled;
   });
@@ -602,12 +939,42 @@ export class VttStore {
     payload: VttUndoPayload
   ): void {
     if (this.isUndoing() || !sceneId) return;
+    const now = Date.now();
+    const incomingCoalesceKey =
+      payload.kind === 'tokens_batch' ? payload.coalesceKey : undefined;
+
+    if (incomingCoalesceKey) {
+      const curr = this.undoStack();
+      for (let i = curr.length - 1; i >= 0; i--) {
+        if (curr[i].sceneId !== sceneId) continue;
+        const topSceneEntry = curr[i];
+        if (
+          topSceneEntry.kind === 'tokens_batch' &&
+          topSceneEntry.coalesceKey === incomingCoalesceKey &&
+          now - topSceneEntry.createdAt <= ROTATION_UNDO_COALESCE_MS
+        ) {
+          const updatedTop: VttUndoEntry = {
+            ...topSceneEntry,
+            label,
+            createdAt: now,
+          };
+          this.undoStack.set([
+            ...curr.slice(0, i),
+            updatedTop,
+            ...curr.slice(i + 1),
+          ]);
+          return;
+        }
+        break;
+      }
+    }
+
     const entry: VttUndoEntry = {
       ...payload,
-      id: `undo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `undo-${now}-${Math.random().toString(36).slice(2, 6)}`,
       sceneId,
       label,
-      createdAt: Date.now(),
+      createdAt: now,
     };
     this.undoStack.update((curr) => {
       const appended = [...curr, entry];
@@ -679,6 +1046,54 @@ export class VttStore {
           this.selectedTokenId.set(res.token.id);
           this.syncExploredFogFromObservers();
         }
+      } else if (entry.kind === 'tokens_batch') {
+        const restoredIds: string[] = [];
+        if (entry.patches?.length) {
+          for (const item of entry.patches) {
+            const tok = this.tokens().find((t) => t.id === item.tokenId);
+            if (tok) {
+              await this.patchToken(item.tokenId, item.previousTokenPatch);
+              restoredIds.push(item.tokenId);
+            }
+          }
+        }
+        if (entry.removedSnapshots?.length) {
+          for (const snap of entry.removedSnapshots) {
+            const { id: snapId, ...restSnap } = snap;
+            const isUuid =
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                snapId
+              );
+            const res = await this.vttService.insertToken({
+              ...restSnap,
+              ...(isUuid ? { id: snapId } : {}),
+            });
+            if (!res.error && res.token) {
+              this.tokens.update((curr) =>
+                curr.some((t) => t.id === res.token!.id)
+                  ? curr
+                  : [...curr, res.token!]
+              );
+              restoredIds.push(res.token.id);
+            }
+          }
+        }
+        if (entry.previousExploredFog) {
+          await this.patchScene(sc.id, {
+            explored_fog: cloneExploredFog(entry.previousExploredFog),
+          });
+        } else {
+          this.syncExploredFogFromObservers();
+        }
+        const finalSelection =
+          entry.selectedTokenIdsAfterUndo &&
+          entry.selectedTokenIdsAfterUndo.length > 0 &&
+          !entry.removedSnapshots?.length
+            ? entry.selectedTokenIdsAfterUndo
+            : restoredIds;
+        if (finalSelection.length > 0) {
+          this.setSelectedTokens(finalSelection);
+        }
       } else if (entry.kind === 'scene_patch') {
         await this.patchScene(sc.id, entry.previousScenePatch);
         if (entry.selectedLightIdAfterUndo !== undefined) {
@@ -722,17 +1137,92 @@ export class VttStore {
     return this.folders().filter((f) => f.scope === scope);
   }
 
+  getActorAssignedUserId(
+    actor: VttRosterActorModel | null | undefined
+  ): string | null {
+    if (!actor) return null;
+    const stats = actor.npc_stats ?? {};
+    if ('__assigned_user_id' in stats) {
+      return stats.__assigned_user_id || null;
+    }
+    return null;
+  }
+
+  getActorAssignedParticipant(
+    actor: VttRosterActorModel | null | undefined
+  ): VttParticipant | null {
+    const assignedId = this.getActorAssignedUserId(actor);
+    if (!assignedId) return null;
+    const found = this.participants().find((p) => p.user_id === assignedId);
+    if (found) return found;
+    return {
+      user_id: assignedId,
+      display_name: 'Assigned Player',
+      handle: null,
+      role: 'player',
+    };
+  }
+
+  getTokenAssignedUserId(
+    token: VttTokenModel | null | undefined
+  ): string | null {
+    if (!token) return null;
+    const roster = this.rosterActors();
+    if (token.npc_stats?.__roster_actor_id) {
+      const linked = roster.find(
+        (a) => a.id === token.npc_stats.__roster_actor_id
+      );
+      if (linked) {
+        return this.getActorAssignedUserId(linked);
+      }
+    }
+    if (token.character_id) {
+      const linkedByChar = roster.find(
+        (a) => a.character_id === token.character_id
+      );
+      if (linkedByChar) {
+        return this.getActorAssignedUserId(linkedByChar);
+      }
+    }
+    const stats = token.npc_stats ?? {};
+    if ('__assigned_user_id' in stats) {
+      return stats.__assigned_user_id || null;
+    }
+    if (token.character_id) {
+      return null;
+    }
+    if (token.owner_id && token.owner_id !== this.campaign()?.gm_id) {
+      return token.owner_id;
+    }
+    return null;
+  }
+
+  canEditCharacterInVtt(characterId: string | null | undefined): boolean {
+    if (!characterId) return false;
+    if (this.isGm()) return true;
+    const uid = this.authStore.user()?.id;
+    if (!uid) return false;
+    if (
+      this.rosterActors().some(
+        (a) =>
+          a.character_id === characterId &&
+          this.getActorAssignedUserId(a) === uid
+      )
+    ) {
+      return true;
+    }
+    return this.tokens().some(
+      (t) =>
+        t.character_id === characterId && this.getTokenAssignedUserId(t) === uid
+    );
+  }
+
   canControlToken(token: VttTokenModel | null | undefined): boolean {
     if (!token) return false;
     if (this.isGm()) return true;
     const uid = this.authStore.user()?.id;
     if (!uid) return false;
-    if (token.owner_id === uid) return true;
-    if (token.character_id) {
-      const ch = this.characterByIdMap().get(token.character_id);
-      if (ch && ch.owner_id === uid) return true;
-    }
-    return false;
+    return this.getTokenAssignedUserId(token) === uid;
   }
 
   getDefenderCapabilities(token: VttTokenModel): DefenderClashCapabilities {
@@ -840,6 +1330,16 @@ export class VttStore {
         this.allCharacters.set(visibleChars);
         this.folders.set(loadedFolders);
         this.rosterActors.set(loadedRoster);
+        if (
+          typeof this.vttService.fetchCampaignParticipants === 'function'
+        ) {
+          this.participants.set(
+            await this.vttService.fetchCampaignParticipants(
+              campaignId,
+              campData.gm_id
+            )
+          );
+        }
 
         const scenesRes = await this.vttService.fetchCampaignScenes(
           campaignId,
@@ -847,6 +1347,10 @@ export class VttStore {
         );
         this.needsMigration.set(scenesRes.needsMigration);
         loadedScenes = scenesRes.scenes;
+      }
+
+      for (const ch of this.allCharacters()) {
+        this.characterStore.upsertRealtimeCharacter(ch);
       }
 
       const uid = this.authStore.user()?.id;
@@ -907,13 +1411,7 @@ export class VttStore {
 
       this.tokens.set(initialTokens);
       this.logs.set(initialLogs);
-
-      if (initialTokens.length > 0) {
-        const myToken =
-          initialTokens.find((t) => this.canControlToken(t)) ??
-          initialTokens[0];
-        this.selectedTokenId.set(myToken?.id ?? null);
-      }
+      this.selectedTokenId.set(null);
 
       this.realtimeChannel = this.vttService.subscribeToCampaignRealtime(
         campaignId,
@@ -988,11 +1486,22 @@ export class VttStore {
                 ? curr.map((a) => (a.id === mergedActor.id ? mergedActor : a))
                 : [...curr, mergedActor];
             });
+            if (
+              !this.isGm() &&
+              this.openSheetTarget() &&
+              !this.canEditOpenSheet()
+            ) {
+              this.openSheetTarget.set(null);
+            }
           },
           onRosterActorDelete: (actorId) => {
             this.rosterActors.update((curr) =>
               curr.filter((a) => a.id !== actorId)
             );
+            const target = this.openSheetTarget();
+            if (target?.rosterActorId === actorId && !target.characterId) {
+              this.openSheetTarget.set(null);
+            }
           },
           onTokenUpsert: (incomingToken) => {
             if (
@@ -1003,9 +1512,7 @@ export class VttStore {
               this.tokens.update((curr) =>
                 curr.filter((t) => t.id !== incomingToken.id)
               );
-              if (this.selectedTokenId() === incomingToken.id) {
-                this.selectedTokenId.set(null);
-              }
+              this.pruneRemovedTokenFromSelection(incomingToken.id);
               return;
             }
             this.tokens.update((curr) => {
@@ -1021,9 +1528,26 @@ export class VttStore {
             this.tokens.update((curr) =>
               curr.filter((t) => t.id !== tokenId)
             );
-            if (this.selectedTokenId() === tokenId) {
-              this.selectedTokenId.set(null);
+            this.pruneRemovedTokenFromSelection(tokenId);
+            const target = this.openSheetTarget();
+            if (
+              target?.tokenId === tokenId &&
+              !target.rosterActorId &&
+              !target.characterId
+            ) {
+              this.openSheetTarget.set(null);
             }
+          },
+          onCharacterUpsert: (incomingChar) => {
+            this.allCharacters.update((curr) => {
+              const exists = curr.some((c) => c.id === incomingChar.id);
+              return exists
+                ? curr.map((c) =>
+                    c.id === incomingChar.id ? incomingChar : c
+                  )
+                : [...curr, incomingChar];
+            });
+            this.characterStore.upsertRealtimeCharacter(incomingChar);
           },
           onLogInsert: (entry) => {
             const visible = this.isLogVisibleToCurrentUser(entry);
@@ -1080,12 +1604,14 @@ export class VttStore {
     this.selectedTokenId.set(null);
     this.selectedRosterActorId.set(null);
     this.selectedCharacterId.set(null);
+    this.openSheetTarget.set(null);
     this.gmSpeakerMode.set('user');
     this.selectedLightId.set(null);
     this.activePings.set([]);
     this.activeSceneNaturalSize.set(null);
     this.latestDiceThrow.set(null);
     this.seenDiceThrowIds.clear();
+    this.inFlightTokenRotationPatches.clear();
     this.undoStack.set([]);
   }
 
@@ -2373,44 +2899,36 @@ export class VttStore {
     };
   }
 
+  getNextTopTokenZIndex(): number {
+    const tokens = this.sceneTokens();
+    if (tokens.length === 0) return 0;
+    let maxZ = 0;
+    for (const t of tokens) {
+      const z = Number(t.npc_stats?.__z_index ?? 0);
+      if (Number.isFinite(z) && z > maxZ) {
+        maxZ = z;
+      }
+    }
+    return maxZ + 1;
+  }
+
   async deployCharacterToken(
     character: CharacterModel,
     placement?: { worldPt: VttPoint; unsnapped: boolean }
   ): Promise<void> {
     const sc = this.activeScene();
-    if (!sc) return;
-
-    const existing = this.sceneTokens().find(
-      (t) => t.character_id === character.id
-    );
-    if (existing) {
-      this.selectedTokenId.set(existing.id);
-      if (placement && this.canControlToken(existing)) {
-        if (sc.grid_mode === 'gridless' || placement.unsnapped) {
-          await this.moveTokenToWorldPoint(
-            existing.id,
-            placement.worldPt,
-            0,
-            true
-          );
-        } else {
-          const resolved = this.resolveDropPlacement('ally', placement);
-          await this.moveTokenToHex(
-            existing.id,
-            resolved.col,
-            resolved.row,
-            0,
-            true
-          );
-        }
-        return;
-      }
-      this.notifications.info(
-        'Already Deployed',
-        `${character.name} is already on this battlemap.`
-      );
+    if (
+      !sc ||
+      (!this.isGm() && !this.canEditCharacterInVtt(character.id))
+    ) {
       return;
     }
+
+    const linkedActor =
+      this.rosterActors().find((a) => a.character_id === character.id) ?? null;
+    const assignedUserId = linkedActor
+      ? this.getActorAssignedUserId(linkedActor)
+      : null;
 
     const stats = computeDerivedStats(
       character,
@@ -2422,11 +2940,18 @@ export class VttStore {
       : { icon: 'greatsword', color: '#38B29A' };
     const spawn = this.resolveDropPlacement('ally', placement);
     const axial = offsetToAxial(spawn.col, spawn.row);
+    const topZ = this.getNextTopTokenZIndex();
+    const portraitUrl = resolveEntityPortraitUrl(linkedActor, character);
+    const tokenImageUrl = resolveEntityTokenImageUrl(linkedActor, character);
+    const tokenAppearance = resolveEntityTokenAppearance(
+      linkedActor,
+      character
+    );
 
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
       character_id: character.id,
-      owner_id: character.owner_id,
+      owner_id: assignedUserId,
       name: character.name,
       faction: 'ally',
       x: spawn.col,
@@ -2455,7 +2980,20 @@ export class VttStore {
       shield_raised: Boolean(character.active_cooldowns?.['__shield_raised']),
       is_hidden: false,
       statuses: [],
-      npc_stats: spawn.unsnappedOnGrid ? { __unsnapped: true } : {},
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
+      npc_stats: enrichNpcStatsWithVisuals(
+        {
+          __assigned_user_id: assignedUserId,
+          __z_index: topZ,
+          ...(linkedActor ? { __roster_actor_id: linkedActor.id } : {}),
+          ...(spawn.unsnappedOnGrid ? { __unsnapped: true } : {}),
+        },
+        portraitUrl,
+        tokenImageUrl,
+        tokenAppearance
+      ),
     });
 
     if (res.error || !res.token) {
@@ -2482,23 +3020,113 @@ export class VttStore {
   canManageRosterActor(actor: VttRosterActorModel): boolean {
     if (this.isGm()) return true;
     const uid = this.authStore.user()?.id;
-    return Boolean(uid && actor.owner_id === uid);
+    return Boolean(uid && this.getActorAssignedUserId(actor) === uid);
   }
 
   canDeployRosterActor(actor: VttRosterActorModel): boolean {
     if (this.isGm()) return true;
     const uid = this.authStore.user()?.id;
-    if (!uid) return false;
-    if (actor.owner_id === uid) return true;
-    if (actor.character_id) {
-      const char =
-        this.allCharacters().find((c) => c.id === actor.character_id) ??
-        this.characterStore
-          .characters()
-          .find((c) => c.id === actor.character_id);
-      if (char?.owner_id === uid) return true;
+    return Boolean(uid && this.getActorAssignedUserId(actor) === uid);
+  }
+
+  async assignRosterActorToPlayer(
+    actorId: string,
+    userId: string | null
+  ): Promise<boolean> {
+    const camp = this.campaign();
+    const target = this.rosterActors().find((a) => a.id === actorId);
+    if (!camp || !target || !this.isGm()) return false;
+
+    const normalizedUserId =
+      typeof userId === 'string' && userId.trim().length > 0
+        ? userId.trim()
+        : null;
+    const nextStats: VttNpcStats = {
+      ...(target.npc_stats ?? {}),
+      __assigned_user_id: normalizedUserId,
+    };
+    const patch: Partial<VttRosterActorModel> = {
+      owner_id: normalizedUserId,
+      npc_stats: nextStats,
+    };
+
+    this.rosterActors.update((curr) =>
+      curr.map((a) => (a.id === actorId ? { ...a, ...patch } : a))
+    );
+
+    const err = await this.vttService.updateRosterActor(
+      camp.id,
+      actorId,
+      patch
+    );
+    if (err) {
+      this.notifications.error('Assignment Error', err);
+      return false;
     }
-    return false;
+
+    const linkedTokens = this.tokens().filter(
+      (t) =>
+        t.npc_stats?.__roster_actor_id === actorId ||
+        Boolean(target.character_id && t.character_id === target.character_id)
+    );
+    for (const tok of linkedTokens) {
+      await this.patchToken(tok.id, {
+        owner_id: normalizedUserId,
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __assigned_user_id: normalizedUserId,
+        },
+      });
+    }
+
+    this.syncExploredFogFromObservers();
+    const assignedPart = normalizedUserId
+      ? this.participants().find((p) => p.user_id === normalizedUserId)
+      : null;
+    this.notifications.info(
+      normalizedUserId ? 'Actor Assigned' : 'Actor Unassigned',
+      normalizedUserId
+        ? `${target.name} assigned to ${assignedPart?.display_name ?? 'Player'}.`
+        : `${target.name} is now GM-only (unassigned).`
+    );
+    return true;
+  }
+
+  async assignTokenToPlayer(
+    tokenId: string,
+    userId: string | null
+  ): Promise<boolean> {
+    if (!this.isGm()) return false;
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok) return false;
+
+    const linkedActor =
+      (tok.npc_stats?.__roster_actor_id
+        ? this.rosterActors().find(
+            (a) => a.id === tok.npc_stats.__roster_actor_id
+          )
+        : null) ??
+      (tok.character_id
+        ? this.rosterActors().find((a) => a.character_id === tok.character_id)
+        : null);
+
+    if (linkedActor) {
+      return this.assignRosterActorToPlayer(linkedActor.id, userId);
+    }
+
+    const normalizedUserId =
+      typeof userId === 'string' && userId.trim().length > 0
+        ? userId.trim()
+        : null;
+    await this.patchToken(tok.id, {
+      owner_id: normalizedUserId,
+      npc_stats: {
+        ...(tok.npc_stats ?? {}),
+        __assigned_user_id: normalizedUserId,
+      },
+    });
+    this.syncExploredFogFromObservers();
+    return true;
   }
 
   async createRosterActorFromScratch(
@@ -2512,10 +3140,7 @@ export class VttStore {
   ): Promise<VttRosterActorModel | null> {
     const camp = this.campaign();
     const uid = this.authStore.user()?.id ?? null;
-    if (!camp || !uid) return null;
-    if (!this.isGm() && draft.actor_kind !== 'character') {
-      return null;
-    }
+    if (!camp || !uid || !this.isGm()) return null;
 
     let linkedCollectionId = options?.collectionActorId ?? null;
     if (options?.saveToCollections) {
@@ -2534,16 +3159,24 @@ export class VttStore {
     const nextSort =
       siblings.reduce((acc, a) => Math.max(acc, a.sort_order ?? 0), -1) + 1;
 
+    const assignedUserId =
+      options?.ownerId !== undefined && options.ownerId
+        ? options.ownerId
+        : null;
+    const portraitUrl = resolveEntityPortraitUrl(draft);
+    const tokenImageUrl = resolveEntityTokenImageUrl(draft);
+    const tokenAppearance = resolveEntityTokenAppearance(draft);
+
     const res = await this.vttService.createRosterActor({
       campaign_id: camp.id,
-      folder_id: this.isGm() ? draft.folder_id || null : null,
+      folder_id: draft.folder_id || null,
       character_id: draft.source_character_id || null,
       collection_actor_id: linkedCollectionId,
-      owner_id: options?.ownerId ?? uid,
+      owner_id: assignedUserId,
       actor_kind: draft.actor_kind,
       is_unique: draft.is_unique,
       name: draft.name.trim() || 'Unnamed Actor',
-      faction: this.isGm() ? draft.faction : 'ally',
+      faction: draft.faction,
       size: Math.max(1, Math.round(draft.size || 1)),
       icon: draft.icon || 'greatsword',
       color: draft.color || '#38B29A',
@@ -2564,13 +3197,22 @@ export class VttStore {
       light_bright_feet: Math.max(0, Math.round(draft.light_bright_feet ?? 0)),
       light_dim_feet: Math.max(0, Math.round(draft.light_dim_feet ?? 0)),
       light_color: draft.light_color || '#F59E0B',
-      npc_stats: {
-        ...draft.npc_stats,
-        __darkvision_feet: resolveActorDarkvisionFeet(
-          draft.darkvision_feet,
-          draft.npc_stats
-        ),
-      },
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
+      npc_stats: enrichNpcStatsWithVisuals(
+        {
+          ...draft.npc_stats,
+          __darkvision_feet: resolveActorDarkvisionFeet(
+            draft.darkvision_feet,
+            draft.npc_stats
+          ),
+          __assigned_user_id: assignedUserId,
+        },
+        portraitUrl,
+        tokenImageUrl,
+        tokenAppearance
+      ),
       notes: draft.notes ?? '',
       sort_order: nextSort,
     });
@@ -2601,11 +3243,12 @@ export class VttStore {
     character: CharacterModel,
     folderId: string | null = null
   ): Promise<VttRosterActorModel | null> {
+    if (!this.isGm()) return null;
     const existing = this.rosterActors().find(
       (a) => a.character_id === character.id
     );
     if (existing) {
-      if (this.isGm() && folderId !== existing.folder_id) {
+      if (folderId !== existing.folder_id) {
         await this.updateRosterActor(existing.id, { folder_id: folderId });
       }
       this.notifications.info(
@@ -2627,15 +3270,14 @@ export class VttStore {
       this.compendiumStore.allPerkNodes(),
       folderId
     );
-    return this.createRosterActorFromScratch(draft, {
-      ownerId: character.owner_id,
-    });
+    return this.createRosterActorFromScratch(draft);
   }
 
   async importCollectionActorToRoster(
     colActor: CollectionActorModel,
     folderId: string | null = null
   ): Promise<VttRosterActorModel | null> {
+    if (!this.isGm()) return null;
     return this.createRosterActorFromScratch(
       {
         folder_id: folderId,
@@ -2661,7 +3303,10 @@ export class VttStore {
         light_bright_feet: colActor.light_bright_feet,
         light_dim_feet: colActor.light_dim_feet,
         light_color: colActor.light_color,
-        npc_stats: { ...colActor.npc_stats },
+        portrait_url: resolveEntityPortraitUrl(colActor),
+        token_image_url: resolveEntityTokenImageUrl(colActor),
+        token_appearance: resolveEntityTokenAppearance(colActor),
+        npc_stats: { ...colActor.npc_stats, __assigned_user_id: null },
         notes: colActor.notes,
       },
       {
@@ -2687,44 +3332,159 @@ export class VttStore {
     const target = this.rosterActors().find((a) => a.id === actorId);
     if (!camp || !target || !this.canManageRosterActor(target)) return false;
 
+    const normalizedPatch: Partial<VttRosterActorModel> = { ...patch };
+    const hasVisualPatch =
+      patch.portrait_url !== undefined ||
+      patch.token_image_url !== undefined ||
+      patch.token_appearance !== undefined;
+    if (patch.portrait_url !== undefined) {
+      normalizedPatch.portrait_url = sanitizeOptionalImageUrl(
+        patch.portrait_url
+      );
+    }
+    if (patch.token_image_url !== undefined) {
+      normalizedPatch.token_image_url = sanitizeOptionalImageUrl(
+        patch.token_image_url
+      );
+    }
+    if (patch.token_appearance !== undefined) {
+      normalizedPatch.token_appearance = normalizeTokenAppearance(
+        patch.token_appearance
+      );
+    }
+    if (hasVisualPatch) {
+      normalizedPatch.npc_stats = enrichNpcStatsWithVisuals(
+        normalizedPatch.npc_stats ?? target.npc_stats,
+        normalizedPatch.portrait_url !== undefined
+          ? normalizedPatch.portrait_url
+          : target.portrait_url,
+        normalizedPatch.token_image_url !== undefined
+          ? normalizedPatch.token_image_url
+          : target.token_image_url,
+        normalizedPatch.token_appearance !== undefined
+          ? normalizedPatch.token_appearance
+          : target.token_appearance
+      );
+    }
+
     this.rosterActors.update((curr) =>
-      curr.map((a) => (a.id === actorId ? { ...a, ...patch } : a))
+      curr.map((a) => (a.id === actorId ? { ...a, ...normalizedPatch } : a))
     );
 
     const err = await this.vttService.updateRosterActor(
       camp.id,
       actorId,
-      patch
+      normalizedPatch
     );
     if (err) {
       this.notifications.error('Actor Update Error', err);
       return false;
     }
 
-    if (
-      patch.vision_feet !== undefined ||
-      patch.darkvision_feet !== undefined ||
-      patch.move_feet !== undefined
-    ) {
-      const tokenPatch: Partial<VttTokenModel> = {};
-      if (patch.vision_feet !== undefined) {
-        tokenPatch.vision_feet = patch.vision_feet;
-      }
-      if (patch.darkvision_feet !== undefined) {
-        tokenPatch.darkvision_feet = patch.darkvision_feet;
-      }
-      if (patch.move_feet !== undefined) {
-        tokenPatch.move_feet = patch.move_feet;
-      }
-      const linkedTokens = this.tokens().filter(
-        (t) =>
-          t.npc_stats?.__roster_actor_id === actorId ||
-          Boolean(target.character_id && t.character_id === target.character_id)
-      );
+    const linkedTokens = this.tokens().filter(
+      (t) =>
+        t.npc_stats?.__roster_actor_id === actorId ||
+        Boolean(target.character_id && t.character_id === target.character_id)
+    );
+    if (linkedTokens.length > 0) {
+      let needsFogSync = false;
       for (const tok of linkedTokens) {
-        await this.patchToken(tok.id, tokenPatch);
+        const tokenPatch: Partial<VttTokenModel> = {};
+        if (normalizedPatch.name !== undefined) {
+          tokenPatch.name = normalizedPatch.name;
+        }
+        if (normalizedPatch.faction !== undefined) {
+          tokenPatch.faction = normalizedPatch.faction;
+        }
+        if (normalizedPatch.size !== undefined) {
+          tokenPatch.size = normalizedPatch.size;
+        }
+        if (normalizedPatch.icon !== undefined) {
+          tokenPatch.icon = normalizedPatch.icon;
+        }
+        if (normalizedPatch.color !== undefined) {
+          tokenPatch.color = normalizedPatch.color;
+        }
+        if (normalizedPatch.portrait_url !== undefined) {
+          tokenPatch.portrait_url = normalizedPatch.portrait_url;
+        }
+        if (normalizedPatch.token_image_url !== undefined) {
+          tokenPatch.token_image_url = normalizedPatch.token_image_url;
+        }
+        if (normalizedPatch.token_appearance !== undefined) {
+          tokenPatch.token_appearance = normalizedPatch.token_appearance;
+        }
+        if (normalizedPatch.max_hp !== undefined) {
+          tokenPatch.max_hp = normalizedPatch.max_hp;
+          if (tok.current_hp > normalizedPatch.max_hp) {
+            tokenPatch.current_hp = normalizedPatch.max_hp;
+          }
+        }
+        if (normalizedPatch.max_sp !== undefined) {
+          tokenPatch.max_sp = normalizedPatch.max_sp;
+          if (tok.current_sp > normalizedPatch.max_sp) {
+            tokenPatch.current_sp = normalizedPatch.max_sp;
+          }
+        }
+        if (normalizedPatch.max_ap !== undefined) {
+          tokenPatch.max_ap = normalizedPatch.max_ap;
+          if (tok.current_ap > normalizedPatch.max_ap) {
+            tokenPatch.current_ap = normalizedPatch.max_ap;
+          }
+        }
+        if (normalizedPatch.armor_dr !== undefined) {
+          tokenPatch.armor_dr = normalizedPatch.armor_dr;
+        }
+        if (normalizedPatch.shield_block !== undefined) {
+          tokenPatch.shield_block = normalizedPatch.shield_block;
+        }
+        if (normalizedPatch.move_feet !== undefined) {
+          tokenPatch.move_feet = normalizedPatch.move_feet;
+          needsFogSync = true;
+        }
+        if (normalizedPatch.vision_feet !== undefined) {
+          tokenPatch.vision_feet = normalizedPatch.vision_feet;
+          needsFogSync = true;
+        }
+        if (normalizedPatch.darkvision_feet !== undefined) {
+          tokenPatch.darkvision_feet = normalizedPatch.darkvision_feet;
+          needsFogSync = true;
+        }
+        if (normalizedPatch.npc_stats !== undefined) {
+          tokenPatch.npc_stats = {
+            ...(tok.npc_stats ?? {}),
+            ...normalizedPatch.npc_stats,
+            ...(tok.npc_stats?.__world_x !== undefined
+              ? { __world_x: tok.npc_stats.__world_x }
+              : {}),
+            ...(tok.npc_stats?.__world_y !== undefined
+              ? { __world_y: tok.npc_stats.__world_y }
+              : {}),
+            ...(tok.npc_stats?.__unsnapped !== undefined
+              ? { __unsnapped: tok.npc_stats.__unsnapped }
+              : {}),
+            ...(tok.npc_stats?.__roster_actor_id !== undefined
+              ? { __roster_actor_id: tok.npc_stats.__roster_actor_id }
+              : {}),
+            ...(tok.npc_stats?.__flip_x !== undefined
+              ? { __flip_x: tok.npc_stats.__flip_x }
+              : {}),
+            ...(tok.npc_stats?.__flip_y !== undefined
+              ? { __flip_y: tok.npc_stats.__flip_y }
+              : {}),
+            ...(tok.npc_stats?.__z_index !== undefined
+              ? { __z_index: tok.npc_stats.__z_index }
+              : {}),
+            ...(tok.npc_stats?.__rotation !== undefined
+              ? { __rotation: tok.npc_stats.__rotation }
+              : {}),
+          };
+        }
+        if (Object.keys(tokenPatch).length > 0) {
+          await this.patchToken(tok.id, tokenPatch);
+        }
       }
-      if (linkedTokens.length > 0) {
+      if (needsFogSync) {
         this.syncExploredFogFromObservers();
       }
     }
@@ -2736,7 +3496,7 @@ export class VttStore {
     actorId: string
   ): Promise<VttRosterActorModel | null> {
     const existing = this.rosterActors().find((a) => a.id === actorId);
-    if (!existing || !this.canManageRosterActor(existing)) return null;
+    if (!existing || !this.isGm()) return null;
 
     return this.createRosterActorFromScratch({
       folder_id: existing.folder_id,
@@ -2762,7 +3522,10 @@ export class VttStore {
       light_bright_feet: existing.light_bright_feet,
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,
-      npc_stats: { ...existing.npc_stats },
+      portrait_url: existing.portrait_url,
+      token_image_url: existing.token_image_url,
+      token_appearance: existing.token_appearance,
+      npc_stats: { ...existing.npc_stats, __assigned_user_id: null },
       notes: existing.notes,
     });
   }
@@ -2782,13 +3545,686 @@ export class VttStore {
   async deleteRosterActor(actorId: string): Promise<void> {
     const camp = this.campaign();
     const existing = this.rosterActors().find((a) => a.id === actorId);
-    if (!camp || !existing || !this.canManageRosterActor(existing)) return;
+    if (!camp || !existing || !this.isGm()) return;
 
     this.rosterActors.update((curr) => curr.filter((a) => a.id !== actorId));
+    if (this.openSheetTarget()?.rosterActorId === actorId) {
+      this.openSheetTarget.set(null);
+    }
     const err = await this.vttService.deleteRosterActor(camp.id, actorId);
     if (err) {
       this.notifications.error('Actor Delete Error', err);
     }
+  }
+
+  openActorSheet(actorId: string): void {
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!actor || (!this.isGm() && !this.canDeployRosterActor(actor))) return;
+    this.selectedRosterActorId.set(actor.id);
+    if (actor.character_id) {
+      this.selectedCharacterId.set(actor.character_id);
+      const localChar = this.characterByIdMap().get(actor.character_id);
+      if (localChar) {
+        this.characterStore.upsertRealtimeCharacter(localChar);
+      } else {
+        void this.characterStore.ensureCharacterLoaded(actor.character_id);
+      }
+    }
+    this.openSheetTarget.set({
+      rosterActorId: actor.id,
+      characterId: actor.character_id ?? null,
+      tokenId: null,
+    });
+  }
+
+  openCharacterSheetInVtt(characterId: string): void {
+    if (!characterId || !this.canEditCharacterInVtt(characterId)) return;
+    const linkedActor =
+      this.rosterActors().find((a) => a.character_id === characterId) ?? null;
+    if (linkedActor) {
+      this.selectedRosterActorId.set(linkedActor.id);
+    }
+    this.selectedCharacterId.set(characterId);
+    const localChar = this.characterByIdMap().get(characterId);
+    if (localChar) {
+      this.characterStore.upsertRealtimeCharacter(localChar);
+    } else {
+      void this.characterStore.ensureCharacterLoaded(characterId);
+    }
+    this.openSheetTarget.set({
+      rosterActorId: linkedActor?.id ?? null,
+      characterId,
+      tokenId: null,
+    });
+  }
+
+  openTokenSheet(tokenId: string): void {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const linkedActor =
+      (tok.npc_stats?.__roster_actor_id
+        ? this.rosterActors().find(
+            (a) => a.id === tok.npc_stats.__roster_actor_id
+          )
+        : null) ??
+      (tok.character_id
+        ? this.rosterActors().find((a) => a.character_id === tok.character_id)
+        : null) ??
+      null;
+    const charId = tok.character_id ?? linkedActor?.character_id ?? null;
+    if (linkedActor) {
+      this.selectedRosterActorId.set(linkedActor.id);
+    }
+    if (charId) {
+      this.selectedCharacterId.set(charId);
+      const localChar = this.characterByIdMap().get(charId);
+      if (localChar) {
+        this.characterStore.upsertRealtimeCharacter(localChar);
+      } else {
+        void this.characterStore.ensureCharacterLoaded(charId);
+      }
+    }
+    this.openSheetTarget.set({
+      rosterActorId: linkedActor?.id ?? null,
+      characterId: charId,
+      tokenId: tok.id,
+    });
+  }
+
+  closeActorSheet(): void {
+    this.openSheetTarget.set(null);
+  }
+
+  canEditOpenSheet(): boolean {
+    if (this.isGm()) return true;
+    const uid = this.authStore.user()?.id;
+    if (!uid) return false;
+    const actor = this.openSheetRosterActor();
+    if (actor) {
+      return this.getActorAssignedUserId(actor) === uid;
+    }
+    const tok = this.openSheetToken();
+    if (tok) {
+      return this.getTokenAssignedUserId(tok) === uid;
+    }
+    const char = this.openSheetCharacter();
+    if (char) {
+      return this.canEditCharacterInVtt(char.id);
+    }
+    return false;
+  }
+
+  async createVttActorQuick(input: {
+    name: string;
+    actor_kind: VttActorKind;
+    folder_id?: string | null;
+    saveToCollections?: boolean;
+  }): Promise<VttRosterActorModel | null> {
+    const camp = this.campaign();
+    const uid = this.authStore.user()?.id ?? null;
+    if (!camp || !uid || !this.isGm()) return null;
+
+    const resolvedKind: VttActorKind = input.actor_kind;
+    const trimmedName =
+      input.name.trim() ||
+      (resolvedKind === 'npc' ? 'New NPC' : 'New Player Character');
+
+    await this.compendiumStore.ensureLoaded();
+
+    if (resolvedKind === 'character') {
+      const createdChar = await this.characterStore.createCharacter(
+        {
+          name: trimmedName,
+          level: 1,
+          attributes: {
+            Brawn: 0,
+            Agility: 0,
+            Technique: 0,
+            Iron: 0,
+            Cunning: 0,
+          },
+          combat_skills: {
+            Strike: 0,
+            Shoot: 0,
+            Parry: 0,
+            Dodge: 0,
+            Block: 0,
+          },
+          field_skills: {
+            Athletics: 0,
+            Menace: 0,
+            Stealth: 0,
+            Tinkering: 0,
+            Medicine: 0,
+            Survival: 0,
+            Resolve: 0,
+            Perception: 0,
+            Sway: 0,
+            Lore: 0,
+          },
+          equipped_armor: 'None',
+          equipped_shield: 'None',
+          weapon_slot_1_id: null,
+          weapon_slot_2_id: null,
+          active_weapon_slot: 1,
+          unlocked_perk_ids: [],
+          inventory: [],
+          notes: '',
+        },
+        { silent: true }
+      );
+
+      if (!createdChar) {
+        this.notifications.error(
+          'Unable to Create Player Character',
+          this.characterStore.error() ?? 'Could not create character sheet.'
+        );
+        return null;
+      }
+
+      this.allCharacters.update((curr) =>
+        curr.some((c) => c.id === createdChar.id)
+          ? curr.map((c) => (c.id === createdChar.id ? createdChar : c))
+          : [...curr, createdChar]
+      );
+
+      const draft = buildActorTemplateFromCharacter(
+        createdChar,
+        this.compendiumStore.allWeapons(),
+        this.compendiumStore.allPerkNodes(),
+        input.folder_id ?? null
+      );
+      draft.notes = '';
+
+      const actor = await this.createRosterActorFromScratch(draft, {
+        saveToCollections: input.saveToCollections,
+        silent: true,
+      });
+      if (!actor) {
+        this.notifications.error(
+          'Unable to Add Player Character',
+          'Character was created, but adding to campaign Actors failed.'
+        );
+        return null;
+      }
+
+      this.notifications.success(
+        'Player Character Created',
+        `${actor.name} is ready. Configure their sheet anytime.`
+      );
+      this.openActorSheet(actor.id);
+      return actor;
+    }
+
+    const npcDraft: ActorTemplateDraft = {
+      folder_id: input.folder_id ?? null,
+      source_character_id: null,
+      actor_kind: 'npc',
+      is_unique: false,
+      name: trimmedName,
+      faction: 'enemy',
+      size: 1,
+      icon: 'battleaxe',
+      color: '#EF4444',
+      max_hp: 8,
+      max_sp: 4,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
+      darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#F59E0B',
+      npc_stats: {
+        weapon_name: 'Unarmed',
+        attack_ap: 1,
+        attack_mod: 2,
+        flat_damage: 3,
+        reach_feet: 5,
+        combat_tag: 'None',
+        parry_mod: 1,
+        dodge_mod: 1,
+        can_dodge: true,
+        enables_martial_parry: false,
+        __darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
+        __inventory: [],
+      },
+      notes: '',
+    };
+
+    const npcActor = await this.createRosterActorFromScratch(npcDraft, {
+      saveToCollections: input.saveToCollections,
+      silent: true,
+    });
+    if (!npcActor) {
+      this.notifications.error(
+        'Unable to Create NPC',
+        'Could not create NPC in campaign Actors.'
+      );
+      return null;
+    }
+
+    this.notifications.success(
+      'NPC Created',
+      `${npcActor.name} is ready. Edit stats or deploy anytime.`
+    );
+    this.openActorSheet(npcActor.id);
+    return npcActor;
+  }
+
+  async initializeLinkedCharacterForActor(
+    actorId: string
+  ): Promise<CharacterModel | null> {
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!actor || !this.canManageRosterActor(actor)) return null;
+    if (actor.character_id) {
+      return this.characterByIdMap().get(actor.character_id) ?? null;
+    }
+
+    await this.compendiumStore.ensureLoaded();
+    const seededInventory = normalizeInventoryItems(
+      actor.npc_stats?.__inventory
+    );
+    const createdChar = await this.characterStore.createCharacter(
+      {
+        name: actor.name,
+        level: 1,
+        attributes: {
+          Brawn: 0,
+          Agility: 0,
+          Technique: 0,
+          Iron: 0,
+          Cunning: 0,
+        },
+        combat_skills: {
+          Strike: 0,
+          Shoot: 0,
+          Parry: 0,
+          Dodge: 0,
+          Block: 0,
+        },
+        field_skills: {
+          Athletics: 0,
+          Menace: 0,
+          Stealth: 0,
+          Tinkering: 0,
+          Medicine: 0,
+          Survival: 0,
+          Resolve: 0,
+          Perception: 0,
+          Sway: 0,
+          Lore: 0,
+        },
+        equipped_armor: 'None',
+        equipped_shield: 'None',
+        weapon_slot_1_id: null,
+        weapon_slot_2_id: null,
+        active_weapon_slot: 1,
+        unlocked_perk_ids: [],
+        inventory: seededInventory,
+        notes: actor.notes ?? '',
+        portrait_url: resolveEntityPortraitUrl(actor),
+        token_image_url: resolveEntityTokenImageUrl(actor),
+        token_appearance: resolveEntityTokenAppearance(actor),
+      },
+      { silent: true }
+    );
+    if (!createdChar) return null;
+
+    this.allCharacters.update((curr) =>
+      curr.some((c) => c.id === createdChar.id)
+        ? curr
+        : [...curr, createdChar]
+    );
+    await this.updateRosterActor(actor.id, {
+      character_id: createdChar.id,
+      actor_kind: 'character',
+      is_unique: true,
+    });
+    const linkedTokens = this.tokens().filter(
+      (t) => t.npc_stats?.__roster_actor_id === actor.id
+    );
+    for (const tok of linkedTokens) {
+      await this.patchToken(tok.id, { character_id: createdChar.id });
+    }
+    this.openSheetTarget.set({
+      rosterActorId: actor.id,
+      characterId: createdChar.id,
+      tokenId: this.openSheetTarget()?.tokenId ?? null,
+    });
+    return createdChar;
+  }
+
+  async updateCharacterFromVttSheet(
+    characterId: string,
+    mutator: (char: CharacterModel) => CharacterModel
+  ): Promise<void> {
+    const current =
+      this.characterByIdMap().get(characterId) ??
+      this.characterStore.getCharacterById(characterId);
+    if (!current) return;
+
+    if (!this.canEditCharacterInVtt(characterId)) return;
+
+    const weapons = this.compendiumStore.allWeapons();
+    const perkNodes = this.compendiumStore.allPerkNodes();
+    const oldDerived = computeDerivedStats(current, weapons, perkNodes);
+    const mutated = mutator(current);
+    const nextDerived = computeDerivedStats(mutated, weapons, perkNodes);
+
+    const hpGrowth =
+      mutated.current_hp === current.current_hp
+        ? Math.max(0, nextDerived.maxHp - oldDerived.maxHp)
+        : 0;
+    const spGrowth =
+      mutated.current_sp === current.current_sp
+        ? Math.max(0, nextDerived.maxSp - oldDerived.maxSp)
+        : 0;
+
+    const normalizedInv = normalizeInventoryItems(mutated.inventory);
+    const normalizedPortrait =
+      mutated.portrait_url !== undefined
+        ? sanitizeOptionalImageUrl(mutated.portrait_url)
+        : sanitizeOptionalImageUrl(current.portrait_url);
+    const normalizedTokenImg =
+      mutated.token_image_url !== undefined
+        ? sanitizeOptionalImageUrl(mutated.token_image_url)
+        : sanitizeOptionalImageUrl(current.token_image_url);
+    const normalizedAppearance =
+      mutated.token_appearance !== undefined
+        ? normalizeTokenAppearance(mutated.token_appearance)
+        : normalizeTokenAppearance(current.token_appearance);
+
+    const clamped: CharacterModel = {
+      ...mutated,
+      name: mutated.name.trim() || current.name,
+      current_hp: Math.max(
+        0,
+        Math.min(nextDerived.maxHp, mutated.current_hp + hpGrowth)
+      ),
+      current_sp: Math.max(
+        0,
+        Math.min(nextDerived.maxSp, mutated.current_sp + spGrowth)
+      ),
+      current_ap: Math.max(0, Math.min(8, mutated.current_ap ?? 4)),
+      inventory: normalizedInv,
+      notes: mutated.notes ?? current.notes ?? '',
+      portrait_url: normalizedPortrait,
+      token_image_url: normalizedTokenImg,
+      token_appearance: normalizedAppearance,
+    };
+
+    this.allCharacters.update((curr) =>
+      curr.some((c) => c.id === characterId)
+        ? curr.map((c) => (c.id === characterId ? clamped : c))
+        : [...curr, clamped]
+    );
+    this.characterStore.upsertRealtimeCharacter(clamped);
+
+    const err = await this.characterService.updateCharacterRecord(
+      characterId,
+      clamped
+    );
+    if (err) {
+      this.notifications.error('Unable to Update Character', err);
+    }
+
+    const reachFeet = nextDerived.activeWeapon
+      ? Math.max(5, Math.round((nextDerived.activeWeapon.reach_tiles ?? 1) * 5))
+      : 5;
+    const linkedActors = this.rosterActors().filter(
+      (a) => a.character_id === characterId
+    );
+    for (const actor of linkedActors) {
+      const nextIcon = nextDerived.activeWeapon
+        ? resolveWeaponVisuals(nextDerived.activeWeapon).icon
+        : actor.icon || 'greatsword';
+      await this.updateRosterActor(actor.id, {
+        name: clamped.name,
+        icon: nextIcon,
+        max_hp: nextDerived.maxHp,
+        max_sp: nextDerived.maxSp,
+        armor_dr: nextDerived.armorDr,
+        shield_block: nextDerived.shieldBlockTotal,
+        move_feet: nextDerived.moveFeet,
+        portrait_url: normalizedPortrait,
+        token_image_url: normalizedTokenImg,
+        token_appearance: normalizedAppearance,
+        notes: clamped.notes ?? actor.notes,
+        npc_stats: enrichNpcStatsWithVisuals(
+          {
+            ...actor.npc_stats,
+            weapon_name: nextDerived.activeWeapon?.name ?? 'Unarmed',
+            attack_mod: nextDerived.attackRollMod,
+            flat_damage: nextDerived.flatWeaponDamage,
+            reach_feet: reachFeet,
+            parry_mod: nextDerived.parryMod,
+            dodge_mod: nextDerived.dodgeMod,
+            can_dodge: nextDerived.canDodge,
+            enables_martial_parry: nextDerived.enablesMartialParry,
+            __inventory: normalizedInv,
+          },
+          normalizedPortrait,
+          normalizedTokenImg,
+          normalizedAppearance
+        ),
+      });
+    }
+
+    const deployedTokens = this.tokens().filter(
+      (t) => t.character_id === characterId
+    );
+    for (const tok of deployedTokens) {
+      await this.patchToken(tok.id, {
+        name: clamped.name,
+        max_hp: nextDerived.maxHp,
+        current_hp: clamped.current_hp,
+        max_sp: nextDerived.maxSp,
+        current_sp: clamped.current_sp,
+        current_ap: clamped.current_ap,
+        armor_dr: nextDerived.armorDr,
+        shield_block: nextDerived.shieldBlockTotal,
+        move_feet: nextDerived.moveFeet,
+        portrait_url: normalizedPortrait,
+        token_image_url: normalizedTokenImg,
+        token_appearance: normalizedAppearance,
+        shield_raised: Boolean(clamped.active_cooldowns?.['__shield_raised']),
+      });
+    }
+  }
+
+  async updateNpcFromVttSheet(
+    actorId: string | null,
+    tokenId: string | null,
+    patch: Partial<VttRosterActorModel>
+  ): Promise<void> {
+    if (actorId) {
+      const existing = this.rosterActors().find((a) => a.id === actorId);
+      if (!existing || !this.canManageRosterActor(existing)) return;
+      const normalizedPatch: Partial<VttRosterActorModel> = { ...patch };
+      if (normalizedPatch.darkvision_feet !== undefined) {
+        normalizedPatch.npc_stats = {
+          ...(normalizedPatch.npc_stats ?? existing.npc_stats),
+          __darkvision_feet: normalizedPatch.darkvision_feet,
+        };
+      } else if (normalizedPatch.npc_stats !== undefined) {
+        normalizedPatch.npc_stats = {
+          ...existing.npc_stats,
+          ...normalizedPatch.npc_stats,
+        };
+      }
+      await this.updateRosterActor(actorId, normalizedPatch);
+      return;
+    }
+
+    if (tokenId) {
+      const tok = this.tokens().find((t) => t.id === tokenId);
+      if (!tok || !this.canControlToken(tok)) return;
+      const tokenPatch: Partial<VttTokenModel> = {};
+      if (patch.name !== undefined) tokenPatch.name = patch.name;
+      if (patch.faction !== undefined) tokenPatch.faction = patch.faction;
+      if (patch.size !== undefined) tokenPatch.size = patch.size;
+      if (patch.icon !== undefined) tokenPatch.icon = patch.icon;
+      if (patch.color !== undefined) tokenPatch.color = patch.color;
+      if (patch.portrait_url !== undefined) {
+        tokenPatch.portrait_url = sanitizeOptionalImageUrl(patch.portrait_url);
+      }
+      if (patch.token_image_url !== undefined) {
+        tokenPatch.token_image_url = sanitizeOptionalImageUrl(
+          patch.token_image_url
+        );
+      }
+      if (patch.token_appearance !== undefined) {
+        tokenPatch.token_appearance = normalizeTokenAppearance(
+          patch.token_appearance
+        );
+      }
+      if (patch.max_hp !== undefined) {
+        tokenPatch.max_hp = patch.max_hp;
+        if (tok.current_hp > patch.max_hp) {
+          tokenPatch.current_hp = patch.max_hp;
+        }
+      }
+      if (patch.max_sp !== undefined) {
+        tokenPatch.max_sp = patch.max_sp;
+        if (tok.current_sp > patch.max_sp) {
+          tokenPatch.current_sp = patch.max_sp;
+        }
+      }
+      if (patch.max_ap !== undefined) {
+        tokenPatch.max_ap = patch.max_ap;
+        if (tok.current_ap > patch.max_ap) {
+          tokenPatch.current_ap = patch.max_ap;
+        }
+      }
+      if (patch.armor_dr !== undefined) tokenPatch.armor_dr = patch.armor_dr;
+      if (patch.shield_block !== undefined) {
+        tokenPatch.shield_block = patch.shield_block;
+      }
+      if (patch.move_feet !== undefined) tokenPatch.move_feet = patch.move_feet;
+      if (patch.vision_feet !== undefined) {
+        tokenPatch.vision_feet = patch.vision_feet;
+      }
+      if (patch.darkvision_feet !== undefined) {
+        tokenPatch.darkvision_feet = patch.darkvision_feet;
+      }
+      if (
+        patch.npc_stats !== undefined ||
+        patch.darkvision_feet !== undefined ||
+        patch.portrait_url !== undefined ||
+        patch.token_image_url !== undefined ||
+        patch.token_appearance !== undefined
+      ) {
+        tokenPatch.npc_stats = {
+          ...(tok.npc_stats ?? {}),
+          ...(patch.npc_stats ?? {}),
+          ...(patch.darkvision_feet !== undefined
+            ? { __darkvision_feet: patch.darkvision_feet }
+            : {}),
+          ...(patch.portrait_url !== undefined
+            ? { __portrait_url: tokenPatch.portrait_url }
+            : {}),
+          ...(patch.token_image_url !== undefined
+            ? { __token_image_url: tokenPatch.token_image_url }
+            : {}),
+          ...(patch.token_appearance !== undefined
+            ? { __token_appearance: tokenPatch.token_appearance }
+            : {}),
+        };
+      }
+      await this.patchToken(tok.id, tokenPatch);
+      if (
+        patch.vision_feet !== undefined ||
+        patch.darkvision_feet !== undefined ||
+        patch.move_feet !== undefined
+      ) {
+        this.syncExploredFogFromObservers();
+      }
+    }
+  }
+
+  async rollActorSheetCheck(input: {
+    speakerName: string;
+    speakerColor?: string | null;
+    speakerIcon?: string | null;
+    speakerFaction?: VttFaction;
+    speakerPortraitUrl?: string | null;
+    speakerTokenImageUrl?: string | null;
+    speakerTokenAppearance?: TokenAppearanceConfig;
+    label: string;
+    modifier: number;
+    detail?: string;
+  }): Promise<void> {
+    const manual = this.manualRollOverride();
+    const roll =
+      manual !== null
+        ? createManualRoll(manual, input.modifier)
+        : roll2d10Check(input.modifier, this.attackRollMode());
+    const built = buildPhysicalDiceFrom2d10Roll(roll);
+    const fullLabel = `${input.speakerName} · ${input.label}`;
+    const speakerVisualExtras: Record<string, unknown> = {
+      ...(input.speakerColor ? { speaker_color: input.speakerColor } : {}),
+      ...(input.speakerIcon ? { speaker_icon: input.speakerIcon } : {}),
+      ...(input.speakerFaction
+        ? { speaker_faction: input.speakerFaction }
+        : {}),
+      ...(input.speakerPortraitUrl
+        ? { speaker_portrait_url: input.speakerPortraitUrl }
+        : {}),
+      ...(input.speakerTokenImageUrl
+        ? { speaker_token_image_url: input.speakerTokenImageUrl }
+        : {}),
+      ...(input.speakerTokenAppearance
+        ? { speaker_token_appearance: input.speakerTokenAppearance }
+        : {}),
+    };
+
+    if (manual === null) {
+      const diceThrow = this.createDiceThrowPayload({
+        label: fullLabel,
+        formula: built.formula,
+        total: roll.total,
+        dice: built.physicalDice,
+        senderNameOverride: input.speakerName,
+      });
+      this.settingsStore.playUiCue('dice');
+      this.enqueueDiceThrow(diceThrow, true);
+      await this.postLog({
+        kind: 'roll',
+        title: `${fullLabel} (${built.formula}) → ${roll.total}`,
+        detail: input.detail ?? null,
+        senderNameOverride: input.speakerName,
+        payload: {
+          roll,
+          chips: built.chips,
+          formula: built.formula,
+          modifier: input.modifier,
+          total: roll.total,
+          diceThrow,
+          speaker_mode: 'character',
+          ...speakerVisualExtras,
+        },
+      });
+      return;
+    }
+
+    await this.postLog({
+      kind: 'roll',
+      title: `${fullLabel} (Manual) → ${roll.total}`,
+      detail: input.detail ?? null,
+      senderNameOverride: input.speakerName,
+      payload: {
+        roll,
+        chips: built.chips,
+        formula: 'Manual',
+        modifier: input.modifier,
+        total: roll.total,
+        speaker_mode: 'character',
+        ...speakerVisualExtras,
+      },
+    });
   }
 
   async saveRosterActorToCollections(
@@ -2821,6 +4257,9 @@ export class VttStore {
       light_bright_feet: existing.light_bright_feet,
       light_dim_feet: existing.light_dim_feet,
       light_color: existing.light_color,
+      portrait_url: existing.portrait_url,
+      token_image_url: existing.token_image_url,
+      token_appearance: existing.token_appearance,
       npc_stats: { ...existing.npc_stats },
       notes: existing.notes,
     });
@@ -2837,49 +4276,6 @@ export class VttStore {
     const sc = this.activeScene();
     const actor = this.rosterActors().find((a) => a.id === actorId);
     if (!sc || !actor || !this.canDeployRosterActor(actor)) return null;
-
-    const isUniquePersona = actor.is_unique || Boolean(actor.character_id);
-    if (isUniquePersona) {
-      const existingToken = this.sceneTokens().find(
-        (t) =>
-          (actor.character_id && t.character_id === actor.character_id) ||
-          t.npc_stats?.__roster_actor_id === actor.id
-      );
-      if (existingToken) {
-        this.selectedTokenId.set(existingToken.id);
-        if (placement && this.canControlToken(existingToken)) {
-          if (sc.grid_mode === 'gridless' || placement.unsnapped) {
-            await this.moveTokenToWorldPoint(
-              existingToken.id,
-              placement.worldPt,
-              0,
-              true
-            );
-          } else {
-            const resolved = this.resolveDropPlacement(
-              actor.faction,
-              placement
-            );
-            await this.moveTokenToHex(
-              existingToken.id,
-              resolved.col,
-              resolved.row,
-              0,
-              true
-            );
-          }
-          return (
-            this.sceneTokens().find((t) => t.id === existingToken.id) ??
-            existingToken
-          );
-        }
-        this.notifications.info(
-          'Already Deployed',
-          `${actor.name} is already on this scene.`
-        );
-        return existingToken;
-      }
-    }
 
     const linkedChar = actor.character_id
       ? (this.allCharacters().find((c) => c.id === actor.character_id) ??
@@ -2917,7 +4313,9 @@ export class VttStore {
     }
 
     let finalName = actor.name;
-    if (!isUniquePersona) {
+    const numberCopies =
+      actor.actor_kind === 'npc' && !actor.is_unique && !actor.character_id;
+    if (numberCopies) {
       const sameBaseCount = this.sceneTokens().filter((t) =>
         t.name.startsWith(actor.name)
       ).length;
@@ -2926,17 +4324,18 @@ export class VttStore {
       }
     }
 
+    const assignedUserId = this.getActorAssignedUserId(actor);
     const spawn = this.resolveDropPlacement(actor.faction, placement);
     const axial = offsetToAxial(spawn.col, spawn.row);
+    const topZ = this.getNextTopTokenZIndex();
+    const portraitUrl = resolveEntityPortraitUrl(actor, linkedChar);
+    const tokenImageUrl = resolveEntityTokenImageUrl(actor, linkedChar);
+    const tokenAppearance = resolveEntityTokenAppearance(actor, linkedChar);
 
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
       character_id: actor.character_id,
-      owner_id:
-        linkedChar?.owner_id ??
-        actor.owner_id ??
-        this.authStore.user()?.id ??
-        null,
+      owner_id: assignedUserId,
       name: finalName,
       faction: actor.faction,
       x: spawn.col,
@@ -2968,15 +4367,25 @@ export class VttStore {
       shield_raised: shieldRaised,
       is_hidden: false,
       statuses: [],
-      npc_stats: {
-        ...actor.npc_stats,
-        __darkvision_feet: resolveActorDarkvisionFeet(
-          actor.darkvision_feet,
-          actor.npc_stats
-        ),
-        __roster_actor_id: actor.id,
-        __unsnapped: spawn.unsnappedOnGrid,
-      },
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
+      npc_stats: enrichNpcStatsWithVisuals(
+        {
+          ...actor.npc_stats,
+          __darkvision_feet: resolveActorDarkvisionFeet(
+            actor.darkvision_feet,
+            actor.npc_stats
+          ),
+          __assigned_user_id: assignedUserId,
+          __roster_actor_id: actor.id,
+          __unsnapped: spawn.unsnappedOnGrid,
+          __z_index: topZ,
+        },
+        portraitUrl,
+        tokenImageUrl,
+        tokenAppearance
+      ),
     });
 
     if (res.error || !res.token) {
@@ -3049,7 +4458,7 @@ export class VttStore {
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
       character_id: null,
-      owner_id: this.authStore.user()?.id ?? null,
+      owner_id: null,
       name: finalName,
       faction: preset.faction,
       x: spawn.col,
@@ -3081,6 +4490,8 @@ export class VttStore {
       npc_stats: {
         ...preset.npc_stats,
         __darkvision_feet: resolvedDarkvision,
+        __assigned_user_id: null,
+        __z_index: this.getNextTopTokenZIndex(),
       },
     });
 
@@ -3195,8 +4606,30 @@ export class VttStore {
   ): Promise<void> {
     const char = this.characterByIdMap().get(characterId);
     if (!char) return;
-    const uid = this.authStore.user()?.id;
-    if (char.owner_id !== uid && !this.authStore.isAdmin()) return;
+    if (!this.canEditCharacterInVtt(characterId)) return;
+
+    const prevShieldRaised = Boolean(
+      char.active_cooldowns?.['__shield_raised']
+    );
+    const nextShieldRaised =
+      patch.shield_raised !== undefined
+        ? Boolean(patch.shield_raised)
+        : prevShieldRaised;
+    const nextHp =
+      patch.current_hp !== undefined ? patch.current_hp : char.current_hp;
+    const nextSp =
+      patch.current_sp !== undefined ? patch.current_sp : char.current_sp;
+    const nextAp =
+      patch.current_ap !== undefined ? patch.current_ap : char.current_ap;
+
+    if (
+      nextHp === char.current_hp &&
+      nextSp === char.current_sp &&
+      nextAp === char.current_ap &&
+      nextShieldRaised === prevShieldRaised
+    ) {
+      return;
+    }
 
     const nextCooldowns = { ...(char.active_cooldowns ?? {}) };
     if (patch.shield_raised !== undefined) {
@@ -3209,18 +4642,16 @@ export class VttStore {
 
     const updated: CharacterModel = {
       ...char,
-      current_hp:
-        patch.current_hp !== undefined ? patch.current_hp : char.current_hp,
-      current_sp:
-        patch.current_sp !== undefined ? patch.current_sp : char.current_sp,
-      current_ap:
-        patch.current_ap !== undefined ? patch.current_ap : char.current_ap,
+      current_hp: nextHp,
+      current_sp: nextSp,
+      current_ap: nextAp,
       active_cooldowns: nextCooldowns,
     };
 
     this.allCharacters.update((list) =>
       list.map((c) => (c.id === characterId ? updated : c))
     );
+    this.characterStore.upsertRealtimeCharacter(updated);
     await this.characterService.updateCharacterRecord(characterId, updated);
   }
 
@@ -3443,6 +4874,394 @@ export class VttStore {
     }
   }
 
+  async moveTokensBatch(
+    moves: readonly BatchTokenMoveInput[],
+    worldBoundsOverride?: { width: number; height: number }
+  ): Promise<void> {
+    if (moves.length === 0) return;
+    if (moves.length === 1) {
+      const single = moves[0];
+      if (single.targetWorld) {
+        await this.moveTokenToWorldPoint(
+          single.tokenId,
+          single.targetWorld,
+          single.distanceFeet,
+          Boolean(single.freeOverride),
+          worldBoundsOverride
+        );
+      } else if (single.targetHex) {
+        await this.moveTokenToHex(
+          single.tokenId,
+          single.targetHex.col,
+          single.targetHex.row,
+          single.distanceFeet,
+          Boolean(single.freeOverride)
+        );
+      }
+      return;
+    }
+
+    const sc = this.activeScene();
+    if (!sc) return;
+
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const bounds = worldBoundsOverride ?? {
+      width: layout.totalWidth,
+      height: layout.totalHeight,
+    };
+    const unsnappedOnGrid = sc.grid_mode !== 'gridless';
+
+    const undoPatches: {
+      tokenId: string;
+      previousTokenPatch: Partial<VttTokenModel>;
+    }[] = [];
+    const forwardPatches: {
+      tokenId: string;
+      patch: Partial<VttTokenModel>;
+    }[] = [];
+
+    for (const item of moves) {
+      const tok = this.sceneTokens().find((t) => t.id === item.tokenId);
+      if (!tok || !this.canControlToken(tok)) continue;
+
+      if (item.targetWorld) {
+        const clampedWorld = clampWorldPointToBounds(item.targetWorld, bounds);
+        const nearestHex = clampHexToBounds(
+          worldPointToHex(clampedWorld, geom),
+          geom.gridWidth,
+          geom.gridHeight
+        );
+        if (
+          tok.world_x === clampedWorld.x &&
+          tok.world_y === clampedWorld.y &&
+          tok.x === nearestHex.col &&
+          tok.y === nearestHex.row &&
+          Boolean(tok.npc_stats?.__unsnapped) === unsnappedOnGrid
+        ) {
+          continue;
+        }
+
+        const axial = offsetToAxial(nearestHex.col, nearestHex.row);
+        const patch: Partial<VttTokenModel> = {
+          x: nearestHex.col,
+          y: nearestHex.row,
+          q: axial.q,
+          r: axial.r,
+          world_x: clampedWorld.x,
+          world_y: clampedWorld.y,
+          ...(unsnappedOnGrid
+            ? { npc_stats: { ...tok.npc_stats, __unsnapped: true } }
+            : {}),
+        };
+
+        if (
+          sc.combat_active &&
+          this.enforceApOnMove() &&
+          !item.freeOverride &&
+          item.distanceFeet > 0
+        ) {
+          const moveActionsNeeded = Math.max(
+            1,
+            Math.ceil(item.distanceFeet / Math.max(5, tok.move_feet))
+          );
+          patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+        }
+
+        undoPatches.push({
+          tokenId: tok.id,
+          previousTokenPatch: {
+            x: tok.x,
+            y: tok.y,
+            q: tok.q,
+            r: tok.r,
+            world_x: tok.world_x,
+            world_y: tok.world_y,
+            current_ap: tok.current_ap,
+            npc_stats: { ...tok.npc_stats },
+          },
+        });
+        forwardPatches.push({ tokenId: tok.id, patch });
+      } else if (item.targetHex) {
+        const clamped = clampHexToBounds(
+          item.targetHex,
+          geom.gridWidth,
+          geom.gridHeight
+        );
+        if (
+          clamped.col === tok.x &&
+          clamped.row === tok.y &&
+          (tok.world_x === null || tok.world_x === undefined) &&
+          !tok.npc_stats?.__unsnapped
+        ) {
+          continue;
+        }
+
+        const axial = offsetToAxial(clamped.col, clamped.row);
+        const patch: Partial<VttTokenModel> = {
+          x: clamped.col,
+          y: clamped.row,
+          q: axial.q,
+          r: axial.r,
+          world_x: null,
+          world_y: null,
+          ...(tok.npc_stats?.__unsnapped
+            ? { npc_stats: { ...tok.npc_stats, __unsnapped: false } }
+            : {}),
+        };
+
+        if (
+          sc.combat_active &&
+          this.enforceApOnMove() &&
+          !item.freeOverride &&
+          item.distanceFeet > 0
+        ) {
+          const moveActionsNeeded = Math.max(
+            1,
+            Math.ceil(item.distanceFeet / Math.max(5, tok.move_feet))
+          );
+          patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+        }
+
+        undoPatches.push({
+          tokenId: tok.id,
+          previousTokenPatch: {
+            x: tok.x,
+            y: tok.y,
+            q: tok.q,
+            r: tok.r,
+            world_x: tok.world_x,
+            world_y: tok.world_y,
+            current_ap: tok.current_ap,
+            npc_stats: { ...tok.npc_stats },
+          },
+        });
+        forwardPatches.push({ tokenId: tok.id, patch });
+      }
+    }
+
+    if (forwardPatches.length === 0) return;
+
+    const prevFog = cloneExploredFog(sc.explored_fog);
+    this.pushUndoEntry(
+      sc.id,
+      `Move ${forwardPatches.length} Tokens`,
+      {
+        kind: 'tokens_batch',
+        patches: undoPatches,
+        previousExploredFog: prevFog,
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      forwardPatches.map((entry) => this.patchToken(entry.tokenId, entry.patch))
+    );
+    this.syncExploredFogFromObservers();
+  }
+
+  private async patchTokenCoalesced(
+    tokenId: string,
+    patch: Partial<VttTokenModel>
+  ): Promise<void> {
+    const existing = this.tokens().find((t) => t.id === tokenId);
+    if (!existing) return;
+
+    this.tokens.update((curr) =>
+      curr.map((t) => (t.id === tokenId ? { ...t, ...patch } : t))
+    );
+
+    const tracker = this.inFlightTokenRotationPatches.get(tokenId);
+    if (tracker?.inFlight) {
+      tracker.queuedPatch = patch;
+      return;
+    }
+
+    const state = {
+      inFlight: true,
+      queuedPatch: null as Partial<VttTokenModel> | null,
+    };
+    this.inFlightTokenRotationPatches.set(tokenId, state);
+
+    let activePatch: Partial<VttTokenModel> | null = patch;
+    try {
+      while (activePatch) {
+        const currentTok =
+          this.tokens().find((t) => t.id === tokenId) ?? existing;
+        const err = await this.vttService.updateToken(
+          tokenId,
+          activePatch,
+          this.needsMigration(),
+          currentTok
+        );
+        if (err) {
+          this.notifications.error('Token Sync Error', err);
+          break;
+        }
+        activePatch = state.queuedPatch;
+        state.queuedPatch = null;
+      }
+    } finally {
+      this.inFlightTokenRotationPatches.delete(tokenId);
+    }
+  }
+
+  async rotateTokensByDelta(
+    tokenIds: readonly string[],
+    deltaDegrees: number
+  ): Promise<void> {
+    if (!Number.isFinite(deltaDegrees) || deltaDegrees === 0) return;
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          Boolean(t) && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+
+    const sceneId = targets[0].encounter_id;
+    const undoPatches = targets.map((tok) => ({
+      tokenId: tok.id,
+      previousTokenPatch: {
+        npc_stats: { ...(tok.npc_stats ?? {}) },
+      },
+    }));
+    const coalesceKey = `rotate:${targets
+      .map((t) => t.id)
+      .sort()
+      .join(',')}`;
+    const label =
+      targets.length === 1
+        ? `Rotate ${targets[0].name}`
+        : `Rotate ${targets.length} Tokens`;
+
+    this.pushUndoEntry(sceneId, label, {
+      kind: 'tokens_batch',
+      patches: undoPatches,
+      selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      coalesceKey,
+    });
+
+    await Promise.all(
+      targets.map((tok) => {
+        const currDeg = normalizeTokenRotation(tok.npc_stats?.__rotation);
+        const nextDeg = normalizeTokenRotation(currDeg + deltaDegrees);
+        return this.patchTokenCoalesced(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __rotation: nextDeg,
+          },
+        });
+      })
+    );
+  }
+
+  async setTokensRotation(
+    tokenIds: readonly string[],
+    degrees: number
+  ): Promise<void> {
+    const targetDeg = normalizeTokenRotation(degrees);
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          t !== undefined &&
+          (this.isGm() || this.canControlToken(t)) &&
+          normalizeTokenRotation(t.npc_stats?.__rotation) !== targetDeg
+      );
+    if (targets.length === 0) return;
+
+    const sceneId = targets[0].encounter_id;
+    const undoPatches = targets.map((tok) => ({
+      tokenId: tok.id,
+      previousTokenPatch: {
+        npc_stats: { ...(tok.npc_stats ?? {}) },
+      },
+    }));
+    const label =
+      targets.length === 1
+        ? `Reset Rotation (${targets[0].name})`
+        : `Reset Rotation (${targets.length} Tokens)`;
+
+    this.pushUndoEntry(sceneId, label, {
+      kind: 'tokens_batch',
+      patches: undoPatches,
+      selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+    });
+
+    await Promise.all(
+      targets.map((tok) =>
+        this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __rotation: targetDeg,
+          },
+        })
+      )
+    );
+  }
+
+  async setTokensHidden(
+    tokenIds: readonly string[],
+    hidden: boolean
+  ): Promise<void> {
+    if (!this.isGm()) return;
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel => t !== undefined && t.is_hidden !== hidden
+      );
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.toggleTokenHidden(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    const sc = this.scenes().find((s) => s.id === sceneId);
+    const prevFog = sc ? cloneExploredFog(sc.explored_fog) : undefined;
+
+    this.pushUndoEntry(
+      sceneId,
+      `${hidden ? 'Hide' : 'Reveal'} ${targets.length} Tokens`,
+      {
+        kind: 'tokens_batch',
+        patches: targets.map((tok) => ({
+          tokenId: tok.id,
+          previousTokenPatch: { is_hidden: tok.is_hidden },
+        })),
+        previousExploredFog: prevFog,
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      targets.map((tok) => this.patchToken(tok.id, { is_hidden: hidden }))
+    );
+    this.syncExploredFogFromObservers();
+  }
+
+  async toggleTokensHiddenBatch(tokenIds: readonly string[]): Promise<void> {
+    if (!this.isGm()) return;
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter((t): t is VttTokenModel => Boolean(t));
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.toggleTokenHidden(targets[0].id);
+      return;
+    }
+    const shouldHide = targets.some((t) => !t.is_hidden);
+    await this.setTokensHidden(
+      targets.map((t) => t.id),
+      shouldHide
+    );
+  }
+
   async toggleTokenHidden(tokenId: string): Promise<void> {
     if (!this.isGm()) return;
     const tok = this.tokens().find((t) => t.id === tokenId);
@@ -3465,6 +5284,339 @@ export class VttStore {
     this.syncExploredFogFromObservers();
   }
 
+  async flipTokensHorizontal(tokenIds: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          Boolean(t) && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.toggleTokenFlipX(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    this.pushUndoEntry(
+      sceneId,
+      `Flip Horizontal (${targets.length} Tokens)`,
+      {
+        kind: 'tokens_batch',
+        patches: targets.map((tok) => ({
+          tokenId: tok.id,
+          previousTokenPatch: { npc_stats: { ...(tok.npc_stats ?? {}) } },
+        })),
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      targets.map((tok) =>
+        this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __flip_x: !Boolean(tok.npc_stats?.__flip_x),
+          },
+        })
+      )
+    );
+  }
+
+  async flipTokensVertical(tokenIds: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          Boolean(t) && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.toggleTokenFlipY(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    this.pushUndoEntry(
+      sceneId,
+      `Flip Vertical (${targets.length} Tokens)`,
+      {
+        kind: 'tokens_batch',
+        patches: targets.map((tok) => ({
+          tokenId: tok.id,
+          previousTokenPatch: { npc_stats: { ...(tok.npc_stats ?? {}) } },
+        })),
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      targets.map((tok) =>
+        this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __flip_y: !Boolean(tok.npc_stats?.__flip_y),
+          },
+        })
+      )
+    );
+  }
+
+  async toggleTokenFlipX(tokenId: string): Promise<void> {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const nextFlipX = !Boolean(tok.npc_stats?.__flip_x);
+    await this.recordablePatchToken(
+      tok.id,
+      {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __flip_x: nextFlipX,
+        },
+      },
+      `Flip Horizontal (${tok.name})`
+    );
+  }
+
+  async toggleTokenFlipY(tokenId: string): Promise<void> {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const nextFlipY = !Boolean(tok.npc_stats?.__flip_y);
+    await this.recordablePatchToken(
+      tok.id,
+      {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __flip_y: nextFlipY,
+        },
+      },
+      `Flip Vertical (${tok.name})`
+    );
+  }
+
+  async bringTokensToFront(tokenIds: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          Boolean(t) && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.bringTokenToFront(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    const targetIdSet = new Set(targets.map((t) => t.id));
+    const peers = this.tokens().filter(
+      (t) => t.encounter_id === sceneId && !targetIdSet.has(t.id)
+    );
+    if (peers.length === 0) return;
+
+    let maxPeerZ = -Infinity;
+    for (const peer of peers) {
+      const z = Number(peer.npc_stats?.__z_index ?? 0);
+      const safeZ = Number.isFinite(z) ? z : 0;
+      if (safeZ > maxPeerZ) {
+        maxPeerZ = safeZ;
+      }
+    }
+    const baseZ = (Number.isFinite(maxPeerZ) ? maxPeerZ : 0) + 1;
+
+    const sortedTargets = [...targets].sort((a, b) => {
+      const za = Number(a.npc_stats?.__z_index ?? 0);
+      const zb = Number(b.npc_stats?.__z_index ?? 0);
+      return (Number.isFinite(za) ? za : 0) - (Number.isFinite(zb) ? zb : 0);
+    });
+
+    const minTargetZ = Number(sortedTargets[0].npc_stats?.__z_index ?? 0);
+    if (Number.isFinite(minTargetZ) && minTargetZ > maxPeerZ) return;
+
+    this.pushUndoEntry(
+      sceneId,
+      `Bring to Front (${sortedTargets.length} Tokens)`,
+      {
+        kind: 'tokens_batch',
+        patches: sortedTargets.map((tok) => ({
+          tokenId: tok.id,
+          previousTokenPatch: { npc_stats: { ...(tok.npc_stats ?? {}) } },
+        })),
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      sortedTargets.map((tok, idx) =>
+        this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __z_index: baseZ + idx,
+          },
+        })
+      )
+    );
+  }
+
+  async sendTokensToBack(tokenIds: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          Boolean(t) && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.sendTokenToBack(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    const targetIdSet = new Set(targets.map((t) => t.id));
+    const peers = this.tokens().filter(
+      (t) => t.encounter_id === sceneId && !targetIdSet.has(t.id)
+    );
+    if (peers.length === 0) return;
+
+    let minPeerZ = Infinity;
+    for (const peer of peers) {
+      const z = Number(peer.npc_stats?.__z_index ?? 0);
+      const safeZ = Number.isFinite(z) ? z : 0;
+      if (safeZ < minPeerZ) {
+        minPeerZ = safeZ;
+      }
+    }
+    const sortedTargets = [...targets].sort((a, b) => {
+      const za = Number(a.npc_stats?.__z_index ?? 0);
+      const zb = Number(b.npc_stats?.__z_index ?? 0);
+      return (Number.isFinite(za) ? za : 0) - (Number.isFinite(zb) ? zb : 0);
+    });
+
+    const maxTargetZ = Number(
+      sortedTargets[sortedTargets.length - 1].npc_stats?.__z_index ?? 0
+    );
+    if (Number.isFinite(maxTargetZ) && maxTargetZ < minPeerZ) return;
+
+    const baseZ =
+      (Number.isFinite(minPeerZ) ? minPeerZ : 0) - sortedTargets.length;
+
+    this.pushUndoEntry(
+      sceneId,
+      `Send to Back (${sortedTargets.length} Tokens)`,
+      {
+        kind: 'tokens_batch',
+        patches: sortedTargets.map((tok) => ({
+          tokenId: tok.id,
+          previousTokenPatch: { npc_stats: { ...(tok.npc_stats ?? {}) } },
+        })),
+        selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      }
+    );
+
+    await Promise.all(
+      sortedTargets.map((tok, idx) =>
+        this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __z_index: baseZ + idx,
+          },
+        })
+      )
+    );
+  }
+
+  async bringTokenToFront(tokenId: string): Promise<void> {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const peers = this.tokens().filter(
+      (t) => t.encounter_id === tok.encounter_id && t.id !== tok.id
+    );
+    if (peers.length === 0) return;
+    let maxPeerZ = -Infinity;
+    for (const peer of peers) {
+      const z = Number(peer.npc_stats?.__z_index ?? 0);
+      const safeZ = Number.isFinite(z) ? z : 0;
+      if (safeZ > maxPeerZ) {
+        maxPeerZ = safeZ;
+      }
+    }
+    const currZ = Number(tok.npc_stats?.__z_index ?? 0);
+    const nextZ = (Number.isFinite(maxPeerZ) ? maxPeerZ : 0) + 1;
+    if (Number.isFinite(currZ) && currZ > maxPeerZ) return;
+
+    await this.recordablePatchToken(
+      tok.id,
+      {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __z_index: nextZ,
+        },
+      },
+      `Bring to Front (${tok.name})`
+    );
+  }
+
+  async sendTokenToBack(tokenId: string): Promise<void> {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const peers = this.tokens().filter(
+      (t) => t.encounter_id === tok.encounter_id && t.id !== tok.id
+    );
+    if (peers.length === 0) return;
+    let minPeerZ = Infinity;
+    for (const peer of peers) {
+      const z = Number(peer.npc_stats?.__z_index ?? 0);
+      const safeZ = Number.isFinite(z) ? z : 0;
+      if (safeZ < minPeerZ) {
+        minPeerZ = safeZ;
+      }
+    }
+    const currZ = Number(tok.npc_stats?.__z_index ?? 0);
+    const nextZ = (Number.isFinite(minPeerZ) ? minPeerZ : 0) - 1;
+    if (Number.isFinite(currZ) && currZ < minPeerZ) return;
+
+    await this.recordablePatchToken(
+      tok.id,
+      {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __z_index: nextZ,
+        },
+      },
+      `Send to Back (${tok.name})`
+    );
+  }
+
+  async removeTokensBatch(tokenIds: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.tokens().find((t) => t.id === id))
+      .filter((t): t is VttTokenModel => t !== undefined && this.canControlToken(t));
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await this.removeToken(targets[0].id);
+      return;
+    }
+
+    const sceneId = targets[0].encounter_id;
+    const snapshots: VttTokenModel[] = targets.map((tok) => ({
+      ...tok,
+      statuses: [...(tok.statuses ?? [])],
+      npc_stats: { ...(tok.npc_stats ?? {}) },
+    }));
+
+    this.pushUndoEntry(sceneId, `Remove ${targets.length} Tokens`, {
+      kind: 'tokens_batch',
+      removedSnapshots: snapshots,
+    });
+
+    await Promise.all(targets.map((tok) => this.removeTokenInternal(tok.id)));
+  }
+
   async removeToken(tokenId: string): Promise<void> {
     const tok = this.tokens().find((t) => t.id === tokenId);
     if (!tok || !this.canControlToken(tok)) return;
@@ -3484,8 +5636,17 @@ export class VttStore {
 
   private async removeTokenInternal(tokenId: string): Promise<void> {
     this.tokens.update((curr) => curr.filter((t) => t.id !== tokenId));
-    if (this.selectedTokenId() === tokenId) {
-      this.selectedTokenId.set(null);
+    this.pruneRemovedTokenFromSelection(tokenId);
+    if (this.pendingTargetAction()?.attackerTokenId === tokenId) {
+      this.pendingTargetAction.set(null);
+    }
+    const target = this.openSheetTarget();
+    if (
+      target?.tokenId === tokenId &&
+      !target.rosterActorId &&
+      !target.characterId
+    ) {
+      this.openSheetTarget.set(null);
     }
     const err = await this.vttService.deleteToken(tokenId);
     if (err) {
@@ -4456,6 +6617,140 @@ export class VttStore {
     };
   }
 
+  private buildSpeakerPayloadFields(
+    speaker: VttResolvedChatSpeaker
+  ): Record<string, unknown> {
+    if (speaker.mode !== 'character') {
+      return {
+        speaker_mode: this.isGm() ? 'gm_user' : 'user',
+      };
+    }
+    return {
+      speaker_mode: 'character',
+      ...(speaker.tokenId ? { speaker_token_id: speaker.tokenId } : {}),
+      ...(speaker.characterId
+        ? { speaker_character_id: speaker.characterId }
+        : {}),
+      ...(speaker.color ? { speaker_color: speaker.color } : {}),
+      ...(speaker.icon ? { speaker_icon: speaker.icon } : {}),
+      ...(speaker.faction ? { speaker_faction: speaker.faction } : {}),
+      ...(speaker.portraitUrl
+        ? { speaker_portrait_url: speaker.portraitUrl }
+        : {}),
+      ...(speaker.tokenImageUrl
+        ? { speaker_token_image_url: speaker.tokenImageUrl }
+        : {}),
+      ...(speaker.tokenAppearance
+        ? { speaker_token_appearance: speaker.tokenAppearance }
+        : {}),
+    };
+  }
+
+  getLogSpeakerVisuals(entry: VttLogEntry): {
+    displayImageUrl: string | null;
+    tokenImageUrl: string | null;
+    portraitUrl: string | null;
+    appearance: TokenAppearanceConfig;
+    icon: string;
+    color: string | null;
+    faction: VttFaction;
+  } | null {
+    const payload = entry.payload ?? {};
+    if (payload['speaker_mode'] !== 'character') {
+      return null;
+    }
+
+    const tokenId =
+      typeof payload['speaker_token_id'] === 'string'
+        ? payload['speaker_token_id']
+        : null;
+    const characterId =
+      typeof payload['speaker_character_id'] === 'string'
+        ? payload['speaker_character_id']
+        : null;
+
+    const liveTok = tokenId
+      ? (this.tokens().find((t) => t.id === tokenId) ?? null)
+      : null;
+    const liveChar = characterId
+      ? (this.characterByIdMap().get(characterId) ?? null)
+      : null;
+    const liveActor = liveTok
+      ? this.resolveRosterActorForToken(liveTok)
+      : characterId
+        ? (this.rosterActors().find((a) => a.character_id === characterId) ??
+          null)
+        : null;
+
+    const payloadTokenImageUrl = sanitizeOptionalImageUrl(
+      payload['speaker_token_image_url']
+    );
+    const payloadPortraitUrl = sanitizeOptionalImageUrl(
+      payload['speaker_portrait_url']
+    );
+    const payloadAppearance = payload['speaker_token_appearance']
+      ? normalizeTokenAppearance(payload['speaker_token_appearance'])
+      : null;
+
+    const tokenImageUrl =
+      resolveEntityTokenImageUrl(liveTok, liveActor, liveChar) ??
+      payloadTokenImageUrl;
+    const portraitUrl =
+      resolveEntityPortraitUrl(liveTok, liveActor, liveChar) ??
+      payloadPortraitUrl;
+    const baseAppearance =
+      liveTok || liveActor || liveChar
+        ? resolveEntityTokenAppearance(liveTok, liveActor, liveChar)
+        : (payloadAppearance ?? normalizeTokenAppearance(null));
+
+    const displayImageUrl = tokenImageUrl ?? portraitUrl;
+    const appearance: TokenAppearanceConfig =
+      tokenImageUrl || !portraitUrl
+        ? baseAppearance
+        : {
+            ...baseAppearance,
+            scale: 1,
+            offset_x: 0,
+            offset_y: 0,
+          };
+
+    const rawFaction = payload['speaker_faction'];
+    const faction: VttFaction =
+      liveTok?.faction ??
+      liveActor?.faction ??
+      (rawFaction === 'ally' || rawFaction === 'enemy' || rawFaction === 'neutral'
+        ? rawFaction
+        : 'ally');
+
+    const icon =
+      liveTok?.icon ||
+      liveActor?.icon ||
+      (typeof payload['speaker_icon'] === 'string' &&
+      payload['speaker_icon'].trim()
+        ? payload['speaker_icon'].trim()
+        : 'user');
+
+    const color =
+      liveTok?.color ||
+      liveActor?.color ||
+      (typeof payload['speaker_color'] === 'string' &&
+      payload['speaker_color'].trim()
+        ? payload['speaker_color'].trim()
+        : faction === 'ally'
+          ? '#38B29A'
+          : null);
+
+    return {
+      displayImageUrl,
+      tokenImageUrl,
+      portraitUrl,
+      appearance,
+      icon,
+      color,
+      faction,
+    };
+  }
+
   async executeChatOrCommand(
     rawInput: string,
     registry: readonly VttChatCommandConfig[] = VTT_CHAT_COMMANDS
@@ -4485,19 +6780,7 @@ export class VttStore {
         kind: 'chat',
         title: trimmed,
         senderNameOverride: speaker.name,
-        payload:
-          speaker.mode === 'character'
-            ? {
-                speaker_mode: 'character',
-                ...(speaker.tokenId ? { speaker_token_id: speaker.tokenId } : {}),
-                ...(speaker.characterId
-                  ? { speaker_character_id: speaker.characterId }
-                  : {}),
-                ...(speaker.color ? { speaker_color: speaker.color } : {}),
-              }
-            : this.isGm()
-              ? { speaker_mode: 'gm_user' }
-              : { speaker_mode: 'user' },
+        payload: this.buildSpeakerPayloadFields(speaker),
       });
       return { cleared: true };
     }
@@ -4572,13 +6855,7 @@ export class VttStore {
           modifier: res.modifier,
           total: res.total,
           diceThrow,
-          speaker_mode:
-            speaker.mode === 'character'
-              ? 'character'
-              : this.isGm()
-                ? 'gm_user'
-                : 'user',
-          ...(speaker.color ? { speaker_color: speaker.color } : {}),
+          ...this.buildSpeakerPayloadFields(speaker),
           ...(isGmPrivate
             ? {
                 visibility: 'gm_roll',
@@ -4607,12 +6884,7 @@ export class VttStore {
           visibility: 'whisper',
           recipient_ids: parsedWhisper.recipientIds,
           recipient_label: parsedWhisper.recipientLabel,
-          speaker_mode:
-            speaker.mode === 'character'
-              ? 'character'
-              : this.isGm()
-                ? 'gm_user'
-                : 'user',
+          ...this.buildSpeakerPayloadFields(speaker),
         },
       });
       return { cleared: true };
@@ -4633,13 +6905,7 @@ export class VttStore {
         senderNameOverride: speaker.name,
         payload: {
           emote: true,
-          speaker_mode:
-            speaker.mode === 'character'
-              ? 'character'
-              : this.isGm()
-                ? 'gm_user'
-                : 'user',
-          ...(speaker.color ? { speaker_color: speaker.color } : {}),
+          ...this.buildSpeakerPayloadFields(speaker),
         },
       });
       return { cleared: true };

@@ -27,6 +27,29 @@ import {
   isWeaponTwoHanded,
   normalizeWeaponRequirement,
 } from '../../../core/compendium/compendium.model';
+import {
+  DEFAULT_TOKEN_APPEARANCE,
+  TokenAppearanceConfig,
+  TokenFramePresetId,
+  TokenShape,
+  buildTokenImagePanZoomTransform,
+  hasCustomTokenAppearance,
+  normalizeTokenAppearance,
+  resolveTokenRingColor,
+  sanitizeOptionalImageUrl,
+} from '../../../shared/token-avatar/token-appearance.model';
+
+export {
+  DEFAULT_TOKEN_APPEARANCE,
+  type TokenAppearanceConfig,
+  type TokenFramePresetId,
+  type TokenShape,
+  buildTokenImagePanZoomTransform,
+  hasCustomTokenAppearance,
+  normalizeTokenAppearance,
+  resolveTokenRingColor,
+  sanitizeOptionalImageUrl,
+};
 
 export {
   type ActiveCombatTag,
@@ -263,6 +286,41 @@ export const SHIELD_TIERS: Record<ShieldTier, ShieldTierSpec> = {
   },
 };
 
+export interface ActorInventoryItem {
+  id: string;
+  name: string;
+  quantity: number;
+  description: string;
+}
+
+export function normalizeInventoryItems(raw: unknown): ActorInventoryItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: ActorInventoryItem[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const entry = raw[i];
+    if (!entry || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const rawName = typeof obj['name'] === 'string' ? obj['name'] : '';
+    const rawId =
+      typeof obj['id'] === 'string' && obj['id'].trim().length > 0
+        ? obj['id'].trim()
+        : `item-${i + 1}`;
+    const rawQty = Number(obj['quantity']);
+    const quantity = Number.isFinite(rawQty)
+      ? Math.max(0, Math.round(rawQty))
+      : 1;
+    const description =
+      typeof obj['description'] === 'string' ? obj['description'] : '';
+    items.push({
+      id: rawId,
+      name: rawName,
+      quantity,
+      description,
+    });
+  }
+  return items;
+}
+
 export interface CharacterModel {
   id: string;
   owner_id: string;
@@ -281,6 +339,11 @@ export interface CharacterModel {
   current_sp: number;
   current_ap: number;
   active_cooldowns: Record<string, number | string>;
+  inventory?: ActorInventoryItem[];
+  notes?: string;
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig;
   created_at?: string;
 }
 

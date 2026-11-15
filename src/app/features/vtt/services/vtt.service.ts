@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseService } from '../../../core/supabase/supabase.service';
 import { CharacterModel } from '../../characters/models/character.model';
+import { normalizeCharacterRecord } from '../../characters/services/character.service';
 import { GameCardModel } from '../../dashboard/models/campaign.model';
 import {
   VttDiceThrowPayload,
@@ -34,7 +35,14 @@ import {
   VttSceneModel,
   VttTokenModel,
   VttWallSegment,
+  TokenAppearanceConfig,
+  enrichNpcStatsWithVisuals,
+  normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
+  sanitizeOptionalImageUrl,
 } from '../models/vtt.model';
 
 export interface VttPingBroadcast {
@@ -250,6 +258,21 @@ function normalizeTokenRow(row: Record<string, unknown>): VttTokenModel {
       ? (row['statuses'] as VttTokenModel['statuses'])
       : [],
     npc_stats: npcStats,
+    portrait_url: resolveEntityPortraitUrl({
+      portrait_url: row['portrait_url'] as string | null | undefined,
+      npc_stats: npcStats,
+    }),
+    token_image_url: resolveEntityTokenImageUrl({
+      token_image_url: row['token_image_url'] as string | null | undefined,
+      npc_stats: npcStats,
+    }),
+    token_appearance: resolveEntityTokenAppearance({
+      token_appearance: row['token_appearance'] as
+        | TokenAppearanceConfig
+        | null
+        | undefined,
+      npc_stats: npcStats,
+    }),
   };
 }
 
@@ -419,6 +442,21 @@ function normalizeRosterActorRow(
     light_dim_feet: Math.max(0, Number(row['light_dim_feet'] ?? 0)),
     light_color: row['light_color'] ? String(row['light_color']) : '#F59E0B',
     npc_stats: npcStats,
+    portrait_url: resolveEntityPortraitUrl({
+      portrait_url: row['portrait_url'] as string | null | undefined,
+      npc_stats: npcStats,
+    }),
+    token_image_url: resolveEntityTokenImageUrl({
+      token_image_url: row['token_image_url'] as string | null | undefined,
+      npc_stats: npcStats,
+    }),
+    token_appearance: resolveEntityTokenAppearance({
+      token_appearance: row['token_appearance'] as
+        | TokenAppearanceConfig
+        | null
+        | undefined,
+      npc_stats: npcStats,
+    }),
     notes: row['notes'] ? String(row['notes']) : '',
     sort_order: Number(row['sort_order'] ?? 0),
     created_at: row['created_at'] ? String(row['created_at']) : undefined,
@@ -530,11 +568,7 @@ export class VttService {
       );
       const characters = (
         Array.isArray(raw.characters) ? raw.characters : []
-      ).map((c) => ({
-        ...c,
-        unlocked_perk_ids: c.unlocked_perk_ids ?? [],
-        active_cooldowns: c.active_cooldowns ?? {},
-      }));
+      ).map(normalizeCharacterRecord);
 
       return {
         bundle: {
@@ -603,16 +637,71 @@ export class VttService {
     return { data: data as GameCardModel, error: null };
   }
 
+  async fetchCampaignParticipants(
+    campaignId: string,
+    gmId: string
+  ): Promise<VttParticipant[]> {
+    const { data: members } = await this.supabase
+      .from('campaign_members')
+      .select('user_id')
+      .eq('campaign_id', campaignId);
+
+    const userIds = new Set<string>();
+    if (gmId) {
+      userIds.add(gmId);
+    }
+    for (const row of members ?? []) {
+      const uid = typeof row?.['user_id'] === 'string' ? row['user_id'] : '';
+      if (uid) {
+        userIds.add(uid);
+      }
+    }
+    if (userIds.size === 0) return [];
+
+    const { data: profiles } = await this.supabase
+      .from('profiles')
+      .select('id, display_name, handle')
+      .in('id', Array.from(userIds));
+
+    const profileMap = new Map<
+      string,
+      { display_name: string; handle: string | null }
+    >();
+    for (const p of profiles ?? []) {
+      const id = typeof p?.['id'] === 'string' ? p['id'] : '';
+      if (!id) continue;
+      profileMap.set(id, {
+        display_name: String(p['display_name'] ?? 'Adventurer'),
+        handle:
+          typeof p['handle'] === 'string' && p['handle'].trim().length > 0
+            ? p['handle'].trim()
+            : null,
+      });
+    }
+
+    const result: VttParticipant[] = [];
+    for (const uid of userIds) {
+      const prof = profileMap.get(uid);
+      result.push({
+        user_id: uid,
+        display_name: prof?.display_name ?? 'Adventurer',
+        handle: prof?.handle ?? null,
+        role: uid === gmId ? 'gm' : 'player',
+      });
+    }
+    result.sort((a, b) => {
+      if (a.role !== b.role) return a.role === 'gm' ? -1 : 1;
+      return a.display_name.localeCompare(b.display_name);
+    });
+    return result;
+  }
+
   async fetchAllVisibleCharacters(): Promise<CharacterModel[]> {
     const { data } = await this.supabase
       .from('characters')
       .select('*')
       .order('name', { ascending: true });
-    return ((data as CharacterModel[]) ?? []).map((c) => ({
-      ...c,
-      unlocked_perk_ids: c.unlocked_perk_ids ?? [],
-      active_cooldowns: c.active_cooldowns ?? {},
-    }));
+    return ((data as CharacterModel[]) ?? []).map(normalizeCharacterRecord);
   }
 
   async fetchCampaignFolders(campaignId: string): Promise<VttFolderModel[]> {
@@ -775,10 +864,18 @@ export class VttService {
       input.darkvision_feet,
       input.npc_stats
     );
-    const enrichedNpcStats: VttNpcStats = {
-      ...(input.npc_stats ?? {}),
-      __darkvision_feet: resolvedDarkvision,
-    };
+    const portraitUrl = resolveEntityPortraitUrl(input);
+    const tokenImageUrl = resolveEntityTokenImageUrl(input);
+    const tokenAppearance = resolveEntityTokenAppearance(input);
+    const enrichedNpcStats = enrichNpcStatsWithVisuals(
+      {
+        ...(input.npc_stats ?? {}),
+        __darkvision_feet: resolvedDarkvision,
+      },
+      portraitUrl,
+      tokenImageUrl,
+      tokenAppearance
+    );
 
     const insertPayload: Record<string, unknown> = {
       campaign_id: input.campaign_id,
@@ -805,6 +902,9 @@ export class VttService {
       light_dim_feet: input.light_dim_feet,
       light_color: input.light_color,
       npc_stats: enrichedNpcStats,
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
       notes: input.notes,
       sort_order: input.sort_order,
     };
@@ -818,6 +918,9 @@ export class VttService {
     if (error && isMissingColumnOrTableError(error.code, error.message)) {
       const legacyPayload: Record<string, unknown> = { ...insertPayload };
       delete legacyPayload['darkvision_feet'];
+      delete legacyPayload['portrait_url'];
+      delete legacyPayload['token_image_url'];
+      delete legacyPayload['token_appearance'];
       const retry = await this.supabase
         .from('vtt_roster_actors')
         .insert(legacyPayload)
@@ -833,6 +936,9 @@ export class VttService {
         const localActor: VttRosterActorModel = {
           ...input,
           darkvision_feet: resolvedDarkvision,
+          portrait_url: portraitUrl,
+          token_image_url: tokenImageUrl,
+          token_appearance: tokenAppearance,
           npc_stats: enrichedNpcStats,
           id: `local-roster-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           created_at: now,
@@ -877,11 +983,38 @@ export class VttService {
     ) {
       payload['folder_id'] = null;
     }
-    if (patch.darkvision_feet !== undefined && patch.npc_stats) {
-      payload['npc_stats'] = {
-        ...patch.npc_stats,
-        __darkvision_feet: patch.darkvision_feet,
-      };
+    if (patch.portrait_url !== undefined) {
+      payload['portrait_url'] = sanitizeOptionalImageUrl(patch.portrait_url);
+    }
+    if (patch.token_image_url !== undefined) {
+      payload['token_image_url'] = sanitizeOptionalImageUrl(
+        patch.token_image_url
+      );
+    }
+    if (patch.token_appearance !== undefined) {
+      payload['token_appearance'] = normalizeTokenAppearance(
+        patch.token_appearance
+      );
+    }
+    if (patch.npc_stats) {
+      const nextStats: VttNpcStats = { ...patch.npc_stats };
+      if (patch.darkvision_feet !== undefined) {
+        nextStats.__darkvision_feet = patch.darkvision_feet;
+      }
+      if (patch.portrait_url !== undefined) {
+        nextStats.__portrait_url = sanitizeOptionalImageUrl(patch.portrait_url);
+      }
+      if (patch.token_image_url !== undefined) {
+        nextStats.__token_image_url = sanitizeOptionalImageUrl(
+          patch.token_image_url
+        );
+      }
+      if (patch.token_appearance !== undefined) {
+        nextStats.__token_appearance = normalizeTokenAppearance(
+          patch.token_appearance
+        );
+      }
+      payload['npc_stats'] = nextStats;
     }
 
     let { error } = await this.supabase
@@ -891,11 +1024,17 @@ export class VttService {
 
     if (
       error &&
-      payload['darkvision_feet'] !== undefined &&
+      (payload['darkvision_feet'] !== undefined ||
+        payload['portrait_url'] !== undefined ||
+        payload['token_image_url'] !== undefined ||
+        payload['token_appearance'] !== undefined) &&
       isMissingColumnOrTableError(error.code, error.message)
     ) {
       const retryPayload: Record<string, unknown> = { ...payload };
       delete retryPayload['darkvision_feet'];
+      delete retryPayload['portrait_url'];
+      delete retryPayload['token_image_url'];
+      delete retryPayload['token_appearance'];
       const retry = await this.supabase
         .from('vtt_roster_actors')
         .update(retryPayload)
@@ -1391,16 +1530,27 @@ export class VttService {
       input.darkvision_feet,
       input.npc_stats
     );
-    const npcStatsWithWorld: VttNpcStats = {
-      ...(input.npc_stats ?? {}),
-      __world_x: input.world_x ?? null,
-      __world_y: input.world_y ?? null,
-      __darkvision_feet: resolvedDarkvision,
-    };
+    const portraitUrl = resolveEntityPortraitUrl(input);
+    const tokenImageUrl = resolveEntityTokenImageUrl(input);
+    const tokenAppearance = resolveEntityTokenAppearance(input);
+    const npcStatsWithWorld = enrichNpcStatsWithVisuals(
+      {
+        ...(input.npc_stats ?? {}),
+        __world_x: input.world_x ?? null,
+        __world_y: input.world_y ?? null,
+        __darkvision_feet: resolvedDarkvision,
+      },
+      portraitUrl,
+      tokenImageUrl,
+      tokenAppearance
+    );
 
     const fullPayload: Record<string, unknown> = {
       ...input,
       darkvision_feet: resolvedDarkvision,
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
       npc_stats: npcStatsWithWorld,
     };
     if (!input.id) {
@@ -1425,6 +1575,9 @@ export class VttService {
       delete tier2Payload['world_x'];
       delete tier2Payload['world_y'];
       delete tier2Payload['darkvision_feet'];
+      delete tier2Payload['portrait_url'];
+      delete tier2Payload['token_image_url'];
+      delete tier2Payload['token_appearance'];
 
       const tier2 = await this.supabase
         .from('vtt_tokens')
@@ -1480,6 +1633,9 @@ export class VttService {
             move_feet: input.move_feet,
             vision_feet: input.vision_feet,
             darkvision_feet: resolvedDarkvision,
+            portrait_url: portraitUrl,
+            token_image_url: tokenImageUrl,
+            token_appearance: tokenAppearance,
             npc_stats: npcStatsWithWorld,
           },
           error: null,
@@ -1506,11 +1662,27 @@ export class VttService {
   ): Promise<string | null> {
     const payload: Record<string, unknown> = { ...patch };
     delete payload['id'];
+    if (patch.portrait_url !== undefined) {
+      payload['portrait_url'] = sanitizeOptionalImageUrl(patch.portrait_url);
+    }
+    if (patch.token_image_url !== undefined) {
+      payload['token_image_url'] = sanitizeOptionalImageUrl(
+        patch.token_image_url
+      );
+    }
+    if (patch.token_appearance !== undefined) {
+      payload['token_appearance'] = normalizeTokenAppearance(
+        patch.token_appearance
+      );
+    }
 
     if (
       (patch.world_x !== undefined ||
         patch.world_y !== undefined ||
-        patch.darkvision_feet !== undefined) &&
+        patch.darkvision_feet !== undefined ||
+        patch.portrait_url !== undefined ||
+        patch.token_image_url !== undefined ||
+        patch.token_appearance !== undefined) &&
       existingToken
     ) {
       const baseStats = patch.npc_stats ?? existingToken.npc_stats ?? {};
@@ -1530,6 +1702,31 @@ export class VttService {
       } else if (existingToken.darkvision_feet !== undefined) {
         nextStats.__darkvision_feet = existingToken.darkvision_feet;
       }
+      if (patch.portrait_url !== undefined) {
+        nextStats.__portrait_url = sanitizeOptionalImageUrl(patch.portrait_url);
+      } else if (existingToken.portrait_url !== undefined) {
+        nextStats.__portrait_url = sanitizeOptionalImageUrl(
+          existingToken.portrait_url
+        );
+      }
+      if (patch.token_image_url !== undefined) {
+        nextStats.__token_image_url = sanitizeOptionalImageUrl(
+          patch.token_image_url
+        );
+      } else if (existingToken.token_image_url !== undefined) {
+        nextStats.__token_image_url = sanitizeOptionalImageUrl(
+          existingToken.token_image_url
+        );
+      }
+      if (patch.token_appearance !== undefined) {
+        nextStats.__token_appearance = normalizeTokenAppearance(
+          patch.token_appearance
+        );
+      } else if (existingToken.token_appearance !== undefined) {
+        nextStats.__token_appearance = normalizeTokenAppearance(
+          existingToken.token_appearance
+        );
+      }
       payload['npc_stats'] = nextStats;
     }
 
@@ -1547,6 +1744,9 @@ export class VttService {
       delete tier2Payload['world_x'];
       delete tier2Payload['world_y'];
       delete tier2Payload['darkvision_feet'];
+      delete tier2Payload['portrait_url'];
+      delete tier2Payload['token_image_url'];
+      delete tier2Payload['token_appearance'];
 
       if (Object.keys(tier2Payload).length > 0) {
         const tier2 = await this.supabase
@@ -1721,6 +1921,7 @@ export class VttService {
       onRosterActorDelete?: (actorId: string) => void;
       onTokenUpsert: (token: VttTokenModel) => void;
       onTokenDelete: (tokenId: string) => void;
+      onCharacterUpsert?: (character: CharacterModel) => void;
       onLogInsert: (entry: VttLogEntry) => void;
       onLogDelete?: (logId: string) => void;
       onPing: (ping: VttPingBroadcast) => void;
@@ -1803,6 +2004,20 @@ export class VttService {
             payload.new as Record<string, unknown>
           );
           handlers.onTokenUpsert(parsed);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'characters' },
+        (payload) => {
+          if (payload.eventType === 'DELETE') return;
+          if (!payload.new || typeof payload.new !== 'object') return;
+          const parsed = normalizeCharacterRecord(
+            payload.new as Record<string, unknown>
+          );
+          if (parsed.id) {
+            handlers.onCharacterUpsert?.(parsed);
+          }
         }
       )
       .on(

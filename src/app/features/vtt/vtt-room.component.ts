@@ -49,17 +49,17 @@ import { ThemeMode, ThemeStore } from '../../core/theme/theme.store';
 import { AssetBrowserModalComponent } from '../../shared/asset-browser/asset-browser-modal.component';
 import { ColorPickerComponent } from '../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
+import { TokenAvatarComponent } from '../../shared/token-avatar/token-avatar.component';
 import {
   CharacterModel,
   ResolvedCombatArt,
 } from '../characters/models/character.model';
 import { CharacterStore } from '../characters/store/character.store';
-import {
-  ActorTemplateDraft,
-  CollectionsStore,
-} from '../collections/collections.store';
+import { CollectionsStore } from '../collections/collections.store';
+import { VttActorSheetComponent } from './components/vtt-actor-sheet/vtt-actor-sheet.component';
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
 import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
+import { VttFloatingWindowComponent } from './components/vtt-floating-window/vtt-floating-window.component';
 import {
   VTT_CHAT_COMMANDS,
   VttChatCommandConfig,
@@ -103,6 +103,7 @@ import {
   DEFAULT_VTT_SCENE_PADDING,
   DEFAULT_VTT_SCENE_WIDTH_PX,
   CollectionActorModel,
+  TokenAppearanceConfig,
   VTT_ACTOR_COLOR_SWATCHES,
   VTT_NPC_PRESETS,
   VTT_SCENE_LIGHTING_PRESETS,
@@ -123,7 +124,13 @@ import {
   VttWallKind,
   computeEffectiveActorSightFeet,
   findMatchingSceneLightingPreset,
+  hasCustomTokenAppearance,
+  normalizeTokenAppearance,
+  normalizeTokenRotation,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
 } from './models/vtt.model';
 import {
   VttSpeakerMode,
@@ -148,37 +155,9 @@ export interface DirectoryContextMenuState {
 }
 
 export interface RosterActorModalState {
-  mode: 'create' | 'edit';
-  actorId: string | null;
   folder_id: string | null;
   actor_kind: VttActorKind;
-  is_unique: boolean;
   name: string;
-  faction: VttFaction;
-  size: number;
-  icon: string;
-  color: string;
-  max_hp: number;
-  max_sp: number;
-  max_ap: number;
-  armor_dr: number;
-  shield_block: number;
-  move_feet: number;
-  vision_feet: number;
-  darkvision_feet: number;
-  light_bright_feet: number;
-  light_dim_feet: number;
-  light_color: string;
-  weapon_name: string;
-  attack_ap: number;
-  attack_mod: number;
-  flat_damage: number;
-  reach_feet: number;
-  combat_tag: ActiveCombatTag | 'None';
-  parry_mod: number;
-  dodge_mod: number;
-  can_dodge: boolean;
-  notes: string;
   saveToCollections: boolean;
 }
 
@@ -231,8 +210,11 @@ export interface EditingMapDraft {
     AssetBrowserModalComponent,
     ColorPickerComponent,
     CompendiumIconComponent,
+    TokenAvatarComponent,
+    VttActorSheetComponent,
     VttCanvasComponent,
     VttDiceOverlayComponent,
+    VttFloatingWindowComponent,
   ],
   templateUrl: './vtt-room.component.html',
 })
@@ -881,6 +863,10 @@ export class VttRoomComponent {
       if (this.canvasComp()?.dismissTransientEscapeState()) {
         return;
       }
+      if (this.vttStore.openSheetTarget()) {
+        this.vttStore.closeActorSheet();
+        return;
+      }
       if (this.vttStore.pendingTargetAction()) {
         this.vttStore.cancelTargetSelection();
         return;
@@ -900,13 +886,8 @@ export class VttRoomComponent {
 
     if (
       this.inGameMenuOpen() ||
-      this.activeSettingsModal() ||
-      this.createMapModal() ||
-      this.folderModal() ||
-      this.editingMapDraft() ||
-      this.rosterActorModal() ||
-      this.rosterImportModalOpen() ||
-      this.canvasComp()?.editingLightDraft()
+      this.activeSettingsModal() === 'controls' ||
+      this.assetBrowserModal() !== null
     ) {
       return;
     }
@@ -926,6 +907,28 @@ export class VttRoomComponent {
     }
 
     if (event.repeat) return;
+
+    if (matchesHotkey(event, bindings.delete_tokens)) {
+      const insideFloatingWindow =
+        typeof Element !== 'undefined' &&
+        event.target instanceof Element &&
+        Boolean(event.target.closest('[data-vtt-floating-window="true"]'));
+      if (
+        insideFloatingWindow ||
+        this.canvasComp()?.hasActiveChainedOrDragMove() ||
+        (this.vttStore.activeTool() === 'light' &&
+          this.vttStore.selectedLightId() !== null)
+      ) {
+        return;
+      }
+      const controllable = this.vttStore.controllableSelectedTokens();
+      if (controllable.length > 0) {
+        event.preventDefault();
+        this.canvasComp()?.tokenContextMenu.set(null);
+        void this.vttStore.removeTokensBatch(controllable.map((t) => t.id));
+      }
+      return;
+    }
 
     if (matchesHotkey(event, bindings.tool_select)) {
       event.preventDefault();
@@ -1057,6 +1060,7 @@ export class VttRoomComponent {
     this.draggingMapId.set(null);
     this.draggingFolderId.set(null);
 
+    const visuals = this.vttStore.resolveRosterActorVisuals(actor);
     const payload: VttRosterDragPayload = {
       kind: 'roster-actor',
       actorId: actor.id,
@@ -1066,6 +1070,9 @@ export class VttRoomComponent {
       color: actor.color,
       faction: actor.faction,
       isUnique: actor.is_unique || Boolean(actor.character_id),
+      portraitUrl: visuals.portraitUrl,
+      tokenImageUrl: visuals.tokenImageUrl,
+      tokenAppearance: visuals.tokenAppearance,
     };
     this.vttStore.draggingRosterPayload.set(payload);
 
@@ -1091,6 +1098,9 @@ export class VttRoomComponent {
       color: '#38B29A',
       faction: 'ally',
       isUnique: true,
+      portraitUrl: resolveEntityPortraitUrl(character),
+      tokenImageUrl: resolveEntityTokenImageUrl(character),
+      tokenAppearance: resolveEntityTokenAppearance(character),
     };
     this.vttStore.draggingRosterPayload.set(payload);
 
@@ -1309,8 +1319,8 @@ export class VttRoomComponent {
     }
     event.preventDefault();
     event.stopPropagation();
-    const screenX = Math.max(8, Math.min(window.innerWidth - 230, event.clientX));
-    const screenY = Math.max(8, Math.min(window.innerHeight - 280, event.clientY));
+    const screenX = Math.max(8, Math.min(window.innerWidth - 236, event.clientX));
+    const screenY = Math.max(8, Math.min(window.innerHeight - 380, event.clientY));
     this.directoryContextMenu.set({
       kind: 'roster-actor',
       targetId: actorId,
@@ -1395,14 +1405,14 @@ export class VttRoomComponent {
     void this.vttStore.deleteDirectoryFolder(folderId);
   }
 
-  deployRosterActorFromMenu(actorId: string): void {
-    this.closeDirectoryContextMenu();
-    void this.vttStore.deployRosterActor(actorId);
-  }
-
   editRosterActorFromMenu(actorId: string): void {
     this.closeDirectoryContextMenu();
-    this.openEditRosterActorModal(actorId);
+    this.vttStore.openActorSheet(actorId);
+  }
+
+  assignRosterActorFromMenu(actorId: string, userId: string | null): void {
+    this.closeDirectoryContextMenu();
+    void this.vttStore.assignRosterActorToPlayer(actorId, userId);
   }
 
   duplicateRosterActorFromMenu(actorId: string): void {
@@ -1437,110 +1447,28 @@ export class VttRoomComponent {
     folderId: string | null = null,
     defaultKind?: VttActorKind
   ): void {
+    if (!this.vttStore.isGm()) return;
     this.closeDirectoryContextMenu();
-    const isGm = this.vttStore.isGm();
-    const kind: VttActorKind = isGm ? defaultKind ?? 'character' : 'character';
-    const isNpc = kind === 'npc';
+    const kind: VttActorKind = defaultKind ?? 'character';
     this.rosterActorModal.set({
-      mode: 'create',
-      actorId: null,
-      folder_id: isGm ? folderId : null,
+      folder_id: folderId,
       actor_kind: kind,
-      is_unique: !isNpc,
       name: '',
-      faction: isNpc ? 'enemy' : 'ally',
-      size: 1,
-      icon: isNpc ? 'battleaxe' : 'greatsword',
-      color: isNpc ? '#EF4444' : '#38B29A',
-      max_hp: isNpc ? 8 : 12,
-      max_sp: isNpc ? 4 : 8,
-      max_ap: 4,
-      armor_dr: 1,
-      shield_block: 0,
-      move_feet: 20,
-      vision_feet: DEFAULT_VTT_DIM_VISION_FEET,
-      darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
-      light_bright_feet: 0,
-      light_dim_feet: 0,
-      light_color: '#FF9B42',
-      weapon_name: isNpc ? 'Signature Strike' : 'Longsword',
-      attack_ap: 1,
-      attack_mod: 3,
-      flat_damage: 4,
-      reach_feet: 5,
-      combat_tag: 'None',
-      parry_mod: 2,
-      dodge_mod: 2,
-      can_dodge: true,
-      notes: '',
       saveToCollections: false,
     });
   }
 
   openEditRosterActorModal(actorId: string): void {
-    const actor = this.vttStore.rosterActors().find((a) => a.id === actorId);
-    if (!actor || !this.vttStore.canManageRosterActor(actor)) return;
     this.closeDirectoryContextMenu();
-
-    this.rosterActorModal.set({
-      mode: 'edit',
-      actorId: actor.id,
-      folder_id: actor.folder_id ?? null,
-      actor_kind: actor.actor_kind,
-      is_unique: actor.is_unique,
-      name: actor.name,
-      faction: actor.faction,
-      size: actor.size || 1,
-      icon: actor.icon || 'greatsword',
-      color: actor.color || '#38B29A',
-      max_hp: actor.max_hp,
-      max_sp: actor.max_sp,
-      max_ap: actor.max_ap,
-      armor_dr: actor.armor_dr,
-      shield_block: actor.shield_block,
-      move_feet: actor.move_feet,
-      vision_feet: actor.vision_feet,
-      darkvision_feet: resolveActorDarkvisionFeet(
-        actor.darkvision_feet,
-        actor.npc_stats
-      ),
-      light_bright_feet: actor.light_bright_feet,
-      light_dim_feet: actor.light_dim_feet,
-      light_color: actor.light_color || '#FF9B42',
-      weapon_name: actor.npc_stats?.weapon_name || 'Signature Strike',
-      attack_ap: actor.npc_stats?.attack_ap ?? 1,
-      attack_mod: actor.npc_stats?.attack_mod ?? 3,
-      flat_damage: actor.npc_stats?.flat_damage ?? 4,
-      reach_feet: actor.npc_stats?.reach_feet ?? 5,
-      combat_tag: actor.npc_stats?.combat_tag ?? 'None',
-      parry_mod: actor.npc_stats?.parry_mod ?? 2,
-      dodge_mod: actor.npc_stats?.dodge_mod ?? 2,
-      can_dodge: actor.npc_stats?.can_dodge ?? true,
-      notes: actor.notes ?? '',
-      saveToCollections: false,
-    });
+    this.vttStore.openActorSheet(actorId);
   }
 
   setRosterActorModalKind(kind: VttActorKind): void {
     const cur = this.rosterActorModal();
     if (!cur || !this.vttStore.isGm()) return;
-    const isNpc = kind === 'npc';
     this.rosterActorModal.set({
       ...cur,
       actor_kind: kind,
-      is_unique: !isNpc,
-      faction:
-        cur.mode === 'create'
-          ? isNpc
-            ? 'enemy'
-            : 'ally'
-          : cur.faction,
-      color:
-        cur.mode === 'create'
-          ? isNpc
-            ? '#EF4444'
-            : '#38B29A'
-          : cur.color,
     });
   }
 
@@ -1555,116 +1483,28 @@ export class VttRoomComponent {
 
   async submitRosterActorModal(): Promise<void> {
     const modal = this.rosterActorModal();
-    if (!modal) return;
+    if (!modal || !this.vttStore.isGm()) return;
     this.rosterActorModal.set(null);
 
     if (modal.folder_id) {
       this.expandFolder(modal.folder_id);
     }
 
-    const hasVisionInput =
-      modal.vision_feet !== null &&
-      modal.vision_feet !== undefined &&
-      String(modal.vision_feet).trim() !== '' &&
-      Number.isFinite(Number(modal.vision_feet));
-    const hasDarkvisionInput =
-      modal.darkvision_feet !== null &&
-      modal.darkvision_feet !== undefined &&
-      String(modal.darkvision_feet).trim() !== '' &&
-      Number.isFinite(Number(modal.darkvision_feet));
-
-    const draft: ActorTemplateDraft = {
-      folder_id: this.vttStore.isGm() ? modal.folder_id || null : null,
-      source_character_id: null,
-      actor_kind: this.vttStore.isGm() ? modal.actor_kind : 'character',
-      is_unique: this.vttStore.isGm() ? modal.is_unique : true,
-      name: modal.name.trim() || 'Unnamed Actor',
-      faction: this.vttStore.isGm() ? modal.faction : 'ally',
-      size: Math.max(1, Math.min(4, Math.round(Number(modal.size) || 1))),
-      icon: modal.icon || 'greatsword',
-      color: modal.color || '#38B29A',
-      max_hp: Math.max(1, Math.round(Number(modal.max_hp) || 10)),
-      max_sp: Math.max(0, Math.round(Number(modal.max_sp) ?? 6)),
-      max_ap: Math.max(1, Math.round(Number(modal.max_ap) || 4)),
-      armor_dr: Math.max(0, Math.round(Number(modal.armor_dr) ?? 0)),
-      shield_block: Math.max(0, Math.round(Number(modal.shield_block) ?? 0)),
-      move_feet: Math.max(0, Math.round(Number(modal.move_feet) ?? 20)),
-      vision_feet: hasVisionInput
-        ? Math.max(0, Math.round(Number(modal.vision_feet)))
-        : DEFAULT_VTT_DIM_VISION_FEET,
-      darkvision_feet: hasDarkvisionInput
-        ? Math.max(0, Math.round(Number(modal.darkvision_feet)))
-        : DEFAULT_VTT_DARKVISION_FEET,
-      light_bright_feet: Math.max(
-        0,
-        Math.round(Number(modal.light_bright_feet) ?? 0)
-      ),
-      light_dim_feet: Math.max(
-        0,
-        Math.round(Number(modal.light_dim_feet) ?? 0)
-      ),
-      light_color: modal.light_color || '#FF9B42',
-      npc_stats: {
-        weapon_name: modal.weapon_name.trim() || 'Signature Strike',
-        attack_ap: Math.max(1, Math.round(Number(modal.attack_ap) || 1)),
-        attack_mod: Math.round(Number(modal.attack_mod) || 0),
-        flat_damage: Math.max(0, Math.round(Number(modal.flat_damage) ?? 3)),
-        reach_feet: Math.max(5, Math.round(Number(modal.reach_feet) || 5)),
-        combat_tag: modal.combat_tag,
-        parry_mod: Math.round(Number(modal.parry_mod) || 0),
-        dodge_mod: Math.round(Number(modal.dodge_mod) || 0),
-        can_dodge: Boolean(modal.can_dodge),
-      },
-      notes: modal.notes ?? '',
-    };
-
-    if (modal.mode === 'create') {
-      await this.vttStore.createRosterActorFromScratch(draft, {
-        saveToCollections: Boolean(modal.saveToCollections),
-      });
-    } else if (modal.actorId) {
-      const existing = this.vttStore
-        .rosterActors()
-        .find((a) => a.id === modal.actorId);
-      await this.vttStore.updateRosterActor(modal.actorId, {
-        folder_id: draft.folder_id,
-        actor_kind: draft.actor_kind,
-        is_unique: draft.is_unique,
-        name: draft.name,
-        faction: draft.faction,
-        size: draft.size,
-        icon: draft.icon,
-        color: draft.color,
-        max_hp: draft.max_hp,
-        max_sp: draft.max_sp,
-        max_ap: draft.max_ap,
-        armor_dr: draft.armor_dr,
-        shield_block: draft.shield_block,
-        move_feet: draft.move_feet,
-        vision_feet: draft.vision_feet,
-        darkvision_feet: draft.darkvision_feet,
-        light_bright_feet: draft.light_bright_feet,
-        light_dim_feet: draft.light_dim_feet,
-        light_color: draft.light_color,
-        npc_stats: {
-          ...(existing?.npc_stats ?? {}),
-          ...draft.npc_stats,
-          __darkvision_feet: draft.darkvision_feet,
-        },
-        notes: draft.notes,
-      });
-      if (modal.saveToCollections) {
-        await this.vttStore.saveRosterActorToCollections(modal.actorId);
-      }
-    }
+    await this.vttStore.createVttActorQuick({
+      name: modal.name,
+      actor_kind: modal.actor_kind,
+      folder_id: modal.folder_id || null,
+      saveToCollections: Boolean(modal.saveToCollections),
+    });
   }
 
   openRosterImportModal(folderId: string | null = null): void {
+    if (!this.vttStore.isGm()) return;
     this.closeDirectoryContextMenu();
-    this.rosterImportFolderId.set(this.vttStore.isGm() ? folderId : null);
+    this.rosterImportFolderId.set(folderId);
     this.rosterImportSearch.set('');
     this.rosterImportTab.set(
-      this.vttStore.isGm() && this.collectionsStore.actors().length > 0
+      this.collectionsStore.actors().length > 0
         ? 'collections'
         : 'my-characters'
     );
@@ -1689,21 +1529,12 @@ export class VttRoomComponent {
       .some((a) => a.collection_actor_id === collectionActorId);
   }
 
-  async importCharacterIntoRoster(
-    character: CharacterModel,
-    deployImmediately = false
-  ): Promise<void> {
+  async importCharacterIntoRoster(character: CharacterModel): Promise<void> {
     const folderId = this.vttStore.isGm() ? this.rosterImportFolderId() : null;
     if (folderId) {
       this.expandFolder(folderId);
     }
-    const created = await this.vttStore.importCharacterToRoster(
-      character,
-      folderId
-    );
-    if (deployImmediately && created) {
-      await this.vttStore.deployRosterActor(created.id);
-    }
+    await this.vttStore.importCharacterToRoster(character, folderId);
   }
 
   async importCollectionActorIntoRoster(
@@ -2344,40 +2175,6 @@ export class VttRoomComponent {
     );
   }
 
-  setTokenTorchPreset(tok: VttTokenModel, mode: 'off' | 'lantern' | 'torch'): void {
-    if (!this.vttStore.canControlToken(tok)) return;
-    if (mode === 'off') {
-      void this.vttStore.recordablePatchToken(
-        tok.id,
-        {
-          light_bright_feet: 0,
-          light_dim_feet: 0,
-        },
-        `Douse Light (${tok.name})`
-      );
-    } else if (mode === 'lantern') {
-      void this.vttStore.recordablePatchToken(
-        tok.id,
-        {
-          light_bright_feet: 15,
-          light_dim_feet: 30,
-          light_color: '#FBBF24',
-        },
-        `Light Lantern (${tok.name})`
-      );
-    } else {
-      void this.vttStore.recordablePatchToken(
-        tok.id,
-        {
-          light_bright_feet: 20,
-          light_dim_feet: 40,
-          light_color: '#FF9B42',
-        },
-        `Light Torch (${tok.name})`
-      );
-    }
-  }
-
   onManualAttackInputChange(val: string | number | null): void {
     if (val === '' || val === null || val === undefined) {
       this.manualAttackTotalInput = null;
@@ -2759,6 +2556,210 @@ export class VttRoomComponent {
 
   cancelClearAllLogs(): void {
     this.confirmClearLogs.set(false);
+  }
+
+  getCreateMapModalSubtitle(): string {
+    return `Creates a blank ${this.defaultSceneWidthPx}\u00D7${this.defaultSceneHeightPx} px scene with a ${this.defaultGridSizePx} px Square Grid (5 ft per tile) and ${this.defaultScenePadding} off-scene padding.`;
+  }
+
+  getSettingsModalTitle(mode: VttSettingsModalKind): string {
+    if (mode === 'general') return 'General Settings';
+    if (mode === 'dice') return '3D Dice & Appearance';
+    if (mode === 'controls') return 'Controls & Hotkeys';
+    return 'Invitation Links';
+  }
+
+  getSettingsModalSubtitle(mode: VttSettingsModalKind): string {
+    if (mode === 'general') {
+      return 'Configure interface theme, token travel speed, audio volume, and table rules.';
+    }
+    if (mode === 'dice') {
+      return 'Customize 3D physics throws, surface textures, body colors, and number ink.';
+    }
+    if (mode === 'controls') {
+      return 'Click any shortcut badge to press a new key or key combination.';
+    }
+    return 'Share this link or invite code so players can join the campaign.';
+  }
+
+  getSettingsModalWidthClass(mode: VttSettingsModalKind): string {
+    if (mode === 'dice') return 'w-[min(94vw,576px)]';
+    if (mode === 'invites') return 'w-[min(94vw,448px)]';
+    return 'w-[min(94vw,512px)]';
+  }
+
+  getSettingsModalEstimatedWidth(mode: VttSettingsModalKind): number {
+    if (mode === 'dice') return 576;
+    if (mode === 'invites') return 448;
+    return 512;
+  }
+
+  readonly multiSelectedTokens = computed<VttTokenModel[]>(() => {
+    const list = this.vttStore.controllableSelectedTokens();
+    return list.length > 1 ? list : [];
+  });
+
+  readonly multiSelectedAllHidden = computed<boolean>(() => {
+    const list = this.multiSelectedTokens();
+    return list.length > 0 && list.every((t) => t.is_hidden);
+  });
+
+  readonly multiSelectedAnyRotated = computed<boolean>(() =>
+    this.multiSelectedTokens().some(
+      (t) => normalizeTokenRotation(t.npc_stats?.__rotation) !== 0
+    )
+  );
+
+  onSceneTokenRowClick(event: MouseEvent, tok: VttTokenModel): void {
+    if (
+      event.shiftKey &&
+      (this.vttStore.isGm() || this.vttStore.canControlToken(tok))
+    ) {
+      if (this.vttStore.isTokenSelected(tok.id)) {
+        this.vttStore.toggleTokenInSelection(tok.id);
+      } else {
+        const priorIds = this.vttStore
+          .controllableSelectedTokens()
+          .map((t) => t.id);
+        this.vttStore.setSelectedTokens([...priorIds, tok.id]);
+      }
+      return;
+    }
+    this.vttStore.selectSingleToken(tok.id);
+  }
+
+  toggleMultiSelectedHidden(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.toggleTokensHiddenBatch(ids);
+    }
+  }
+
+  flipMultiSelectedHorizontal(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.flipTokensHorizontal(ids);
+    }
+  }
+
+  flipMultiSelectedVertical(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.flipTokensVertical(ids);
+    }
+  }
+
+  rotateMultiSelectedBy(deltaDeg: number): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.rotateTokensByDelta(ids, deltaDeg);
+    }
+  }
+
+  resetMultiSelectedRotation(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.setTokensRotation(ids, 0);
+    }
+  }
+
+  bringMultiSelectedToFront(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.bringTokensToFront(ids);
+    }
+  }
+
+  sendMultiSelectedToBack(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      void this.vttStore.sendTokensToBack(ids);
+    }
+  }
+
+  removeMultiSelectedTokens(): void {
+    const ids = this.multiSelectedTokens().map((t) => t.id);
+    if (ids.length > 0) {
+      this.canvasComp()?.tokenContextMenu.set(null);
+      void this.vttStore.removeTokensBatch(ids);
+    }
+  }
+
+  readonly brokenPortraitUrls = signal<Record<string, boolean>>({});
+
+  markPortraitBroken(url: string | null | undefined): void {
+    if (!url) return;
+    this.brokenPortraitUrls.update((curr) =>
+      curr[url] ? curr : { ...curr, [url]: true }
+    );
+  }
+
+  isPortraitBroken(url: string | null | undefined): boolean {
+    if (!url) return true;
+    return Boolean(this.brokenPortraitUrls()[url]);
+  }
+
+  hasCustomTokenArt(
+    tokenImageUrl: string | null | undefined,
+    appearance: TokenAppearanceConfig | null | undefined
+  ): boolean {
+    return Boolean(tokenImageUrl) || hasCustomTokenAppearance(appearance);
+  }
+
+  getCharacterVisuals(ch: CharacterModel): {
+    portraitUrl: string | null;
+    tokenImageUrl: string | null;
+    tokenAppearance: TokenAppearanceConfig;
+  } {
+    return {
+      portraitUrl: resolveEntityPortraitUrl(ch),
+      tokenImageUrl: resolveEntityTokenImageUrl(ch),
+      tokenAppearance: resolveEntityTokenAppearance(ch),
+    };
+  }
+
+  getCollectionActorVisuals(colActor: CollectionActorModel): {
+    portraitUrl: string | null;
+    tokenImageUrl: string | null;
+    tokenAppearance: TokenAppearanceConfig;
+  } {
+    return {
+      portraitUrl: resolveEntityPortraitUrl(colActor),
+      tokenImageUrl: resolveEntityTokenImageUrl(colActor),
+      tokenAppearance: resolveEntityTokenAppearance(colActor),
+    };
+  }
+
+  getSpeakerComposerAppearance(speaker: {
+    portraitUrl?: string | null;
+    tokenImageUrl?: string | null;
+    tokenAppearance?: TokenAppearanceConfig | null;
+  }): {
+    displayImageUrl: string | null;
+    appearance: TokenAppearanceConfig;
+  } {
+    const appearance = normalizeTokenAppearance(speaker.tokenAppearance);
+    if (speaker.tokenImageUrl) {
+      return {
+        displayImageUrl: speaker.tokenImageUrl,
+        appearance,
+      };
+    }
+    if (speaker.portraitUrl) {
+      return {
+        displayImageUrl: speaker.portraitUrl,
+        appearance: {
+          ...appearance,
+          scale: 1,
+          offset_x: 0,
+          offset_y: 0,
+        },
+      };
+    }
+    return {
+      displayImageUrl: null,
+      appearance,
+    };
   }
 
   async executeClearAllLogs(): Promise<void> {

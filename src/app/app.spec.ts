@@ -68,6 +68,7 @@ import {
   getUpgradeSlotKey,
 } from './features/characters/models/character.model';
 import { CharacterService } from './features/characters/services/character.service';
+import { CharacterStore } from './features/characters/store/character.store';
 import { CollectionsService } from './features/collections/collections.service';
 import {
   CollectionsStore,
@@ -164,10 +165,31 @@ import {
   findMatchingSceneLightingPreset,
   resolveActorDarkvisionFeet,
 } from './features/vtt/models/vtt.model';
+import { VttActorSheetComponent } from './features/vtt/components/vtt-actor-sheet/vtt-actor-sheet.component';
 import { VttCanvasComponent } from './features/vtt/components/vtt-canvas/vtt-canvas.component';
+import { VttFloatingWindowComponent } from './features/vtt/components/vtt-floating-window/vtt-floating-window.component';
 import { VttService } from './features/vtt/services/vtt.service';
 import { VttStore } from './features/vtt/store/vtt.store';
 import { VttRoomComponent } from './features/vtt/vtt-room.component';
+import { normalizeCharacterRecord } from './features/characters/services/character.service';
+import { AssetBrowserModalComponent } from './shared/asset-browser/asset-browser-modal.component';
+import {
+  DEFAULT_TOKEN_APPEARANCE,
+  buildTokenImagePanZoomTransform,
+  clampTokenOffset,
+  clampTokenScale,
+  hasCustomTokenAppearance,
+  normalizeTokenAppearance,
+  resolveTokenRingColor,
+} from './shared/token-avatar/token-appearance.model';
+import { TokenAvatarComponent } from './shared/token-avatar/token-avatar.component';
+import { TokenizerEditorComponent } from './shared/token-avatar/tokenizer-editor.component';
+import {
+  enrichNpcStatsWithVisuals,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
+} from './features/vtt/models/vtt.model';
 import {
   KeywordTooltipService,
   computeKeywordTooltipPosition,
@@ -1989,9 +2011,18 @@ describe('App', () => {
     expect(DEFAULT_VTT_HOTKEYS.tool_select).toBe('v');
     expect(DEFAULT_VTT_HOTKEYS.tool_ruler).toBe('r');
     expect(DEFAULT_VTT_HOTKEYS.undo).toBe('ctrl+z');
+    expect(DEFAULT_VTT_HOTKEYS.delete_tokens).toBe('delete');
     expect(settings.badges().tool_select).toBe('V');
     expect(settings.badges().tool_ruler).toBe('R');
     expect(settings.badges().undo).toBe('Ctrl+Z');
+    expect(settings.badges().delete_tokens).toBe('Del');
+
+    const delEvent = new KeyboardEvent('keydown', {
+      key: 'Delete',
+      code: 'Delete',
+    });
+    expect(normalizeKeyComboFromEvent(delEvent)).toBe('delete');
+    expect(matchesHotkey(delEvent, settings.hotkeys().delete_tokens)).toBe(true);
 
     const ctrlZEvent = new KeyboardEvent('keydown', {
       key: 'z',
@@ -5505,12 +5536,19 @@ describe('App', () => {
     );
 
     comp.openEditRosterActorModal('actor-scout-1');
-    expect(comp.rosterActorModal()?.vision_feet).toBe(60);
-    expect(comp.rosterActorModal()?.darkvision_feet).toBe(10);
+    expect(vttStore.openSheetRosterActor()?.id).toBe('actor-scout-1');
+    expect(vttStore.openSheetRosterActor()?.vision_feet).toBe(60);
+    expect(
+      resolveActorDarkvisionFeet(
+        vttStore.openSheetRosterActor()?.darkvision_feet,
+        vttStore.openSheetRosterActor()?.npc_stats
+      )
+    ).toBe(10);
 
-    comp.updateRosterActorModalField('vision_feet', 90);
-    comp.updateRosterActorModalField('darkvision_feet', 25);
-    await comp.submitRosterActorModal();
+    await vttStore.updateNpcFromVttSheet('actor-scout-1', null, {
+      vision_feet: 90,
+      darkvision_feet: 25,
+    });
 
     expect(updatedActors[0].vision_feet).toBe(90);
     expect(updatedActors[0].darkvision_feet).toBe(25);
@@ -5529,5 +5567,2399 @@ describe('App', () => {
     expect(comp.getTokenEffectiveSightLabel(vttStore.tokens()[0])).toBe(
       '45ft (Dim 90ft · Dark 25ft)'
     );
+  });
+
+  it('creates Player Characters and NPCs instantly in VTT without upfront weapon prompts and opens their floating sheet', async () => {
+    let charCounter = 0;
+    let actorCounter = 0;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({ id: 'gm-quick-1', email: 'gm@example.com' }),
+            displayName: () => 'Warden',
+            handle: () => 'warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            loadCompendium: async () => undefined,
+            weapons: () => [],
+            perkNodes: () => [],
+            standaloneNodes: () => [],
+            allWeapons: () => [],
+            allPerkNodes: () => [],
+            skillTrees: () => [],
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({ data: [], error: null }),
+            insertCharacter: async (payload: Partial<CharacterModel>) => ({
+              data: {
+                ...(payload as CharacterModel),
+                id: `quick-char-${++charCounter}`,
+                created_at: new Date().toISOString(),
+              },
+              error: null,
+            }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            createRosterActor: async (input: Partial<VttRosterActorModel>) => ({
+              actor: {
+                ...(input as VttRosterActorModel),
+                id: `quick-actor-${++actorCounter}`,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              error: null,
+            }),
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-quick-1',
+      name: 'Frontier Watch',
+      cover_image_url: null,
+      gm_id: 'gm-quick-1',
+      invite_code: 'FRNT01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+
+    comp.openCreateRosterActorModal(null);
+    expect(comp.rosterActorModal()?.actor_kind).toBe('character');
+    comp.updateRosterActorModalField('name', 'Kaelen Thorne');
+    await comp.submitRosterActorModal();
+
+    expect(vttStore.rosterActors().length).toBe(1);
+    const createdPcActor = vttStore.rosterActors()[0];
+    expect(createdPcActor.actor_kind).toBe('character');
+    expect(createdPcActor.name).toBe('Kaelen Thorne');
+    expect(createdPcActor.character_id).toBe('quick-char-1');
+    expect(createdPcActor.npc_stats.weapon_name).toBe('Unarmed');
+
+    expect(vttStore.openSheetRosterActor()?.id).toBe(createdPcActor.id);
+    expect(vttStore.openSheetCharacter()?.id).toBe('quick-char-1');
+    expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('None');
+    expect(vttStore.openSheetCharacter()?.inventory).toEqual([]);
+
+    vttStore.closeActorSheet();
+    expect(vttStore.openSheetTarget()).toBeNull();
+
+    comp.openCreateRosterActorModal(null);
+    comp.setRosterActorModalKind('npc');
+    comp.updateRosterActorModalField('name', 'Tavern Keeper');
+    await comp.submitRosterActorModal();
+
+    expect(vttStore.rosterActors().length).toBe(2);
+    const createdNpcActor = vttStore.rosterActors().find(
+      (a) => a.name === 'Tavern Keeper'
+    )!;
+    expect(createdNpcActor.actor_kind).toBe('npc');
+    expect(createdNpcActor.character_id).toBeNull();
+    expect(vttStore.openSheetRosterActor()?.id).toBe(createdNpcActor.id);
+    expect(vttStore.openSheetCharacter()).toBeNull();
+  });
+
+  it('allows Campaign GM to open a Player Character sheet in VTT, equip weapons/armor, gift inventory items, sync tokens, and roll checks', async () => {
+    const updatedCharacterPayloads: Partial<CharacterModel>[] = [];
+    const updatedRosterActors: {
+      id: string;
+      patch: Partial<VttRosterActorModel>;
+    }[] = [];
+    const updatedTokens: { id: string; patch: Partial<VttTokenModel> }[] = [];
+    const postedLogs: Record<string, unknown>[] = [];
+
+    const mockLongsword: WeaponModel = {
+      id: 'wep-longsword-1',
+      slug: 'iron-longsword',
+      name: 'Iron Longsword',
+      category: 'Martial',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Brawn',
+      gov_skill: 'Strike',
+      base_damage: 5,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      trait_name: 'Balanced',
+      trait_description: 'Reliable martial blade.',
+      rule_hooks: {},
+    };
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({ id: 'gm-sheet-1', email: 'gm@example.com' }),
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            loadCompendium: async () => undefined,
+            weapons: () => [mockLongsword],
+            perkNodes: () => [],
+            standaloneNodes: () => [],
+            allWeapons: () => [mockLongsword],
+            allPerkNodes: () => [],
+            skillTrees: () => [],
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({ data: [], error: null }),
+            updateCharacterRecord: async (
+              _id: string,
+              payload: Partial<CharacterModel>
+            ) => {
+              updatedCharacterPayloads.push(payload);
+              return null;
+            },
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            updateRosterActor: async (
+              _cid: string,
+              aid: string,
+              patch: Partial<VttRosterActorModel>
+            ) => {
+              updatedRosterActors.push({ id: aid, patch });
+              return null;
+            },
+            updateToken: async (
+              tid: string,
+              patch: Partial<VttTokenModel>
+            ) => {
+              updatedTokens.push({ id: tid, patch });
+              return null;
+            },
+            insertLog: async (entry: Record<string, unknown>) => {
+              postedLogs.push(entry);
+              return {
+                id: `log-sheet-${postedLogs.length}`,
+                campaign_id: 'camp-sheet-1',
+                encounter_id: 'scene-sheet-1',
+                sender_id: 'gm-sheet-1',
+                sender_name: String(entry['sender_name'] ?? 'Grand Warden'),
+                kind: String(entry['kind'] ?? 'roll') as 'roll',
+                title: String(entry['title'] ?? ''),
+                detail: (entry['detail'] as string | null) ?? null,
+                payload: (entry['payload'] as Record<string, unknown>) ?? {},
+                created_at: new Date().toISOString(),
+              };
+            },
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    const charStore = TestBed.inject(CharacterStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-sheet-1',
+      name: 'Ashen Vale',
+      cover_image_url: null,
+      gm_id: 'gm-sheet-1',
+      invite_code: 'ASHV01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const scene: VttSceneModel = {
+      id: 'scene-sheet-1',
+      campaign_id: 'camp-sheet-1',
+      gm_id: 'gm-sheet-1',
+      folder_id: null,
+      sort_order: 0,
+      name: 'Campfire Clearing',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: DEFAULT_VTT_GRID_WIDTH,
+      grid_height: DEFAULT_VTT_GRID_HEIGHT,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: true,
+      fog_enabled: false,
+      global_illumination: true,
+      darkness_level: 0,
+      walls: [],
+      lights: [],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+      created_at: new Date().toISOString(),
+    };
+    vttStore.scenes.set([scene]);
+    vttStore.activeSceneId.set('scene-sheet-1');
+
+    const playerChar: CharacterModel = {
+      id: 'char-player-1',
+      owner_id: 'player-user-99',
+      name: 'Lyra Vance',
+      level: 1,
+      attributes: {
+        Brawn: 2,
+        Agility: 1,
+        Technique: 1,
+        Iron: 1,
+        Cunning: 0,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 0,
+        Perception: 2,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'None',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 12,
+      current_sp: 7,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+    vttStore.allCharacters.set([playerChar]);
+    charStore.upsertRealtimeCharacter(playerChar);
+
+    const playerActor: VttRosterActorModel = {
+      id: 'actor-player-1',
+      campaign_id: 'camp-sheet-1',
+      folder_id: null,
+      character_id: 'char-player-1',
+      collection_actor_id: null,
+      owner_id: 'player-user-99',
+      actor_kind: 'character',
+      is_unique: true,
+      name: 'Lyra Vance',
+      faction: 'ally',
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      max_hp: 12,
+      max_sp: 7,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: { weapon_name: 'Unarmed' },
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vttStore.rosterActors.set([playerActor]);
+
+    const playerToken: VttTokenModel = {
+      id: 'tok-player-1',
+      encounter_id: 'scene-sheet-1',
+      character_id: 'char-player-1',
+      owner_id: 'player-user-99',
+      name: 'Lyra Vance',
+      faction: 'ally',
+      x: 2,
+      y: 2,
+      q: 0,
+      r: 0,
+      world_x: null,
+      world_y: null,
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      current_hp: 12,
+      max_hp: 12,
+      current_sp: 7,
+      max_sp: 7,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      shield_raised: false,
+      is_hidden: false,
+      statuses: [],
+      npc_stats: { __roster_actor_id: 'actor-player-1' },
+    };
+    vttStore.tokens.set([playerToken]);
+
+    vttStore.openActorSheet('actor-player-1');
+    expect(vttStore.canEditOpenSheet()).toBe(true);
+    expect(vttStore.openSheetCharacter()?.name).toBe('Lyra Vance');
+
+    await vttStore.updateCharacterFromVttSheet('char-player-1', (curr) => ({
+      ...curr,
+      equipped_armor: 'Medium',
+      weapon_slot_1_id: 'wep-longsword-1',
+      inventory: [
+        {
+          id: 'item-salve-1',
+          name: 'Sunleaf Salve',
+          quantity: 2,
+          description: 'Restores 4 HP out of combat.',
+        },
+      ],
+      notes: 'Carries the watchtower cipher.',
+    }));
+
+    expect(updatedCharacterPayloads.length).toBe(1);
+    expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('Medium');
+    expect(vttStore.openSheetCharacter()?.inventory?.[0]?.name).toBe(
+      'Sunleaf Salve'
+    );
+    expect(vttStore.openSheetCharacter()?.inventory?.[0]?.quantity).toBe(2);
+    expect(vttStore.openSheetDerived()?.activeWeapon?.name).toBe(
+      'Iron Longsword'
+    );
+    expect(vttStore.openSheetDerived()?.armorDr).toBe(2);
+
+    const syncedActor = vttStore.rosterActors()[0];
+    expect(syncedActor.armor_dr).toBe(2);
+    expect(syncedActor.npc_stats.weapon_name).toBe('Iron Longsword');
+    expect(syncedActor.npc_stats.__inventory?.[0]?.name).toBe('Sunleaf Salve');
+    expect(syncedActor.notes).toBe('Carries the watchtower cipher.');
+
+    const syncedToken = vttStore.tokens()[0];
+    expect(syncedToken.armor_dr).toBe(2);
+    expect(updatedTokens.length).toBeGreaterThan(0);
+
+    await vttStore.rollActorSheetCheck({
+      speakerName: 'Lyra Vance',
+      speakerColor: '#38B29A',
+      label: 'Perception Check',
+      modifier: 2,
+      detail: 'Cunning 0 + Perception 2',
+    });
+
+    expect(postedLogs.length).toBe(1);
+    expect(vttStore.logs().length).toBe(1);
+    expect(vttStore.logs()[0].title).toContain('Lyra Vance · Perception Check');
+  });
+
+  it('enforces explicit GM actor assignment, allows multiple tokens for Player Characters, gates HUD to owner/GM without Carried Light, keeps VTT sheet level read-only, and supports canvas token flip/stacking/visibility', async () => {
+    const activeUserSig = signal<{
+      id: string;
+      email: string;
+      name: string;
+      handle: string;
+    }>({
+      id: 'gm-assign-1',
+      email: 'gm@example.com',
+      name: 'Grand Warden',
+      handle: 'warden',
+    });
+
+    let actorSeq = 0;
+    let tokenSeq = 0;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({
+              id: activeUserSig().id,
+              email: activeUserSig().email,
+            }),
+            displayName: () => activeUserSig().name,
+            handle: () => activeUserSig().handle,
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            loadCompendium: async () => undefined,
+            weapons: () => [],
+            perkNodes: () => [],
+            standaloneNodes: () => [],
+            allWeapons: () => [],
+            allPerkNodes: () => [],
+            skillTrees: () => [],
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({ data: [], error: null }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            createRosterActor: async (input: Partial<VttRosterActorModel>) => ({
+              actor: {
+                ...(input as VttRosterActorModel),
+                id: `assign-actor-${++actorSeq}`,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              error: null,
+            }),
+            updateRosterActor: async () => null,
+            insertToken: async (payload: Partial<VttTokenModel>) => ({
+              token: {
+                ...(payload as VttTokenModel),
+                id: `assign-tok-${++tokenSeq}`,
+              },
+              error: null,
+            }),
+            updateToken: async () => null,
+            deleteToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    const charStore = TestBed.inject(CharacterStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-assign-1',
+      name: 'Irongate Keep',
+      cover_image_url: null,
+      gm_id: 'gm-assign-1',
+      invite_code: 'IRON01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.participants.set([
+      {
+        user_id: 'gm-assign-1',
+        handle: 'warden',
+        display_name: 'Grand Warden',
+        role: 'gm',
+      },
+      {
+        user_id: 'player-1',
+        handle: 'sera',
+        display_name: 'Sera',
+        role: 'player',
+      },
+      {
+        user_id: 'player-2',
+        handle: 'bren',
+        display_name: 'Bren',
+        role: 'player',
+      },
+    ]);
+
+    const scene: VttSceneModel = {
+      id: 'scene-assign-1',
+      campaign_id: 'camp-assign-1',
+      gm_id: 'gm-assign-1',
+      folder_id: null,
+      sort_order: 0,
+      name: 'Courtyard',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: DEFAULT_VTT_GRID_WIDTH,
+      grid_height: DEFAULT_VTT_GRID_HEIGHT,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: true,
+      fog_enabled: false,
+      global_illumination: true,
+      darkness_level: 0,
+      walls: [],
+      lights: [],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+      created_at: new Date().toISOString(),
+    };
+    vttStore.scenes.set([scene]);
+    vttStore.activeSceneId.set('scene-assign-1');
+
+    const seraCharacter: CharacterModel = {
+      id: 'char-sera-1',
+      owner_id: 'player-1',
+      name: 'Sera Vane',
+      level: 3,
+      attributes: {
+        Brawn: 2,
+        Agility: 2,
+        Technique: 1,
+        Iron: 1,
+        Cunning: 0,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 0,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 14,
+      current_sp: 8,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+    vttStore.allCharacters.set([seraCharacter]);
+    charStore.upsertRealtimeCharacter(seraCharacter);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+
+    expect(vttStore.assignablePlayers().map((p) => p.user_id)).toEqual([
+      'player-1',
+      'player-2',
+    ]);
+
+    const importedActor = await vttStore.importCharacterToRoster(
+      seraCharacter,
+      null
+    );
+    expect(importedActor).not.toBeNull();
+    expect(importedActor!.owner_id).toBeNull();
+    expect(vttStore.getActorAssignedUserId(importedActor!)).toBeNull();
+
+    await vttStore.deployRosterActor(importedActor!.id, {
+      worldPt: { x: 400, y: 400 },
+      unsnapped: false,
+    });
+    await vttStore.deployRosterActor(importedActor!.id, {
+      worldPt: { x: 500, y: 400 },
+      unsnapped: false,
+    });
+    expect(vttStore.tokens().length).toBe(2);
+    expect(
+      comp.getDeployedTokensForRosterActor(vttStore.rosterActors()[0]).length
+    ).toBe(2);
+
+    const firstTokenId = vttStore.tokens()[0].id;
+    const secondTokenId = vttStore.tokens()[1].id;
+    expect(firstTokenId).not.toBe(secondTokenId);
+    expect(vttStore.tokens()[0].owner_id).toBeNull();
+
+    vttStore.openActorSheet(importedActor!.id);
+    fixture.detectChanges();
+    const sheetEl = (fixture.nativeElement as HTMLElement).querySelector(
+      'section[aria-label="Actor Sheet"]'
+    );
+    expect(sheetEl).not.toBeNull();
+    expect(sheetEl!.textContent).toContain('Lv');
+    expect(sheetEl!.textContent).toContain('3');
+    expect(sheetEl!.textContent).toContain('Full Page');
+    const levelBadge = sheetEl!.querySelector(
+      '[title="Level up in the Character Sheet (Full Page)"]'
+    );
+    expect(levelBadge).not.toBeNull();
+    expect(levelBadge!.querySelectorAll('button').length).toBe(0);
+    vttStore.closeActorSheet();
+
+    activeUserSig.set({
+      id: 'player-1',
+      email: 'sera@example.com',
+      name: 'Sera',
+      handle: 'sera',
+    });
+    vttStore.selectedTokenId.set(firstTokenId);
+    fixture.detectChanges();
+
+    expect(comp.visibleCampaignRosterActors().length).toBe(0);
+    expect(vttStore.canControlToken(vttStore.tokens()[0])).toBe(false);
+    vttStore.openActorSheet(importedActor!.id);
+    expect(vttStore.openSheetTarget()).toBeNull();
+    vttStore.openTokenSheet(firstTokenId);
+    expect(vttStore.openSheetTarget()).toBeNull();
+
+    const unassignedHudText =
+      (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(unassignedHudText).not.toContain('1 AP: Stance Recovery');
+
+    activeUserSig.set({
+      id: 'gm-assign-1',
+      email: 'gm@example.com',
+      name: 'Grand Warden',
+      handle: 'warden',
+    });
+    await vttStore.assignRosterActorToPlayer(importedActor!.id, 'player-1');
+
+    expect(
+      vttStore.getActorAssignedUserId(vttStore.rosterActors()[0])
+    ).toBe('player-1');
+    expect(vttStore.tokens()[0].owner_id).toBe('player-1');
+    expect(vttStore.tokens()[1].owner_id).toBe('player-1');
+
+    activeUserSig.set({
+      id: 'player-1',
+      email: 'sera@example.com',
+      name: 'Sera',
+      handle: 'sera',
+    });
+    vttStore.selectedTokenId.set(firstTokenId);
+    fixture.detectChanges();
+
+    expect(comp.visibleCampaignRosterActors().length).toBe(1);
+    expect(vttStore.canControlToken(vttStore.tokens()[0])).toBe(true);
+    const assignedHudText =
+      (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(assignedHudText).toContain('1 AP: Stance Recovery');
+    expect(assignedHudText).not.toContain('Carried Light');
+    expect(assignedHudText).not.toContain('Lantern 30ft');
+    expect(assignedHudText).not.toContain('Torch 40ft');
+
+    vttStore.openTokenSheet(firstTokenId);
+    expect(vttStore.openSheetCharacter()?.id).toBe('char-sera-1');
+    expect(vttStore.canEditOpenSheet()).toBe(true);
+    vttStore.closeActorSheet();
+
+    activeUserSig.set({
+      id: 'player-2',
+      email: 'bren@example.com',
+      name: 'Bren',
+      handle: 'bren',
+    });
+    vttStore.selectedTokenId.set(firstTokenId);
+    fixture.detectChanges();
+
+    expect(vttStore.selectedTokenId()).toBe(firstTokenId);
+    expect(vttStore.canControlToken(vttStore.tokens()[0])).toBe(false);
+    expect((fixture.nativeElement as HTMLElement).textContent ?? '').not.toContain(
+      '1 AP: Stance Recovery'
+    );
+
+    activeUserSig.set({
+      id: 'gm-assign-1',
+      email: 'gm@example.com',
+      name: 'Grand Warden',
+      handle: 'warden',
+    });
+    fixture.detectChanges();
+
+    const canvasComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find((inst): inst is VttCanvasComponent => inst instanceof VttCanvasComponent)!;
+    expect(canvasComp).toBeTruthy();
+
+    await vttStore.toggleTokenFlipX(firstTokenId);
+    fixture.detectChanges();
+    const renderedFirstAfterFlipX = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === firstTokenId)!;
+    expect(renderedFirstAfterFlipX.flipX).toBe(true);
+    expect(renderedFirstAfterFlipX.artTransform).toBe('scaleX(-1)');
+
+    await vttStore.toggleTokenFlipY(firstTokenId);
+    fixture.detectChanges();
+    const renderedFirstAfterBoth = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === firstTokenId)!;
+    expect(renderedFirstAfterBoth.flipY).toBe(true);
+    expect(renderedFirstAfterBoth.artTransform).toBe('scale(-1, -1)');
+
+    await vttStore.bringTokenToFront(firstTokenId);
+    fixture.detectChanges();
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      secondTokenId,
+      firstTokenId,
+    ]);
+
+    await vttStore.sendTokenToBack(firstTokenId);
+    fixture.detectChanges();
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      firstTokenId,
+      secondTokenId,
+    ]);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(canvasComp.renderableTokens().map((r) => r.token.id)).toEqual([
+      secondTokenId,
+      firstTokenId,
+    ]);
+
+    await vttStore.toggleTokenHidden(firstTokenId);
+    expect(
+      vttStore.tokens().find((t) => t.id === firstTokenId)?.is_hidden
+    ).toBe(true);
+  });
+
+  it('should render VTT modals as draggable floating windows, prevent input drag-highlight dismissal, and stack focused windows to the front', async () => {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent, AssetBrowserModalComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => ({
+              id: 'gm-win-1',
+              email: 'gm@example.com',
+            }),
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            loadCompendium: async () => undefined,
+            weapons: () => [],
+            perkNodes: () => [],
+            standaloneNodes: () => [],
+            allWeapons: () => [],
+            allPerkNodes: () => [],
+            skillTrees: () => [],
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({ data: [], error: null }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: UserAssetsService,
+          useValue: {
+            hasBootstrappedStarterFolders: () => true,
+            markStarterFoldersBootstrapped: () => undefined,
+            fetchAssetsBundle: async () => ({
+              folders: [],
+              assets: [],
+              preferences: {
+                owner_id: 'gm-win-1',
+                maps_folder_id: null,
+                characters_folder_id: null,
+              },
+              fallback: false,
+              error: null,
+              usedRpc: true,
+            }),
+            fetchFolders: async () => ({ folders: [], error: null }),
+            fetchAssets: async () => ({ assets: [], error: null }),
+            fetchPreferences: async () => ({
+              owner_id: 'gm-win-1',
+              maps_folder_id: null,
+              characters_folder_id: null,
+            }),
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-win-1',
+      name: 'Emberwatch',
+      cover_image_url: null,
+      gm_id: 'gm-win-1',
+      invite_code: 'EMBR01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const scene: VttSceneModel = {
+      id: 'scene-win-1',
+      campaign_id: 'camp-win-1',
+      gm_id: 'gm-win-1',
+      folder_id: null,
+      sort_order: 0,
+      name: 'Sunlit Citadel',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+      scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+      padding: DEFAULT_VTT_SCENE_PADDING,
+      grid_width: DEFAULT_VTT_GRID_WIDTH,
+      grid_height: DEFAULT_VTT_GRID_HEIGHT,
+      grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: true,
+      fog_enabled: false,
+      global_illumination: true,
+      darkness_level: 0,
+      walls: [],
+      lights: [
+        {
+          id: 'light-win-1',
+          x: 280,
+          y: 280,
+          bright_feet: 20,
+          dim_feet: 40,
+          color: '#FF9B42',
+          enabled: true,
+        },
+      ],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+      created_at: new Date().toISOString(),
+    };
+    vttStore.scenes.set([scene]);
+    vttStore.activeSceneId.set('scene-win-1');
+
+    const npcActor: VttRosterActorModel = {
+      id: 'actor-win-1',
+      campaign_id: 'camp-win-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: false,
+      name: 'Citadel Sentry',
+      faction: 'neutral',
+      size: 1,
+      icon: 'battleaxe',
+      color: '#F59E0B',
+      max_hp: 16,
+      max_sp: 6,
+      max_ap: 3,
+      armor_dr: 2,
+      shield_block: 1,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: { weapon_name: 'Halberd', reach_feet: 10 },
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vttStore.rosterActors.set([npcActor]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    const rootEl = fixture.nativeElement as HTMLElement;
+    fixture.detectChanges();
+
+    vttStore.openActorSheet('actor-win-1');
+    comp.openEditMapModal('scene-win-1', 'general');
+    fixture.detectChanges();
+
+    const actorSheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent
+      )!;
+    const sceneWindowComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttFloatingWindowComponent =>
+          inst instanceof VttFloatingWindowComponent &&
+          inst.windowTitle() === 'Scene Configuration'
+      )!;
+    expect(actorSheetComp).toBeTruthy();
+    expect(sceneWindowComp).toBeTruthy();
+
+    expect(sceneWindowComp.zIndex()).toBeGreaterThan(actorSheetComp.zIndex());
+
+    const actorSheetEl = rootEl.querySelector(
+      'section[aria-label="Actor Sheet"]'
+    ) as HTMLElement;
+    actorSheetEl.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0 })
+    );
+    fixture.detectChanges();
+    expect(actorSheetComp.zIndex()).toBeGreaterThan(sceneWindowComp.zIndex());
+
+    const sceneWindowEl = rootEl.querySelector(
+      'section[aria-label="Scene Configuration"]'
+    ) as HTMLElement;
+    const sceneHeaderEl = sceneWindowEl.firstElementChild as HTMLElement;
+    const startX = sceneWindowComp.windowX();
+    const startY = sceneWindowComp.windowY();
+
+    sceneHeaderEl.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        clientX: startX + 40,
+        clientY: startY + 18,
+      })
+    );
+    expect(sceneWindowComp.zIndex()).toBeGreaterThan(actorSheetComp.zIndex());
+
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        clientX: startX + 160,
+        clientY: startY + 98,
+      })
+    );
+    window.dispatchEvent(new PointerEvent('pointerup'));
+    fixture.detectChanges();
+
+    expect(sceneWindowComp.windowX()).toBe(startX + 120);
+    expect(sceneWindowComp.windowY()).toBe(startY + 80);
+
+    const movedX = sceneWindowComp.windowX();
+    const movedY = sceneWindowComp.windowY();
+    const sceneNameInput = sceneWindowEl.querySelector(
+      'input[name="editMapName"]'
+    ) as HTMLInputElement;
+    expect(sceneNameInput).toBeTruthy();
+
+    sceneNameInput.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        clientX: movedX + 50,
+        clientY: movedY + 120,
+      })
+    );
+    sceneNameInput.dispatchEvent(
+      new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: movedX + 50,
+        clientY: movedY + 120,
+      })
+    );
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        clientX: 12,
+        clientY: 12,
+      })
+    );
+    rootEl.dispatchEvent(
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        button: 0,
+        clientX: 12,
+        clientY: 12,
+      })
+    );
+    rootEl.dispatchEvent(
+      new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 12,
+        clientY: 12,
+      })
+    );
+    rootEl.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        button: 0,
+        clientX: 12,
+        clientY: 12,
+      })
+    );
+    fixture.detectChanges();
+
+    expect(comp.editingMapDraft()).not.toBeNull();
+    expect(sceneWindowComp.windowX()).toBe(movedX);
+    expect(sceneWindowComp.windowY()).toBe(movedY);
+
+    sceneWindowComp.toggleMinimize();
+    fixture.detectChanges();
+    expect(sceneWindowComp.minimized()).toBe(true);
+    expect(sceneWindowEl.querySelector('input[name="editMapName"]')).toBeNull();
+
+    sceneWindowComp.toggleMinimize();
+    fixture.detectChanges();
+    expect(sceneWindowComp.minimized()).toBe(false);
+    expect(sceneWindowEl.querySelector('input[name="editMapName"]')).toBeTruthy();
+
+    comp.openSceneAssetPicker();
+    fixture.detectChanges();
+
+    const assetBrowserComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is AssetBrowserModalComponent =>
+          inst instanceof AssetBrowserModalComponent
+      )!;
+    expect(assetBrowserComp.floating()).toBe(true);
+    expect(assetBrowserComp.zIndex()).toBeGreaterThan(sceneWindowComp.zIndex());
+
+    const canvasComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttCanvasComponent => inst instanceof VttCanvasComponent
+      )!;
+    canvasComp.openEditLightModal('light-win-1');
+    comp.openCreateMapModal(null);
+    comp.openCreateFolderModal('maps', null);
+    comp.openCreateRosterActorModal(null);
+    comp.openRosterImportModal(null);
+    comp.openSettingsModal('general');
+    fixture.detectChanges();
+
+    expect(
+      rootEl.querySelector(
+        'section[data-vtt-floating-window="true"][aria-label="General Settings"]'
+      )
+    ).toBeTruthy();
+
+    comp.openInGameMenu();
+    fixture.detectChanges();
+
+    expect(
+      rootEl.querySelector(
+        'section[data-vtt-floating-window="true"][aria-label="In-Game Menu"]'
+      )
+    ).toBeTruthy();
+
+    const floatingSections = rootEl.querySelectorAll(
+      'section[data-vtt-floating-window="true"]'
+    );
+    expect(floatingSections.length).toBe(9);
+
+    const backdropModals = Array.from(
+      rootEl.querySelectorAll('div.fixed.inset-0')
+    ).filter((el) => !el.classList.contains('pointer-events-none'));
+    expect(backdropModals.length).toBe(0);
+
+    const standaloneAssetFixture = TestBed.createComponent(
+      AssetBrowserModalComponent
+    );
+    standaloneAssetFixture.componentRef.setInput('open', true);
+    standaloneAssetFixture.componentRef.setInput('floating', false);
+    standaloneAssetFixture.detectChanges();
+
+    let standaloneClosedCount = 0;
+    standaloneAssetFixture.componentInstance.closed.subscribe(() => {
+      standaloneClosedCount++;
+    });
+
+    const standaloneRoot = standaloneAssetFixture.nativeElement as HTMLElement;
+    const standaloneBackdrop = standaloneRoot.querySelector(
+      'div.fixed.inset-0'
+    ) as HTMLElement;
+    expect(standaloneBackdrop).toBeTruthy();
+
+    standaloneBackdrop.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, button: 0 })
+    );
+    expect(standaloneClosedCount).toBe(0);
+
+    standaloneBackdrop.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 0 })
+    );
+    expect(standaloneClosedCount).toBe(1);
+  });
+
+  it('should support marquee drag-select, shift+click multi-selection, group drag & batch actions, and shift+wheel rotation with coalesced undo', async () => {
+    const activeUserSig = signal<{
+      id: string;
+      email: string;
+    }>({
+      id: 'gm-multi-1',
+      email: 'gm@example.com',
+    });
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            waitForInit: async () => undefined,
+            user: () => activeUserSig(),
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            ensureLoaded: async () => undefined,
+            loadCompendium: async () => undefined,
+            weapons: () => [],
+            perkNodes: () => [],
+            standaloneNodes: () => [],
+            allWeapons: () => [],
+            allPerkNodes: () => [],
+            skillTrees: () => [],
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({ data: [], error: null }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: UserAssetsService,
+          useValue: {
+            hasBootstrappedStarterFolders: () => true,
+            markStarterFoldersBootstrapped: () => undefined,
+            fetchAssetsBundle: async () => ({
+              folders: [],
+              assets: [],
+              preferences: {
+                owner_id: 'gm-multi-1',
+                maps_folder_id: null,
+                characters_folder_id: null,
+              },
+              fallback: false,
+              error: null,
+              usedRpc: true,
+            }),
+            fetchFolders: async () => ({ folders: [], error: null }),
+            fetchAssets: async () => ({ assets: [], error: null }),
+            fetchPreferences: async () => ({
+              owner_id: 'gm-multi-1',
+              maps_folder_id: null,
+              characters_folder_id: null,
+            }),
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            subscribeToCampaignRoom: () => () => undefined,
+            unsubscribeChannel: () => undefined,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            updateToken: async () => null,
+            deleteToken: async () => null,
+            insertToken: async (
+              payload: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...payload,
+                id: payload.id ?? `restored-${payload.name}`,
+              } as VttTokenModel,
+              error: null,
+            }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-multi-1',
+      name: 'Shattered Reach',
+      cover_image_url: null,
+      gm_id: 'gm-multi-1',
+      invite_code: 'MLTI01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+
+    const scene: VttSceneModel = {
+      id: 'scene-multi-1',
+      campaign_id: 'camp-multi-1',
+      gm_id: 'gm-multi-1',
+      folder_id: null,
+      sort_order: 0,
+      name: 'Courtyard',
+      is_active_scene: true,
+      map_image_url: null,
+      background_color: DEFAULT_VTT_BG_COLOR,
+      grid_mode: 'square',
+      scene_width: 1400,
+      scene_height: 980,
+      padding: 0,
+      grid_width: 20,
+      grid_height: 14,
+      grid_size_px: 70,
+      grid_offset_x: 0,
+      grid_offset_y: 0,
+      grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+      round_number: 1,
+      combat_active: false,
+      active_turn_token_id: null,
+      initiative_order: [],
+      token_vision: false,
+      fog_enabled: false,
+      global_illumination: true,
+      darkness_level: 0,
+      walls: [],
+      lights: [],
+      explored_fog: { cells: [], revealed_all: false },
+      pending_clash: null,
+      created_at: new Date().toISOString(),
+    };
+    vttStore.scenes.set([scene]);
+    vttStore.activeSceneId.set('scene-multi-1');
+
+    const makeTok = (
+      id: string,
+      name: string,
+      col: number,
+      row: number,
+      ownerId: string | null,
+      faction: 'ally' | 'enemy'
+    ): VttTokenModel => ({
+      id,
+      encounter_id: 'scene-multi-1',
+      character_id: null,
+      owner_id: ownerId,
+      name,
+      faction,
+      size: 1,
+      icon: 'greatsword',
+      color: faction === 'ally' ? '#38B29A' : '#F43F5E',
+      x: col,
+      y: row,
+      q: col,
+      r: row,
+      world_x: null,
+      world_y: null,
+      current_hp: 20,
+      max_hp: 20,
+      current_sp: 10,
+      max_sp: 10,
+      current_ap: 4,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 0,
+      shield_raised: false,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      is_hidden: false,
+      statuses: [],
+      npc_stats: {},
+    });
+
+    vttStore.tokens.set([
+      makeTok('tok-m1', 'Vanguard A', 2, 2, 'player-m1', 'ally'),
+      makeTok('tok-m2', 'Vanguard B', 4, 2, 'player-m1', 'ally'),
+      makeTok('tok-m3', 'Raider Captain', 12, 9, null, 'enemy'),
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    const rootEl = fixture.nativeElement as HTMLElement;
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    const canvasComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find((inst): inst is VttCanvasComponent => inst instanceof VttCanvasComponent)!;
+    expect(canvasComp).toBeTruthy();
+
+    canvasComp.zoom.set(1);
+    canvasComp.panX.set(0);
+    canvasComp.panY.set(0);
+    fixture.detectChanges();
+
+    const vpEl = canvasComp.viewportRef().nativeElement;
+    vi.spyOn(vpEl, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1400,
+      bottom: 980,
+      width: 1400,
+      height: 980,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    canvasComp.onViewportPointerDown(
+      new PointerEvent('pointerdown', { button: 0, clientX: 80, clientY: 80 })
+    );
+    canvasComp.onWindowPointerMove(
+      new PointerEvent('pointermove', {
+        buttons: 1,
+        clientX: 400,
+        clientY: 260,
+      })
+    );
+    fixture.detectChanges();
+
+    expect(rootEl.querySelector('[data-vtt-marquee="true"]')).toBeTruthy();
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2']);
+
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', { button: 0, clientX: 400, clientY: 260 })
+    );
+    fixture.detectChanges();
+
+    expect(rootEl.querySelector('[data-vtt-marquee="true"]')).toBeNull();
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2']);
+    expect(rootEl.querySelector('[data-vtt-multi-hud="true"]')).toBeTruthy();
+    expect(rootEl.textContent ?? '').toContain('2 Tokens Selected');
+
+    canvasComp.onViewportPointerDown(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: 760,
+        clientY: 560,
+        shiftKey: true,
+      })
+    );
+    canvasComp.onWindowPointerMove(
+      new PointerEvent('pointermove', {
+        buttons: 1,
+        clientX: 960,
+        clientY: 740,
+        shiftKey: true,
+      })
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', {
+        button: 0,
+        clientX: 960,
+        clientY: 740,
+        shiftKey: true,
+      })
+    );
+    fixture.detectChanges();
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2', 'tok-m3']);
+
+    activeUserSig.set({ id: 'player-m1', email: 'player@example.com' });
+    vttStore.clearTokenSelection();
+    fixture.detectChanges();
+
+    canvasComp.onViewportPointerDown(
+      new PointerEvent('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+    );
+    canvasComp.onWindowPointerMove(
+      new PointerEvent('pointermove', {
+        buttons: 1,
+        clientX: 1100,
+        clientY: 850,
+      })
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', { button: 0, clientX: 1100, clientY: 850 })
+    );
+    fixture.detectChanges();
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2']);
+
+    activeUserSig.set({ id: 'gm-multi-1', email: 'gm@example.com' });
+    vttStore.clearTokenSelection();
+    fixture.detectChanges();
+
+    const r1 = canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m1')!;
+    const r2 = canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m2')!;
+
+    canvasComp.onTokenPointerDown(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: r1.center.x,
+        clientY: r1.center.y,
+      }),
+      r1
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', {
+        button: 0,
+        clientX: r1.center.x,
+        clientY: r1.center.y,
+      })
+    );
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1']);
+
+    canvasComp.onTokenPointerDown(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: r2.center.x,
+        clientY: r2.center.y,
+        shiftKey: true,
+      }),
+      r2
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', {
+        button: 0,
+        clientX: r2.center.x,
+        clientY: r2.center.y,
+        shiftKey: true,
+      })
+    );
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2']);
+
+    const r2Selected = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === 'tok-m2')!;
+    canvasComp.onTokenPointerDown(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: r2Selected.center.x,
+        clientY: r2Selected.center.y,
+        shiftKey: true,
+      }),
+      r2Selected
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', {
+        button: 0,
+        clientX: r2Selected.center.x,
+        clientY: r2Selected.center.y,
+        shiftKey: true,
+      })
+    );
+    expect(vttStore.selectedTokenIds()).toEqual(['tok-m1']);
+
+    vttStore.setSelectedTokens(['tok-m1', 'tok-m2']);
+    vttStore.undoStack.set([]);
+    fixture.detectChanges();
+
+    const zoomBeforeWheel = canvasComp.zoom();
+    canvasComp.onWheel(
+      new WheelEvent('wheel', {
+        deltaY: 120,
+        shiftKey: true,
+        clientX: 300,
+        clientY: 300,
+      })
+    );
+    canvasComp.onWheel(
+      new WheelEvent('wheel', {
+        deltaY: 0,
+        deltaX: 120,
+        shiftKey: true,
+        clientX: 300,
+        clientY: 300,
+      })
+    );
+    canvasComp.onWheel(
+      new WheelEvent('wheel', {
+        deltaY: -120,
+        shiftKey: true,
+        ctrlKey: true,
+        clientX: 300,
+        clientY: 300,
+      })
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(canvasComp.zoom()).toBe(zoomBeforeWheel);
+    const rotTok1 = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === 'tok-m1')!;
+    const rotTok2 = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === 'tok-m2')!;
+    expect(rotTok1.rotationDeg).toBe(25);
+    expect(rotTok2.rotationDeg).toBe(25);
+    expect(rotTok1.artTransform).toBe('rotate(25deg)');
+    expect(vttStore.undoStack().length).toBe(1);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(
+      canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m1')!
+        .rotationDeg
+    ).toBe(0);
+    expect(
+      canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m2')!
+        .artTransform
+    ).toBe('none');
+
+    vttStore.clearTokenSelection();
+    fixture.detectChanges();
+    canvasComp.onWheel(
+      new WheelEvent('wheel', {
+        deltaY: -120,
+        shiftKey: true,
+        clientX: r1.center.x,
+        clientY: r1.center.y,
+      })
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(
+      canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m1')!
+        .rotationDeg
+    ).toBe(345);
+    await vttStore.setTokensRotation(['tok-m1'], 0);
+    fixture.detectChanges();
+
+    vttStore.setSelectedTokens(['tok-m1', 'tok-m2']);
+    fixture.detectChanges();
+
+    comp.toggleMultiSelectedHidden();
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.is_hidden).toBe(
+      true
+    );
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.is_hidden).toBe(
+      true
+    );
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.is_hidden).toBe(
+      false
+    );
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.is_hidden).toBe(
+      false
+    );
+
+    await vttStore.flipTokensHorizontal(['tok-m1', 'tok-m2']);
+    await vttStore.rotateTokensByDelta(['tok-m1', 'tok-m2'], 90);
+    fixture.detectChanges();
+    expect(
+      canvasComp.renderableTokens().find((r) => r.token.id === 'tok-m1')!
+        .artTransform
+    ).toBe('rotate(90deg) scaleX(-1)');
+
+    await vttStore.sendTokensToBack(['tok-m3']);
+    fixture.detectChanges();
+    expect(canvasComp.renderableTokens()[0].token.id).toBe('tok-m3');
+    await vttStore.bringTokensToFront(['tok-m3']);
+    fixture.detectChanges();
+    expect(canvasComp.renderableTokens()[2].token.id).toBe('tok-m3');
+
+    vttStore.setSelectedTokens(['tok-m1', 'tok-m2']);
+    fixture.detectChanges();
+    const dragR1 = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.id === 'tok-m1')!;
+    canvasComp.onTokenPointerDown(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: dragR1.center.x,
+        clientY: dragR1.center.y,
+      }),
+      dragR1
+    );
+    canvasComp.onWindowPointerMove(
+      new PointerEvent('pointermove', {
+        buttons: 1,
+        clientX: dragR1.center.x + 140,
+        clientY: dragR1.center.y + 70,
+      })
+    );
+    canvasComp.onWindowPointerUp(
+      new PointerEvent('pointerup', {
+        button: 0,
+        clientX: dragR1.center.x + 140,
+        clientY: dragR1.center.y + 70,
+      })
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.x).toBe(4);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.y).toBe(3);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.x).toBe(6);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.y).toBe(3);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.x).toBe(2);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m1')?.y).toBe(2);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.x).toBe(4);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-m2')?.y).toBe(2);
+
+    await vttStore.removeTokensBatch(['tok-m1', 'tok-m2']);
+    fixture.detectChanges();
+    expect(vttStore.tokens().map((t) => t.id)).toEqual(['tok-m3']);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(vttStore.tokens().length).toBe(3);
+
+    const allyOne = vttStore.tokens().find((t) => t.name === 'Vanguard A')!;
+    expect(allyOne).toBeTruthy();
+    vttStore.selectSingleToken(allyOne.id);
+    fixture.detectChanges();
+
+    const inputTarget = document.createElement('input');
+    const delInInputEvent = new KeyboardEvent('keydown', {
+      key: 'Delete',
+      code: 'Delete',
+      cancelable: true,
+    });
+    Object.defineProperty(delInInputEvent, 'target', { value: inputTarget });
+    comp.onGlobalKeyDown(delInInputEvent);
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(vttStore.tokens().length).toBe(3);
+
+    const singleDelEvent = new KeyboardEvent('keydown', {
+      key: 'Delete',
+      code: 'Delete',
+      cancelable: true,
+    });
+    comp.onGlobalKeyDown(singleDelEvent);
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(singleDelEvent.defaultPrevented).toBe(true);
+    expect(vttStore.tokens().some((t) => t.name === 'Vanguard A')).toBe(false);
+    expect(vttStore.selectedTokenIds()).toEqual([]);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(vttStore.tokens().length).toBe(3);
+
+    const allyIds = vttStore
+      .tokens()
+      .filter((t) => t.faction === 'ally')
+      .map((t) => t.id);
+    expect(allyIds.length).toBe(2);
+    vttStore.setSelectedTokens(allyIds);
+    vttStore.undoStack.set([]);
+    fixture.detectChanges();
+
+    comp.onGlobalKeyDown(
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        code: 'Delete',
+        cancelable: true,
+      })
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(vttStore.tokens().map((t) => t.id)).toEqual(['tok-m3']);
+    expect(vttStore.undoStack().length).toBe(1);
+
+    await vttStore.undoLastAction();
+    fixture.detectChanges();
+    expect(vttStore.tokens().length).toBe(3);
+
+    activeUserSig.set({ id: 'player-m1', email: 'player@example.com' });
+    vttStore.selectSingleToken('tok-m3');
+    fixture.detectChanges();
+
+    comp.onGlobalKeyDown(
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        code: 'Delete',
+        cancelable: true,
+      })
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(vttStore.tokens().some((t) => t.id === 'tok-m3')).toBe(true);
+  });
+
+  it('should normalize token appearance, render vector and custom PNG frames in TokenAvatarComponent, and support interactive TokenizerEditorComponent pan, zoom, and Stamp from Portrait', async () => {
+    expect(clampTokenScale(0.1)).toBe(0.5);
+    expect(clampTokenScale(9.5)).toBe(3);
+    expect(clampTokenScale(1.456)).toBe(1.46);
+    expect(clampTokenOffset(-250)).toBe(-100);
+    expect(clampTokenOffset(250)).toBe(100);
+
+    const normalized = normalizeTokenAppearance({
+      shape: 'circle',
+      frame: 'ornate',
+      frame_color: 'f59e0b',
+      scale: 1.6,
+      offset_x: 18.4,
+      offset_y: -24.2,
+    });
+    expect(normalized).toEqual({
+      shape: 'circle',
+      frame: 'ornate',
+      frame_color: '#F59E0B',
+      custom_frame_url: null,
+      scale: 1.6,
+      offset_x: 18.4,
+      offset_y: -24.2,
+    });
+    expect(hasCustomTokenAppearance(DEFAULT_TOKEN_APPEARANCE)).toBe(false);
+    expect(hasCustomTokenAppearance(normalized)).toBe(true);
+    expect(buildTokenImagePanZoomTransform(DEFAULT_TOKEN_APPEARANCE)).toBe(
+      'none'
+    );
+    expect(buildTokenImagePanZoomTransform(normalized)).toBe(
+      'translate(18.4%, -24.2%) scale(1.6)'
+    );
+    expect(resolveTokenRingColor(normalized, '#38B29A', 'ally')).toBe(
+      '#F59E0B'
+    );
+    expect(
+      resolveTokenRingColor(DEFAULT_TOKEN_APPEARANCE, null, 'enemy')
+    ).toBe('#F43F5E');
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [TokenAvatarComponent, TokenizerEditorComponent],
+      providers: [
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+            uploadAssetFile: async () => null,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const avatarFixture = TestBed.createComponent(TokenAvatarComponent);
+    avatarFixture.componentRef.setInput(
+      'tokenImageUrl',
+      'https://cdn.example.com/tokens/knight-face.webp'
+    );
+    avatarFixture.componentRef.setInput('appearance', normalized);
+    avatarFixture.componentRef.setInput('artTransform', 'rotate(45deg) scaleX(-1)');
+    avatarFixture.detectChanges();
+
+    const avatarEl = avatarFixture.nativeElement as HTMLElement;
+    const tokenImg = avatarEl.querySelector('img') as HTMLImageElement | null;
+    expect(tokenImg).toBeTruthy();
+    expect(tokenImg?.getAttribute('src')).toBe(
+      'https://cdn.example.com/tokens/knight-face.webp'
+    );
+    expect(tokenImg?.style.transform).toContain('scale(1.6)');
+    expect(avatarEl.querySelector('svg')).toBeTruthy();
+
+    avatarFixture.componentRef.setInput('appearance', {
+      ...DEFAULT_TOKEN_APPEARANCE,
+      frame: 'none',
+    });
+    avatarFixture.detectChanges();
+    expect(avatarEl.querySelector('svg')).toBeNull();
+
+    avatarFixture.componentRef.setInput('appearance', {
+      ...DEFAULT_TOKEN_APPEARANCE,
+      frame: 'custom_png',
+      custom_frame_url: 'https://cdn.example.com/frames/gold-ring.png',
+    });
+    avatarFixture.detectChanges();
+    const allImgs = Array.from(avatarEl.querySelectorAll('img'));
+    expect(allImgs.length).toBe(2);
+    expect(allImgs[1].getAttribute('src')).toBe(
+      'https://cdn.example.com/frames/gold-ring.png'
+    );
+
+    const editorFixture = TestBed.createComponent(TokenizerEditorComponent);
+    const editorComp = editorFixture.componentInstance;
+    let latestPortrait: string | null =
+      'https://cdn.example.com/portraits/full-body.png';
+    let latestTokenUrl: string | null = null;
+    let latestAppearance = { ...DEFAULT_TOKEN_APPEARANCE };
+    const requestedSlots: string[] = [];
+    let applyCallback: ((url: string) => void) | null = null;
+
+    editorFixture.componentRef.setInput('portraitUrl', latestPortrait);
+    editorFixture.componentRef.setInput('tokenImageUrl', latestTokenUrl);
+    editorFixture.componentRef.setInput('tokenAppearance', latestAppearance);
+    editorFixture.componentRef.setInput('externalAssetPicker', true);
+
+    editorComp.visualsChange.subscribe((v) => {
+      latestPortrait = v.portrait_url;
+      latestTokenUrl = v.token_image_url;
+      latestAppearance = v.token_appearance;
+      editorFixture.componentRef.setInput('portraitUrl', v.portrait_url);
+      editorFixture.componentRef.setInput('tokenImageUrl', v.token_image_url);
+      editorFixture.componentRef.setInput('tokenAppearance', v.token_appearance);
+    });
+    editorComp.requestAssetPicker.subscribe((req) => {
+      requestedSlots.push(req.slot);
+      applyCallback = req.apply;
+    });
+    editorFixture.detectChanges();
+
+    editorComp.stampTokenFromPortrait();
+    editorFixture.detectChanges();
+    expect(latestPortrait).toBe(
+      'https://cdn.example.com/portraits/full-body.png'
+    );
+    expect(latestTokenUrl).toBe(
+      'https://cdn.example.com/portraits/full-body.png'
+    );
+
+    editorComp.onScaleSliderCommit('1.55');
+    expect(latestAppearance.scale).toBe(1.55);
+
+    editorComp.selectFramePreset('boss');
+    expect(latestAppearance.frame).toBe('boss');
+
+    editorComp.onFrameColorChange('#A855F7');
+    expect(latestAppearance.frame_color).toBe('#A855F7');
+
+    editorComp.clearCustomFrameColor();
+    expect(latestAppearance.frame_color).toBeNull();
+
+    editorComp.resetTokenCrop();
+    expect(latestAppearance.scale).toBe(1);
+    expect(latestAppearance.offset_x).toBe(0);
+    expect(latestAppearance.offset_y).toBe(0);
+
+    editorComp.openAssetPickerForSlot('portrait');
+    editorComp.openAssetPickerForSlot('frame');
+    editorComp.openAssetPickerForSlot('token');
+    expect(requestedSlots).toEqual(['portrait', 'frame', 'token']);
+
+    expect(applyCallback).toBeTruthy();
+    applyCallback!('https://cdn.example.com/tokens/custom-mini.png');
+    expect(latestTokenUrl).toBe(
+      'https://cdn.example.com/tokens/custom-mini.png'
+    );
+    expect(latestPortrait).toBe(
+      'https://cdn.example.com/portraits/full-body.png'
+    );
+  });
+
+  it('should keep portrait_url and token_image_url separate across pre-migration fallbacks, VTT sheets, battlemap tokens, Collections templates, and Chat speaker avatars', async () => {
+    const legacyCharRow = normalizeCharacterRecord({
+      id: 'char-legacy-vis',
+      owner_id: 'player-vis-1',
+      name: 'Kaelen Vance',
+      level: 2,
+      attributes: {
+        Brawn: 2,
+        Agility: 2,
+        Technique: 2,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 0,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Medium',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 15,
+      current_sp: 9,
+      current_ap: 4,
+      active_cooldowns: {
+        perk_lunge: 2,
+        __visuals_json: JSON.stringify({
+          portrait_url: 'https://cdn.example.com/kaelen-portrait.webp',
+          token_image_url: 'https://cdn.example.com/kaelen-token.webp',
+          token_appearance: {
+            shape: 'circle',
+            frame: 'iron',
+            frame_color: '#38BDF8',
+            scale: 1.35,
+            offset_x: 6,
+            offset_y: -12,
+          },
+        }),
+      } as unknown as Record<string, number>,
+    });
+
+    expect(legacyCharRow.active_cooldowns).toEqual({ perk_lunge: 2 });
+    expect(legacyCharRow.portrait_url).toBe(
+      'https://cdn.example.com/kaelen-portrait.webp'
+    );
+    expect(legacyCharRow.token_image_url).toBe(
+      'https://cdn.example.com/kaelen-token.webp'
+    );
+    expect(legacyCharRow.token_appearance?.frame).toBe('iron');
+    expect(legacyCharRow.token_appearance?.scale).toBe(1.35);
+
+    const colDraft = buildActorTemplateFromCharacter(legacyCharRow, [], []);
+    expect(colDraft.portrait_url).toBe(
+      'https://cdn.example.com/kaelen-portrait.webp'
+    );
+    expect(colDraft.token_image_url).toBe(
+      'https://cdn.example.com/kaelen-token.webp'
+    );
+    expect(colDraft.token_appearance?.frame).toBe('iron');
+
+    const enrichedStats = enrichNpcStatsWithVisuals(
+      { attack_mod: 4 },
+      'https://cdn.example.com/npc-sheet.png',
+      null,
+      {
+        ...DEFAULT_TOKEN_APPEARANCE,
+        frame: 'boss',
+        frame_color: '#F43F5E',
+      }
+    );
+    expect(resolveEntityPortraitUrl({ npc_stats: enrichedStats })).toBe(
+      'https://cdn.example.com/npc-sheet.png'
+    );
+    expect(resolveEntityTokenImageUrl({ npc_stats: enrichedStats })).toBeNull();
+    expect(resolveEntityTokenAppearance({ npc_stats: enrichedStats }).frame).toBe(
+      'boss'
+    );
+
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-vis-1',
+      email: 'gm@example.com',
+    });
+    const insertedLogs: Omit<VttLogEntry, 'id' | 'created_at'>[] = [];
+    const updatedCharPatches: Partial<CharacterModel>[] = [];
+    const updatedTokenPatches: { id: string; patch: Partial<VttTokenModel> }[] = [];
+    const charStoreListSig = signal<CharacterModel[]>([legacyCharRow]);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => activeUserSig(),
+            isAdmin: () => false,
+            displayName: () => 'Warden',
+            handle: () => 'warden',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal<WeaponModel[]>([]),
+            allPerkNodes: signal<PerkNodeModel[]>([]),
+            allSkillTrees: signal([]),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: charStoreListSig,
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              charStoreListSig().find((c) => c.id === id),
+            upsertRealtimeCharacter: (ch: CharacterModel) =>
+              charStoreListSig.update((curr) =>
+                curr.some((c) => c.id === ch.id)
+                  ? curr.map((c) => (c.id === ch.id ? ch : c))
+                  : [...curr, ch]
+              ),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            updateCharacterRecord: async (
+              _id: string,
+              patch: Partial<CharacterModel>
+            ) => {
+              updatedCharPatches.push(patch);
+              return null;
+            },
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateRosterActor: async () => ({
+              error: null,
+              needsMigration: false,
+            }),
+            updateToken: async (id: string, patch: Partial<VttTokenModel>) => {
+              updatedTokenPatches.push({ id, patch });
+              return null;
+            },
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `spawned-vis-tok-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            insertLog: async (
+              entry: Omit<VttLogEntry, 'id' | 'created_at'>
+            ) => {
+              insertedLogs.push(entry);
+              return {
+                ...entry,
+                id: `vis-log-${insertedLogs.length}`,
+                created_at: new Date().toISOString(),
+              };
+            },
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-vis-1',
+      gm_id: 'gm-vis-1',
+      name: 'Tokenizer Test Campaign',
+      cover_image_url: null,
+      invite_code: 'VIS101',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-vis-1',
+        campaign_id: 'camp-vis-1',
+        gm_id: 'gm-vis-1',
+        folder_id: null,
+        name: 'Great Hall',
+        is_active_scene: true,
+        map_image_url: null,
+        background_color: DEFAULT_VTT_BG_COLOR,
+        grid_mode: 'square',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-vis-1');
+    vttStore.allCharacters.set([legacyCharRow]);
+
+    const pcRoster: VttRosterActorModel = {
+      id: 'roster-kaelen',
+      campaign_id: 'camp-vis-1',
+      folder_id: null,
+      character_id: legacyCharRow.id,
+      collection_actor_id: null,
+      owner_id: 'player-vis-1',
+      actor_kind: 'character',
+      is_unique: true,
+      name: 'Kaelen Vance',
+      faction: 'ally',
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      portrait_url: legacyCharRow.portrait_url,
+      token_image_url: legacyCharRow.token_image_url,
+      token_appearance: legacyCharRow.token_appearance,
+      max_hp: 15,
+      max_sp: 9,
+      max_ap: 4,
+      armor_dr: 1,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const portraitOnlyNpc: VttRosterActorModel = {
+      id: 'roster-envoy',
+      campaign_id: 'camp-vis-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Gilded Envoy',
+      faction: 'neutral',
+      size: 1,
+      icon: 'crown',
+      color: '#F59E0B',
+      portrait_url: 'https://cdn.example.com/envoy-sheet-portrait.png',
+      token_image_url: null,
+      token_appearance: {
+        ...DEFAULT_TOKEN_APPEARANCE,
+        frame: 'ornate',
+      },
+      max_hp: 12,
+      max_sp: 6,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    vttStore.rosterActors.set([pcRoster, portraitOnlyNpc]);
+
+    const kaelenTok = await vttStore.deployRosterActor('roster-kaelen');
+    const envoyTok = await vttStore.deployRosterActor('roster-envoy');
+    expect(kaelenTok?.token_image_url).toBe(
+      'https://cdn.example.com/kaelen-token.webp'
+    );
+    expect(envoyTok?.portrait_url).toBe(
+      'https://cdn.example.com/envoy-sheet-portrait.png'
+    );
+    expect(envoyTok?.token_image_url).toBeNull();
+
+    const roomFixture = TestBed.createComponent(VttRoomComponent);
+    roomFixture.detectChanges();
+    const canvasComp = roomFixture.componentInstance.canvasComp()!;
+
+    const renderedKaelen = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.name === 'Kaelen Vance')!;
+    const renderedEnvoy = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.name === 'Gilded Envoy')!;
+    expect(renderedKaelen.tokenImageUrl).toBe(
+      'https://cdn.example.com/kaelen-token.webp'
+    );
+    expect(renderedKaelen.tokenAppearance.frame).toBe('iron');
+    expect(renderedEnvoy.tokenImageUrl).toBeNull();
+    expect(renderedEnvoy.tokenAppearance.frame).toBe('ornate');
+
+    await vttStore.updateCharacterFromVttSheet(legacyCharRow.id, (char) => ({
+      ...char,
+      portrait_url: 'https://cdn.example.com/kaelen-new-portrait.webp',
+      token_image_url: 'https://cdn.example.com/kaelen-new-token.webp',
+      token_appearance: {
+        ...DEFAULT_TOKEN_APPEARANCE,
+        frame: 'boss',
+        frame_color: '#10B981',
+        scale: 1.5,
+        offset_x: -10,
+        offset_y: 8,
+      },
+    }));
+    roomFixture.detectChanges();
+
+    expect(updatedCharPatches.length).toBeGreaterThanOrEqual(1);
+    expect(
+      updatedCharPatches[updatedCharPatches.length - 1].portrait_url
+    ).toBe('https://cdn.example.com/kaelen-new-portrait.webp');
+    expect(
+      updatedCharPatches[updatedCharPatches.length - 1].token_image_url
+    ).toBe('https://cdn.example.com/kaelen-new-token.webp');
+    expect(updatedTokenPatches.length).toBeGreaterThanOrEqual(1);
+    const syncedKaelen = canvasComp
+      .renderableTokens()
+      .find((r) => r.token.name === 'Kaelen Vance')!;
+    expect(syncedKaelen.tokenImageUrl).toBe(
+      'https://cdn.example.com/kaelen-new-token.webp'
+    );
+    expect(syncedKaelen.tokenAppearance.frame).toBe('boss');
+    expect(syncedKaelen.tokenAppearance.scale).toBe(1.5);
+
+    vttStore.selectSingleToken(envoyTok!.id);
+    vttStore.setGmSpeakerMode('character');
+    await vttStore.executeChatOrCommand('We parley at dawn.', VTT_CHAT_COMMANDS);
+    expect(insertedLogs.length).toBe(1);
+
+    const envoyChatLog = vttStore.logs()[0];
+    const envoySpeakerVis = vttStore.getLogSpeakerVisuals(envoyChatLog);
+    expect(envoySpeakerVis?.displayImageUrl).toBe(
+      'https://cdn.example.com/envoy-sheet-portrait.png'
+    );
+    expect(envoySpeakerVis?.appearance.frame).toBe('ornate');
+    expect(envoySpeakerVis?.appearance.scale).toBe(1);
+
+    vttStore.selectSingleToken(kaelenTok!.id);
+    await vttStore.executeChatOrCommand('Steel answers first.', VTT_CHAT_COMMANDS);
+    const kaelenChatLog = vttStore.logs()[vttStore.logs().length - 1];
+    const kaelenSpeakerVis = vttStore.getLogSpeakerVisuals(kaelenChatLog);
+    expect(kaelenSpeakerVis?.displayImageUrl).toBe(
+      'https://cdn.example.com/kaelen-new-token.webp'
+    );
+    expect(kaelenSpeakerVis?.appearance.frame).toBe('boss');
+    expect(kaelenSpeakerVis?.appearance.scale).toBe(1.5);
   });
 });

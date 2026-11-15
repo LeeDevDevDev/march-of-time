@@ -111,30 +111,32 @@
     </div>
   </ng-template>
 
-  <div
-    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-xs"
-    (click)="close()"
-  >
+  <ng-template #assetBrowserContentTpl>
     <div
-      (click)="$event.stopPropagation()"
-      class="flex h-[min(88vh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      (pointerdown)="onHeaderPointerDown($event)"
+      class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-[#243B37] bg-[#122220] px-5 py-3"
+      [class.cursor-move]="floating()"
+      [class.select-none]="floating()"
+      [class.border-b]="!floating() || !minimized()"
     >
-      <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="font-display text-base font-bold text-white">
-              {{ modalTitle() }}
-            </h2>
-            <span class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#5EEAD4]">
-              {{ userAssetsStore.userStorageRoot() }}/
-            </span>
-          </div>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="font-display text-sm font-bold text-white">
+            {{ modalTitle() }}
+          </h2>
+          <span class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#5EEAD4]">
+            {{ userAssetsStore.userStorageRoot() }}/
+          </span>
+        </div>
+        @if (!floating() || !minimized()) {
           <p class="mt-0.5 text-[11px] text-[#8AB0AB]">
             Your personal Supabase folder workspace &mdash; organize map &amp; character images and reuse them across any scene or game.
           </p>
-        </div>
+        }
+      </div>
 
-        <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2">
+        @if (!floating() || !minimized()) {
           <button
             type="button"
             (click)="showRoutingSetup.set(!showRoutingSetup())"
@@ -152,17 +154,31 @@
             </svg>
             <span>Upload Locations</span>
           </button>
+        }
 
+        @if (floating()) {
           <button
             type="button"
-            (click)="close()"
-            class="rounded-lg border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-base font-bold text-[#8AB0AB] hover:text-white"
+            (click)="toggleMinimize()"
+            class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
           >
-            &times;
+            {{ minimized() ? 'Expand' : 'Minimize' }}
           </button>
-        </div>
-      </div>
+        }
 
+        <button
+          type="button"
+          (click)="close()"
+          [attr.title]="'Close ' + modalTitle()"
+          [attr.aria-label]="'Close ' + modalTitle()"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+        >
+          &times;
+        </button>
+      </div>
+    </div>
+
+    @if (!floating() || !minimized()) {
       @if (showRoutingSetup()) {
         <div class="shrink-0 border-b border-[#243B37] bg-[#101D1B] px-5 py-3.5 space-y-2.5">
           <div class="flex items-center justify-between gap-2">
@@ -656,6 +672,39 @@
           </div>
         </div>
       </div>
+    }
+  </ng-template>
+
+  @if (floating()) {
+    <section
+      role="dialog"
+      [attr.aria-label]="modalTitle()"
+      data-vtt-floating-window="true"
+      (pointerdown)="focusWindow()"
+      (wheel)="$event.stopPropagation()"
+      class="fixed pointer-events-auto flex w-[min(94vw,960px)] flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615]/98 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs select-text"
+      [class.h-[min(84vh,720px)]]="!minimized()"
+      [style.left.px]="windowX()"
+      [style.top.px]="windowY()"
+      [style.zIndex]="zIndex()"
+    >
+      <ng-container *ngTemplateOutlet="assetBrowserContentTpl" />
+    </section>
+  } @else {
+    <div
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-xs"
+      (mousedown)="onBackdropMouseDown($event)"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-label]="modalTitle()"
+        (mousedown)="$event.stopPropagation()"
+        (click)="$event.stopPropagation()"
+        class="flex h-[min(88vh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      >
+        <ng-container *ngTemplateOutlet="assetBrowserContentTpl" />
+      </div>
     </div>
-  </div>
+  }
 }

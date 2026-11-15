@@ -4,23 +4,40 @@ import {
   CharacterModel,
   DerivedCharacterStats,
   computeDerivedStats,
+  hasCustomTokenAppearance,
 } from './models/character.model';
 import { CharacterStore } from './store/character.store';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog.component';
+import { TokenAvatarComponent } from '../../shared/token-avatar/token-avatar.component';
 
 @Component({
   selector: 'app-characters-list',
   standalone: true,
-  imports: [RouterLink, ConfirmDialogComponent],
+  imports: [RouterLink, ConfirmDialogComponent, TokenAvatarComponent],
   templateUrl: './characters-list.component.html',
 })
 export class CharactersListComponent {
   readonly characterStore = inject(CharacterStore);
   private readonly router = inject(Router);
   readonly pendingDeleteCharacter = signal<CharacterModel | null>(null);
+  readonly brokenPortraitIds = signal<Record<string, boolean>>({});
 
   constructor() {
     void this.characterStore.ensureLoaded();
+  }
+
+  hasCustomToken(char: CharacterModel): boolean {
+    return (
+      Boolean(char.token_image_url) ||
+      hasCustomTokenAppearance(char.token_appearance)
+    );
+  }
+
+  markPortraitError(characterId: string): void {
+    this.brokenPortraitIds.update((curr) => ({
+      ...curr,
+      [characterId]: true,
+    }));
   }
 
   getStats(char: CharacterModel): DerivedCharacterStats {

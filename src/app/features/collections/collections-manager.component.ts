@@ -15,6 +15,11 @@ import {
 } from '../../core/compendium/compendium.model';
 import { ColorPickerComponent } from '../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
+import { TokenAvatarComponent } from '../../shared/token-avatar/token-avatar.component';
+import {
+  TokenizerEditorComponent,
+  TokenizerVisualsPayload,
+} from '../../shared/token-avatar/tokenizer-editor.component';
 import { CharacterModel } from '../characters/models/character.model';
 import {
   DirectoryFolderNode,
@@ -25,15 +30,24 @@ import {
   collectDescendantFolderIds,
 } from '../vtt/engine/directory-tree.engine';
 import {
+  ActorInventoryItem,
   CollectionActorModel,
   DEFAULT_VTT_DARKVISION_FEET,
   DEFAULT_VTT_DIM_VISION_FEET,
+  TokenAppearanceConfig,
   VTT_ACTOR_COLOR_SWATCHES,
   VTT_NPC_PRESETS,
   VttActorKind,
   VttFaction,
   VttNpcPreset,
+  enrichNpcStatsWithVisuals,
+  hasCustomTokenAppearance,
+  normalizeInventoryItems,
+  normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
+  resolveEntityPortraitUrl,
+  resolveEntityTokenAppearance,
+  resolveEntityTokenImageUrl,
 } from '../vtt/models/vtt.model';
 import {
   ActorTemplateDraft,
@@ -60,6 +74,9 @@ export interface CollectionActorFormState {
   size: number;
   icon: string;
   color: string;
+  portraitUrl: string | null;
+  tokenImageUrl: string | null;
+  tokenAppearance: TokenAppearanceConfig;
   maxHp: number;
   maxSp: number;
   maxAp: number;
@@ -80,6 +97,10 @@ export interface CollectionActorFormState {
   parryMod: number;
   dodgeMod: number;
   canDodge: boolean;
+  inventory: ActorInventoryItem[];
+  newItemName: string;
+  newItemQuantity: number;
+  newItemDescription: string;
   notes: string;
 }
 
@@ -92,6 +113,8 @@ export interface CollectionActorFormState {
     NgTemplateOutlet,
     ColorPickerComponent,
     CompendiumIconComponent,
+    TokenAvatarComponent,
+    TokenizerEditorComponent,
   ],
   templateUrl: './collections-manager.component.html',
 })
@@ -117,6 +140,7 @@ export class CollectionsManagerComponent implements OnInit {
   readonly collapsedFolderIds = signal<Record<string, boolean>>({});
   readonly draggingActorId = signal<string | null>(null);
   readonly dragOverTarget = signal<string | null>(null);
+  readonly brokenPortraitUrls = signal<Record<string, boolean>>({});
 
   readonly folderModal = signal<CollectionFolderModalState | null>(null);
   readonly actorModal = signal<CollectionActorFormState | null>(null);
@@ -316,6 +340,32 @@ export class CollectionsManagerComponent implements OnInit {
     await this.collectionsStore.deleteFolder(folderId);
   }
 
+  getActorPortraitUrl(actor: CollectionActorModel): string | null {
+    const url = resolveEntityPortraitUrl(actor);
+    if (!url || this.brokenPortraitUrls()[url]) return null;
+    return url;
+  }
+
+  getActorTokenImageUrl(actor: CollectionActorModel): string | null {
+    return resolveEntityTokenImageUrl(actor);
+  }
+
+  getActorTokenAppearance(actor: CollectionActorModel): TokenAppearanceConfig {
+    return resolveEntityTokenAppearance(actor);
+  }
+
+  hasActorCustomToken(actor: CollectionActorModel): boolean {
+    return (
+      Boolean(this.getActorTokenImageUrl(actor)) ||
+      hasCustomTokenAppearance(this.getActorTokenAppearance(actor))
+    );
+  }
+
+  markPortraitError(url: string | null | undefined): void {
+    if (!url) return;
+    this.brokenPortraitUrls.update((curr) => ({ ...curr, [url]: true }));
+  }
+
   openCreateActorModal(kind: VttActorKind = 'character'): void {
     const activeFilter = this.selectedFolderFilter();
     const defaultFolder =
@@ -333,6 +383,9 @@ export class CollectionsManagerComponent implements OnInit {
       size: 1,
       icon: kind === 'npc' ? 'battleaxe' : 'greatsword',
       color: kind === 'npc' ? '#EF4444' : '#38B29A',
+      portraitUrl: null,
+      tokenImageUrl: null,
+      tokenAppearance: normalizeTokenAppearance(null),
       maxHp: 10,
       maxSp: 5,
       maxAp: 4,
@@ -353,6 +406,10 @@ export class CollectionsManagerComponent implements OnInit {
       parryMod: 2,
       dodgeMod: 2,
       canDodge: true,
+      inventory: [],
+      newItemName: '',
+      newItemQuantity: 1,
+      newItemDescription: '',
       notes: '',
     });
   }
@@ -392,6 +449,9 @@ export class CollectionsManagerComponent implements OnInit {
       size: actor.size,
       icon: actor.icon ?? 'greatsword',
       color: actor.color ?? '#38B29A',
+      portraitUrl: resolveEntityPortraitUrl(actor),
+      tokenImageUrl: resolveEntityTokenImageUrl(actor),
+      tokenAppearance: resolveEntityTokenAppearance(actor),
       maxHp: actor.max_hp,
       maxSp: actor.max_sp,
       maxAp: actor.max_ap,
@@ -415,7 +475,64 @@ export class CollectionsManagerComponent implements OnInit {
       parryMod: actor.npc_stats.parry_mod ?? 2,
       dodgeMod: actor.npc_stats.dodge_mod ?? 2,
       canDodge: actor.npc_stats.can_dodge !== false,
+      inventory: normalizeInventoryItems(actor.npc_stats.__inventory),
+      newItemName: '',
+      newItemQuantity: 1,
+      newItemDescription: '',
       notes: actor.notes ?? '',
+    });
+  }
+
+  onActorModalVisualsChange(payload: TokenizerVisualsPayload): void {
+    const form = this.actorModal();
+    if (!form) return;
+    this.actorModal.set({
+      ...form,
+      portraitUrl: payload.portrait_url,
+      tokenImageUrl: payload.token_image_url,
+      tokenAppearance: payload.token_appearance,
+    });
+  }
+
+  addModalInventoryItem(): void {
+    const form = this.actorModal();
+    if (!form) return;
+    const name = form.newItemName.trim();
+    if (!name) return;
+    const nextItem: ActorInventoryItem = {
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      quantity: Math.max(1, Math.round(Number(form.newItemQuantity) || 1)),
+      description: form.newItemDescription.trim(),
+    };
+    this.actorModal.set({
+      ...form,
+      inventory: [...form.inventory, nextItem],
+      newItemName: '',
+      newItemQuantity: 1,
+      newItemDescription: '',
+    });
+  }
+
+  adjustModalInventoryQty(itemId: string, delta: number): void {
+    const form = this.actorModal();
+    if (!form) return;
+    const next = form.inventory
+      .map((item) =>
+        item.id === itemId
+          ? { ...item, quantity: item.quantity + delta }
+          : item
+      )
+      .filter((item) => item.quantity > 0);
+    this.actorModal.set({ ...form, inventory: next });
+  }
+
+  removeModalInventoryItem(itemId: string): void {
+    const form = this.actorModal();
+    if (!form) return;
+    this.actorModal.set({
+      ...form,
+      inventory: form.inventory.filter((item) => item.id !== itemId),
     });
   }
 
@@ -437,6 +554,9 @@ export class CollectionsManagerComponent implements OnInit {
       form.darkvisionFeet !== undefined &&
       String(form.darkvisionFeet).trim() !== '' &&
       Number.isFinite(Number(form.darkvisionFeet));
+
+    const normalizedInventory = normalizeInventoryItems(form.inventory);
+    const normalizedAppearance = normalizeTokenAppearance(form.tokenAppearance);
 
     const draft: ActorTemplateDraft = {
       folder_id: form.folderId || null,
@@ -463,17 +583,28 @@ export class CollectionsManagerComponent implements OnInit {
       light_bright_feet: Math.max(0, Number(form.lightBrightFeet) || 0),
       light_dim_feet: Math.max(0, Number(form.lightDimFeet) || 0),
       light_color: form.lightColor || '#F59E0B',
-      npc_stats: {
-        weapon_name: form.weaponName.trim() || 'Unarmed',
-        attack_ap: Math.max(0, Number(form.attackAp) || 1),
-        attack_mod: Number(form.attackMod) || 0,
-        flat_damage: Math.max(0, Number(form.flatDamage) || 0),
-        reach_feet: Math.max(5, Number(form.reachFeet) || 5),
-        combat_tag: form.combatTag,
-        parry_mod: Number(form.parryMod) || 0,
-        dodge_mod: Number(form.dodgeMod) || 0,
-        can_dodge: form.canDodge,
-      },
+      portrait_url: form.portraitUrl,
+      token_image_url: form.tokenImageUrl,
+      token_appearance: normalizedAppearance,
+      npc_stats: enrichNpcStatsWithVisuals(
+        {
+          weapon_name: form.weaponName.trim() || 'Unarmed',
+          attack_ap: Math.max(0, Number(form.attackAp) || 1),
+          attack_mod: Number(form.attackMod) || 0,
+          flat_damage: Math.max(0, Number(form.flatDamage) || 0),
+          reach_feet: Math.max(5, Number(form.reachFeet) || 5),
+          combat_tag: form.combatTag,
+          parry_mod: Number(form.parryMod) || 0,
+          dodge_mod: Number(form.dodgeMod) || 0,
+          can_dodge: form.canDodge,
+          ...(normalizedInventory.length > 0 || form.mode === 'edit'
+            ? { __inventory: normalizedInventory }
+            : {}),
+        },
+        form.portraitUrl,
+        form.tokenImageUrl,
+        normalizedAppearance
+      ),
       notes: form.notes,
     };
 

@@ -2,6 +2,33 @@ import {
   ActiveCombatTag,
   CombatStatusEffect,
 } from '../../../core/compendium/compendium.model';
+import {
+  ActorInventoryItem,
+  DEFAULT_TOKEN_APPEARANCE,
+  TokenAppearanceConfig,
+  TokenFramePresetId,
+  TokenShape,
+  buildTokenImagePanZoomTransform,
+  hasCustomTokenAppearance,
+  normalizeInventoryItems,
+  normalizeTokenAppearance,
+  resolveTokenRingColor,
+  sanitizeOptionalImageUrl,
+} from '../../characters/models/character.model';
+
+export {
+  type ActorInventoryItem,
+  DEFAULT_TOKEN_APPEARANCE,
+  type TokenAppearanceConfig,
+  type TokenFramePresetId,
+  type TokenShape,
+  buildTokenImagePanZoomTransform,
+  hasCustomTokenAppearance,
+  normalizeInventoryItems,
+  normalizeTokenAppearance,
+  resolveTokenRingColor,
+  sanitizeOptionalImageUrl,
+};
 
 export type VttFaction = 'ally' | 'enemy' | 'neutral';
 
@@ -244,6 +271,105 @@ export interface VttNpcStats {
   __unsnapped?: boolean;
   __roster_actor_id?: string | null;
   __darkvision_feet?: number;
+  __inventory?: ActorInventoryItem[];
+  __assigned_user_id?: string | null;
+  __flip_x?: boolean;
+  __flip_y?: boolean;
+  __z_index?: number;
+  __rotation?: number;
+  __portrait_url?: string | null;
+  __token_image_url?: string | null;
+  __token_appearance?: TokenAppearanceConfig;
+}
+
+export interface VisualBearingEntity {
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig | null;
+  npc_stats?: VttNpcStats | null;
+}
+
+export function resolveEntityPortraitUrl(
+  entity: VisualBearingEntity | null | undefined,
+  fallbackA?: VisualBearingEntity | null,
+  fallbackB?: VisualBearingEntity | null
+): string | null {
+  return (
+    sanitizeOptionalImageUrl(entity?.portrait_url) ??
+    sanitizeOptionalImageUrl(entity?.npc_stats?.__portrait_url) ??
+    sanitizeOptionalImageUrl(fallbackA?.portrait_url) ??
+    sanitizeOptionalImageUrl(fallbackA?.npc_stats?.__portrait_url) ??
+    sanitizeOptionalImageUrl(fallbackB?.portrait_url) ??
+    sanitizeOptionalImageUrl(fallbackB?.npc_stats?.__portrait_url)
+  );
+}
+
+export function resolveEntityTokenImageUrl(
+  entity: VisualBearingEntity | null | undefined,
+  fallbackA?: VisualBearingEntity | null,
+  fallbackB?: VisualBearingEntity | null
+): string | null {
+  return (
+    sanitizeOptionalImageUrl(entity?.token_image_url) ??
+    sanitizeOptionalImageUrl(entity?.npc_stats?.__token_image_url) ??
+    sanitizeOptionalImageUrl(fallbackA?.token_image_url) ??
+    sanitizeOptionalImageUrl(fallbackA?.npc_stats?.__token_image_url) ??
+    sanitizeOptionalImageUrl(fallbackB?.token_image_url) ??
+    sanitizeOptionalImageUrl(fallbackB?.npc_stats?.__token_image_url)
+  );
+}
+
+export function resolveEntityTokenAppearance(
+  entity: VisualBearingEntity | null | undefined,
+  fallbackA?: VisualBearingEntity | null,
+  fallbackB?: VisualBearingEntity | null
+): TokenAppearanceConfig {
+  const candidates: (TokenAppearanceConfig | null | undefined)[] = [
+    entity?.token_appearance,
+    entity?.npc_stats?.__token_appearance,
+    fallbackA?.token_appearance,
+    fallbackA?.npc_stats?.__token_appearance,
+    fallbackB?.token_appearance,
+    fallbackB?.npc_stats?.__token_appearance,
+  ];
+  for (const cand of candidates) {
+    if (cand && typeof cand === 'object') {
+      const normalized = normalizeTokenAppearance(cand);
+      if (hasCustomTokenAppearance(normalized)) {
+        return normalized;
+      }
+    }
+  }
+  for (const cand of candidates) {
+    if (cand && typeof cand === 'object') {
+      return normalizeTokenAppearance(cand);
+    }
+  }
+  return { ...DEFAULT_TOKEN_APPEARANCE };
+}
+
+export function enrichNpcStatsWithVisuals(
+  npcStats: VttNpcStats | null | undefined,
+  portraitUrl: string | null | undefined,
+  tokenImageUrl: string | null | undefined,
+  tokenAppearance: TokenAppearanceConfig | null | undefined
+): VttNpcStats {
+  return {
+    ...(npcStats ?? {}),
+    __portrait_url: sanitizeOptionalImageUrl(portraitUrl),
+    __token_image_url: sanitizeOptionalImageUrl(tokenImageUrl),
+    __token_appearance: normalizeTokenAppearance(tokenAppearance),
+  };
+}
+
+export function normalizeTokenRotation(
+  raw: number | null | undefined
+): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return 0;
+  }
+  const rounded = Math.round(raw);
+  return ((rounded % 360) + 360) % 360;
 }
 
 export type VttDefenseChoice = 'parry' | 'dodge' | 'take_hit';
@@ -374,6 +500,9 @@ export interface VttTokenModel {
   is_hidden: boolean;
   statuses: Exclude<CombatStatusEffect, 'None'>[];
   npc_stats: VttNpcStats;
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig;
 }
 
 export type VttLogKind =
@@ -583,6 +712,9 @@ export interface VttRosterActorModel {
   light_dim_feet: number;
   light_color: string;
   npc_stats: VttNpcStats;
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig;
   notes: string;
   sort_order: number;
   created_at?: string;
@@ -623,6 +755,9 @@ export interface CollectionActorModel {
   light_dim_feet: number;
   light_color: string;
   npc_stats: VttNpcStats;
+  portrait_url?: string | null;
+  token_image_url?: string | null;
+  token_appearance?: TokenAppearanceConfig;
   notes: string;
   sort_order: number;
   created_at?: string;
@@ -638,6 +773,9 @@ export interface VttRosterDragPayload {
   color: string | null;
   faction: VttFaction;
   isUnique: boolean;
+  portraitUrl?: string | null;
+  tokenImageUrl?: string | null;
+  tokenAppearance?: TokenAppearanceConfig;
 }
 
 export const VTT_ACTOR_COLOR_SWATCHES: string[] = [

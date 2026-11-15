@@ -15,7 +15,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { VttSettingsStore } from '../../../../core/settings/vtt-settings.store';
 import { ColorPickerComponent } from '../../../../shared/color-picker/color-picker.component';
-import { CompendiumIconComponent } from '../../../../shared/compendium-icon/compendium-icon.component';
+import { TokenAvatarComponent } from '../../../../shared/token-avatar/token-avatar.component';
 import {
   HexPathResult,
   TokenTravelAnimation,
@@ -48,14 +48,27 @@ import {
 import {
   DEFAULT_VTT_BG_COLOR,
   HexCoord,
+  TokenAppearanceConfig,
   VttGridMode,
   VttLightSource,
   VttPoint,
   VttRosterDragPayload,
   VttTokenModel,
   VttWallSegment,
+  normalizeTokenRotation,
 } from '../../models/vtt.model';
-import { VttStore } from '../../store/vtt.store';
+import { BatchTokenMoveInput, VttStore } from '../../store/vtt.store';
+import { VttFloatingWindowComponent } from '../vtt-floating-window/vtt-floating-window.component';
+
+interface DragCompanionTokenState {
+  tokenId: string;
+  startHex: HexCoord;
+  currentHex: HexCoord;
+  startWorld: VttPoint;
+  currentWorld: VttPoint;
+  reachable: boolean;
+  feet: number;
+}
 
 interface DragTokenState {
   tokenId: string;
@@ -71,6 +84,27 @@ interface DragTokenState {
   pathResult: HexPathResult;
   gridlessBlocked: boolean;
   gridlessFeet: number;
+  companions: DragCompanionTokenState[];
+  toggleOffOnClick: boolean;
+  narrowToSingleOnClick: boolean;
+}
+
+interface MarqueeSelectState {
+  startWorld: VttPoint;
+  currentWorld: VttPoint;
+  startScreen: VttPoint;
+  currentScreen: VttPoint;
+  additive: boolean;
+  initialSelectedIds: string[];
+  hasMoved: boolean;
+}
+
+export interface MarqueeBoxView {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  count: number;
 }
 
 export interface ChainedMoveLeg {
@@ -155,6 +189,12 @@ export interface RenderableVttToken {
   inTargetReach: boolean;
   distanceFromAttackerFeet: number | null;
   apPips: number[];
+  flipX: boolean;
+  flipY: boolean;
+  rotationDeg: number;
+  artTransform: string;
+  tokenImageUrl: string | null;
+  tokenAppearance: TokenAppearanceConfig;
 }
 
 export interface RenderableDoorHandle {
@@ -177,7 +217,12 @@ function hexToRgba(hex: string, alpha: number): string {
 @Component({
   selector: 'app-vtt-canvas',
   standalone: true,
-  imports: [FormsModule, ColorPickerComponent, CompendiumIconComponent],
+  imports: [
+    FormsModule,
+    ColorPickerComponent,
+    TokenAvatarComponent,
+    VttFloatingWindowComponent,
+  ],
   templateUrl: './vtt-canvas.component.html',
 })
 export class VttCanvasComponent implements AfterViewInit {
@@ -214,6 +259,7 @@ export class VttCanvasComponent implements AfterViewInit {
   readonly lastPointerWorld = signal<VttPoint | null>(null);
   readonly rosterDropPreview = signal<RosterDropPreviewState | null>(null);
   readonly dragTokenState = signal<DragTokenState | null>(null);
+  readonly marqueeSelectState = signal<MarqueeSelectState | null>(null);
   readonly chainedTokenMove = signal<ChainedTokenMoveState | null>(null);
   readonly dragLightState = signal<DragLightState | null>(null);
   readonly lightPlacementDraft = signal<LightPlacementDraft | null>(null);
@@ -256,6 +302,22 @@ export class VttCanvasComponent implements AfterViewInit {
   readonly isGridless = computed(
     () => this.vttStore.activeScene()?.grid_mode === 'gridless'
   );
+
+  readonly marqueeBoxRect = computed<MarqueeBoxView | null>(() => {
+    const m = this.marqueeSelectState();
+    if (!m || !m.hasMoved) return null;
+    const left = Math.min(m.startScreen.x, m.currentScreen.x);
+    const top = Math.min(m.startScreen.y, m.currentScreen.y);
+    const width = Math.max(1, Math.abs(m.currentScreen.x - m.startScreen.x));
+    const height = Math.max(1, Math.abs(m.currentScreen.y - m.startScreen.y));
+    return {
+      left: Math.round(left),
+      top: Math.round(top),
+      width: Math.round(width),
+      height: Math.round(height),
+      count: this.vttStore.controllableSelectedTokens().length,
+    };
+  });
 
   readonly worldBounds = computed(() => {
     const layout = this.vttStore.sceneLayout();
@@ -323,6 +385,31 @@ export class VttCanvasComponent implements AfterViewInit {
       this.vttStore.sceneTokens().find((t) => t.id === menu.tokenId) ?? null
     );
   });
+
+  readonly contextMenuTargetTokens = computed<VttTokenModel[]>(() => {
+    const primary = this.contextMenuToken();
+    if (!primary) return [];
+    const selected = this.vttStore.controllableSelectedTokens();
+    if (selected.length > 1 && selected.some((t) => t.id === primary.id)) {
+      return selected;
+    }
+    return [primary];
+  });
+
+  readonly contextMenuAllHidden = computed<boolean>(() => {
+    const targets = this.contextMenuTargetTokens();
+    return targets.length > 0 && targets.every((t) => t.is_hidden);
+  });
+
+  readonly contextMenuSomeHidden = computed<boolean>(() =>
+    this.contextMenuTargetTokens().some((t) => t.is_hidden)
+  );
+
+  readonly contextMenuAnyRotated = computed<boolean>(() =>
+    this.contextMenuTargetTokens().some(
+      (t) => normalizeTokenRotation(t.npc_stats?.__rotation) !== 0
+    )
+  );
 
   readonly animatedSceneTokens = computed<VttTokenModel[]>(() => {
     const tokens = this.vttStore.sceneTokens();
@@ -423,7 +510,7 @@ export class VttCanvasComponent implements AfterViewInit {
     const chain = this.chainedTokenMove();
     const animPos = this.tokenAnimPositions();
     const instantMove = this.settingsStore.preferences().tokenMoveSpeed <= 0;
-    const selId = this.vttStore.selectedTokenId();
+    const selectedIdSet = new Set(this.vttStore.selectedTokenIds());
     const pendingTarget = this.vttStore.pendingTargetAction();
     const attackerTok = pendingTarget
       ? this.vttStore
@@ -432,8 +519,17 @@ export class VttCanvasComponent implements AfterViewInit {
       : null;
 
     const results: RenderableVttToken[] = [];
+    const orderedTokens = this.vttStore
+      .sceneTokens()
+      .map((tok, idx) => ({
+        tok,
+        idx,
+        z: Number(tok.npc_stats?.__z_index ?? 0),
+      }))
+      .sort((a, b) => (a.z !== b.z ? a.z - b.z : a.idx - b.idx))
+      .map((entry) => entry.tok);
 
-    for (const tok of this.vttStore.sceneTokens()) {
+    for (const tok of orderedTokens) {
       const controllable = this.vttStore.canControlToken(tok);
 
       if (tok.is_hidden && restrictVision) {
@@ -463,10 +559,19 @@ export class VttCanvasComponent implements AfterViewInit {
       }
 
       let center = restingCenter;
-      if (instantMove && drag && drag.tokenId === tok.id) {
-        center = drag.freeUnsnap
-          ? drag.currentWorld
-          : hexToWorldCenter(drag.currentHex, geom);
+      if (instantMove && drag) {
+        if (drag.tokenId === tok.id) {
+          center = drag.freeUnsnap
+            ? drag.currentWorld
+            : hexToWorldCenter(drag.currentHex, geom);
+        } else if (drag.hasMoved && drag.companions.length > 0) {
+          const comp = drag.companions.find((c) => c.tokenId === tok.id);
+          if (comp) {
+            center = drag.freeUnsnap
+              ? comp.currentWorld
+              : hexToWorldCenter(comp.currentHex, geom);
+          }
+        }
       } else if (instantMove && chain && chain.tokenId === tok.id) {
         center = chain.lastUnsnapped
           ? chain.currentWorld
@@ -497,6 +602,23 @@ export class VttCanvasComponent implements AfterViewInit {
 
       const maxAp = Math.max(1, Math.min(8, tok.max_ap || 4));
       const pips = Array.from({ length: maxAp }, (_, idx) => idx);
+      const flipX = Boolean(tok.npc_stats?.__flip_x);
+      const flipY = Boolean(tok.npc_stats?.__flip_y);
+      const rotationDeg = normalizeTokenRotation(tok.npc_stats?.__rotation);
+      const flipPart =
+        flipX && flipY
+          ? 'scale(-1, -1)'
+          : flipX
+            ? 'scaleX(-1)'
+            : flipY
+              ? 'scaleY(-1)'
+              : '';
+      const rotPart = rotationDeg !== 0 ? `rotate(${rotationDeg}deg)` : '';
+      const artTransform =
+        rotPart && flipPart
+          ? `${rotPart} ${flipPart}`
+          : rotPart || flipPart || 'none';
+      const resolvedVisuals = this.vttStore.resolveTokenVisuals(tok);
 
       results.push({
         token: tok,
@@ -510,13 +632,19 @@ export class VttCanvasComponent implements AfterViewInit {
           tok.max_sp > 0
             ? Math.max(0, Math.min(100, (tok.current_sp / tok.max_sp) * 100))
             : 0,
-        isSelected: selId === tok.id,
+        isSelected: selectedIdSet.has(tok.id),
         isTurnActive: sc.combat_active && sc.active_turn_token_id === tok.id,
         isControllable: controllable,
         isTargetable,
         inTargetReach: inReach,
         distanceFromAttackerFeet: distFromAttacker,
         apPips: pips,
+        flipX,
+        flipY,
+        rotationDeg,
+        artTransform,
+        tokenImageUrl: resolvedVisuals.tokenImageUrl,
+        tokenAppearance: resolvedVisuals.tokenAppearance,
       });
     }
 
@@ -637,6 +765,7 @@ export class VttCanvasComponent implements AfterViewInit {
       if (!sc) {
         this.lastFittedSceneId = null;
         this.dragTokenState.set(null);
+        this.marqueeSelectState.set(null);
         this.chainedTokenMove.set(null);
       } else if (
         sc.id !== this.lastFittedSceneId &&
@@ -645,6 +774,7 @@ export class VttCanvasComponent implements AfterViewInit {
         this.lastFittedSceneId = sc.id;
         this.tokenContextMenu.set(null);
         this.dragTokenState.set(null);
+        this.marqueeSelectState.set(null);
         this.chainedTokenMove.set(null);
         queueMicrotask(() => this.fitMapToViewport());
       }
@@ -658,6 +788,7 @@ export class VttCanvasComponent implements AfterViewInit {
       }
       if (tool !== 'select') {
         this.dragTokenState.set(null);
+        this.marqueeSelectState.set(null);
         this.chainedTokenMove.set(null);
       }
     });
@@ -955,8 +1086,74 @@ export class VttCanvasComponent implements AfterViewInit {
     return pt;
   }
 
+  private isFloatingWindowTarget(target: EventTarget | null): boolean {
+    if (!target || typeof HTMLElement === 'undefined') return false;
+    return target instanceof HTMLElement
+      ? Boolean(target.closest('[data-vtt-floating-window]'))
+      : false;
+  }
+
+  private resolveRotationWheelTargetIds(event: WheelEvent): string[] {
+    const selectedControllable = this.vttStore.controllableSelectedTokens();
+    if (selectedControllable.length > 0) {
+      return selectedControllable.map((t) => t.id);
+    }
+
+    if (
+      typeof HTMLElement !== 'undefined' &&
+      event.target instanceof HTMLElement
+    ) {
+      const tokenEl = event.target.closest('[data-token-id]');
+      const domTokenId = tokenEl?.getAttribute('data-token-id');
+      if (domTokenId) {
+        const tok = this.vttStore
+          .sceneTokens()
+          .find((t) => t.id === domTokenId);
+        if (
+          tok &&
+          (this.vttStore.isGm() || this.vttStore.canControlToken(tok))
+        ) {
+          return [tok.id];
+        }
+      }
+    }
+
+    const worldPt = this.screenToWorld(event.clientX, event.clientY);
+    const renderable = this.renderableTokens();
+    for (let i = renderable.length - 1; i >= 0; i--) {
+      const item = renderable[i];
+      if (!this.vttStore.isGm() && !item.isControllable) continue;
+      const dist = Math.hypot(
+        worldPt.x - item.center.x,
+        worldPt.y - item.center.y
+      );
+      if (dist <= item.radiusPx) {
+        return [item.token.id];
+      }
+    }
+    return [];
+  }
+
   onWheel(event: WheelEvent): void {
+    if (this.isFloatingWindowTarget(event.target)) return;
     event.preventDefault();
+
+    if (event.shiftKey) {
+      const rawDelta =
+        Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+          ? event.deltaY
+          : event.deltaX;
+      if (rawDelta === 0) return;
+
+      const targetIds = this.resolveRotationWheelTargetIds(event);
+      if (targetIds.length === 0) return;
+
+      const stepDeg = event.ctrlKey || event.metaKey ? 5 : 15;
+      const deltaDeg = rawDelta > 0 ? stepDeg : -stepDeg;
+      void this.vttStore.rotateTokensByDelta(targetIds, deltaDeg);
+      return;
+    }
+
     const rect = this.viewportRef().nativeElement.getBoundingClientRect();
     const sx = event.clientX - rect.left;
     const sy = event.clientY - rect.top;
@@ -990,8 +1187,10 @@ export class VttCanvasComponent implements AfterViewInit {
   }
 
   cancelActiveMovementOrDraft(): boolean {
+    const activeMarquee = this.marqueeSelectState();
     const hadActive =
       this.dragTokenState() !== null ||
+      activeMarquee !== null ||
       this.chainedTokenMove() !== null ||
       this.rulerStart() !== null ||
       this.rulerWorldStart() !== null ||
@@ -1002,6 +1201,10 @@ export class VttCanvasComponent implements AfterViewInit {
     if (!hadActive) return false;
 
     this.dragTokenState.set(null);
+    if (activeMarquee) {
+      this.marqueeSelectState.set(null);
+      this.vttStore.setSelectedTokens(activeMarquee.initialSelectedIds);
+    }
     this.chainedTokenMove.set(null);
     this.rulerStart.set(null);
     this.rulerCurrent.set(null);
@@ -1012,6 +1215,50 @@ export class VttCanvasComponent implements AfterViewInit {
     this.lightPlacementDraft.set(null);
     this.dragLightState.set(null);
     return true;
+  }
+
+  private computeMarqueeTokenIds(
+    startWorld: VttPoint,
+    endWorld: VttPoint,
+    seedIds: readonly string[]
+  ): string[] {
+    const minX = Math.min(startWorld.x, endWorld.x);
+    const maxX = Math.max(startWorld.x, endWorld.x);
+    const minY = Math.min(startWorld.y, endWorld.y);
+    const maxY = Math.max(startWorld.y, endWorld.y);
+
+    const controllableSceneIds = new Set(
+      this.vttStore
+        .sceneTokens()
+        .filter((t) => this.vttStore.isGm() || this.vttStore.canControlToken(t))
+        .map((t) => t.id)
+    );
+    const nextIds: string[] = [];
+    const seen = new Set<string>();
+
+    for (const id of seedIds) {
+      if (controllableSceneIds.has(id) && !seen.has(id)) {
+        seen.add(id);
+        nextIds.push(id);
+      }
+    }
+
+    for (const item of this.renderableTokens()) {
+      if (!this.vttStore.isGm() && !item.isControllable) continue;
+      if (seen.has(item.token.id)) continue;
+      const clampedX = Math.max(minX, Math.min(maxX, item.center.x));
+      const clampedY = Math.max(minY, Math.min(maxY, item.center.y));
+      const dist = Math.hypot(
+        item.center.x - clampedX,
+        item.center.y - clampedY
+      );
+      if (dist <= item.radiusPx * 0.75) {
+        seen.add(item.token.id);
+        nextIds.push(item.token.id);
+      }
+    }
+
+    return nextIds;
   }
 
   private nowAnimClockMs(): number {
@@ -1195,6 +1442,40 @@ export class VttCanvasComponent implements AfterViewInit {
           sc?.walls ?? []
         );
 
+      const dx = clampedWorld.x - dragTok.startWorld.x;
+      const dy = clampedWorld.y - dragTok.startWorld.y;
+      const companions = dragTok.companions.map((comp) => {
+        const compWorld = clampWorldPointToBounds(
+          { x: comp.startWorld.x + dx, y: comp.startWorld.y + dy },
+          this.worldBounds(),
+          20
+        );
+        const compHex = clampHexToBounds(
+          worldPointToHex(compWorld, geom),
+          geom.gridWidth,
+          geom.gridHeight
+        );
+        const compDistPx = Math.hypot(
+          compWorld.x - comp.startWorld.x,
+          compWorld.y - comp.startWorld.y
+        );
+        const compFeet = worldPixelsToFeet(compDistPx, geom.gridSizePx);
+        const compBlocked =
+          !shiftOverride &&
+          isWorldSegmentBlockedByWalls(
+            comp.startWorld,
+            compWorld,
+            sc?.walls ?? []
+          );
+        return {
+          ...comp,
+          currentHex: compHex,
+          currentWorld: compWorld,
+          reachable: !compBlocked,
+          feet: compFeet,
+        };
+      });
+
       return {
         ...dragTok,
         freeUnsnap: true,
@@ -1204,12 +1485,14 @@ export class VttCanvasComponent implements AfterViewInit {
         shiftOverride,
         gridlessBlocked: blocked,
         gridlessFeet: feet,
+        companions,
       };
     }
 
     const rawHex = worldPointToHex(worldPt, geom);
     const clamped = clampHexToBounds(rawHex, geom.gridWidth, geom.gridHeight);
     const startTileCenter = hexToWorldCenter(dragTok.startHex, geom);
+    const targetTileCenter = hexToWorldCenter(clamped, geom);
     const startedOffCenter =
       Math.hypot(
         dragTok.startWorld.x - startTileCenter.x,
@@ -1229,17 +1512,58 @@ export class VttCanvasComponent implements AfterViewInit {
         }
       : findHexPath(dragTok.startHex, clamped, geom, sc?.walls ?? []);
 
+    const tileWorldDx = targetTileCenter.x - startTileCenter.x;
+    const tileWorldDy = targetTileCenter.y - startTileCenter.y;
+    const companions = dragTok.companions.map((comp) => {
+      const compStartTileCenter = hexToWorldCenter(comp.startHex, geom);
+      const compHex = clampHexToBounds(
+        worldPointToHex(
+          {
+            x: compStartTileCenter.x + tileWorldDx,
+            y: compStartTileCenter.y + tileWorldDy,
+          },
+          geom
+        ),
+        geom.gridWidth,
+        geom.gridHeight
+      );
+      const compWorld = hexToWorldCenter(compHex, geom);
+      if (shiftOverride) {
+        return {
+          ...comp,
+          currentHex: compHex,
+          currentWorld: compWorld,
+          reachable: true,
+          feet: getHexDistanceFeet(comp.startHex, compHex),
+        };
+      }
+      const compPath = findHexPath(
+        comp.startHex,
+        compHex,
+        geom,
+        sc?.walls ?? []
+      );
+      return {
+        ...comp,
+        currentHex: compHex,
+        currentWorld: compWorld,
+        reachable: compPath.reachable,
+        feet: compPath.feet,
+      };
+    });
+
     return {
       ...dragTok,
       freeUnsnap: false,
       currentHex: clamped,
-      currentWorld: hexToWorldCenter(clamped, geom),
+      currentWorld: targetTileCenter,
       hasMoved:
         clamped.col !== dragTok.startHex.col ||
         clamped.row !== dragTok.startHex.row ||
         (startedOffCenter && pointerDist > 4 / this.zoom()),
       shiftOverride,
       pathResult: pathRes,
+      companions,
     };
   }
 
@@ -1341,6 +1665,7 @@ export class VttCanvasComponent implements AfterViewInit {
   }
 
   onContextMenu(event: MouseEvent): void {
+    if (this.isFloatingWindowTarget(event.target)) return;
     event.preventDefault();
     if (
       Date.now() < this.suppressContextMenuUntil ||
@@ -1352,6 +1677,7 @@ export class VttCanvasComponent implements AfterViewInit {
   }
 
   onViewportPointerDown(event: PointerEvent): void {
+    if (this.isFloatingWindowTarget(event.target)) return;
     const sc = this.vttStore.activeScene();
     if (!sc) return;
 
@@ -1432,6 +1758,9 @@ export class VttCanvasComponent implements AfterViewInit {
           },
           gridlessBlocked: false,
           gridlessFeet: 0,
+          companions: [],
+          toggleOffOnClick: false,
+          narrowToSingleOnClick: false,
         };
         this.dragTokenState.set(
           this.recomputeDragTokenForPointer(
@@ -1485,6 +1814,29 @@ export class VttCanvasComponent implements AfterViewInit {
       this.vttStore.cancelTargetSelection();
       return;
     }
+
+    if (tool === 'select') {
+      const initialSelectedIds = [...this.vttStore.selectedTokenIds()];
+      const additive = Boolean(event.shiftKey);
+      if (!additive) {
+        this.vttStore.clearTokenSelection();
+      }
+      this.vttStore.selectedLightId.set(null);
+      const rect = this.viewportRef().nativeElement.getBoundingClientRect();
+      const startScreen = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      this.marqueeSelectState.set({
+        startWorld: worldPt,
+        currentWorld: worldPt,
+        startScreen,
+        currentScreen: startScreen,
+        additive,
+        initialSelectedIds,
+        hasMoved: false,
+      });
+    }
   }
 
   onTokenPointerDown(event: PointerEvent, item: RenderableVttToken): void {
@@ -1509,7 +1861,7 @@ export class VttCanvasComponent implements AfterViewInit {
         event.preventDefault();
         return;
       }
-      if (this.vttStore.isGm()) {
+      if (this.vttStore.isGm() || item.isControllable) {
         return;
       }
     }
@@ -1543,14 +1895,15 @@ export class VttCanvasComponent implements AfterViewInit {
       this.commitActiveChainedMove();
     }
 
-    this.vttStore.selectedTokenId.set(item.token.id);
     this.vttStore.selectedLightId.set(null);
 
     const sc = this.vttStore.activeScene();
     const gridMode = sc?.grid_mode ?? 'square';
     const tool = this.vttStore.activeTool();
+    const shiftHeld = Boolean(event.shiftKey);
 
     if (tool === 'ruler') {
+      this.vttStore.selectSingleToken(item.token.id);
       if (gridMode === 'gridless') {
         this.rulerWorldStart.set(item.center);
         this.rulerWorldCurrent.set(item.center);
@@ -1562,45 +1915,107 @@ export class VttCanvasComponent implements AfterViewInit {
       return;
     }
 
-    if (tool === 'select' && item.isControllable) {
-      const chainForToken = this.chainedTokenMove();
-      const geom = this.vttStore.gridGeometry();
-      const isMidAnim = Boolean(this.tokenAnimPositions()[item.token.id]);
-      const startHex =
-        chainForToken && chainForToken.tokenId === item.token.id
-          ? chainForToken.currentHex
-          : isMidAnim
-            ? clampHexToBounds(
-                worldPointToHex(item.center, geom),
-                geom.gridWidth,
-                geom.gridHeight
-              )
-            : { col: item.token.x, row: item.token.y };
-      const startWorld =
-        chainForToken && chainForToken.tokenId === item.token.id
-          ? chainForToken.currentWorld
-          : item.center;
-      const pointerDownWorld = this.screenToWorld(event.clientX, event.clientY);
-      const shiftHeld = Boolean(event.shiftKey);
-      this.shiftPressed.set(shiftHeld);
-      this.lastPointerWorld.set(pointerDownWorld);
-
-      this.dragTokenState.set({
-        tokenId: item.token.id,
-        gridMode,
-        freeUnsnap: gridMode === 'gridless' || shiftHeld,
-        startHex,
-        currentHex: startHex,
-        startWorld,
-        currentWorld: startWorld,
-        pointerDownWorld,
-        hasMoved: false,
-        shiftOverride: shiftHeld && this.vttStore.isGm(),
-        pathResult: { reachable: true, path: [startHex], steps: 0, feet: 0 },
-        gridlessBlocked: false,
-        gridlessFeet: 0,
-      });
+    if (tool !== 'select') {
+      this.vttStore.selectSingleToken(item.token.id);
+      return;
     }
+
+    if (!item.isControllable) {
+      if (!shiftHeld || this.vttStore.controllableSelectedTokens().length === 0) {
+        this.vttStore.selectSingleToken(item.token.id);
+      }
+      return;
+    }
+
+    const wasAlreadySelected = this.vttStore.isTokenSelected(item.token.id);
+    const priorControllable = this.vttStore.controllableSelectedTokens();
+    let toggleOffOnClick = false;
+    let narrowToSingleOnClick = false;
+
+    if (shiftHeld) {
+      if (wasAlreadySelected) {
+        toggleOffOnClick = true;
+      } else {
+        const controllableIds = priorControllable.map((t) => t.id);
+        this.vttStore.setSelectedTokens([...controllableIds, item.token.id]);
+      }
+    } else if (wasAlreadySelected && priorControllable.length > 1) {
+      narrowToSingleOnClick = true;
+    } else {
+      this.vttStore.selectSingleToken(item.token.id);
+    }
+
+    const chainForToken = this.chainedTokenMove();
+    const geom = this.vttStore.gridGeometry();
+    const isMidAnim = Boolean(this.tokenAnimPositions()[item.token.id]);
+    const startHex =
+      chainForToken && chainForToken.tokenId === item.token.id
+        ? chainForToken.currentHex
+        : isMidAnim
+          ? clampHexToBounds(
+              worldPointToHex(item.center, geom),
+              geom.gridWidth,
+              geom.gridHeight
+            )
+          : { col: item.token.x, row: item.token.y };
+    const startWorld =
+      chainForToken && chainForToken.tokenId === item.token.id
+        ? chainForToken.currentWorld
+        : item.center;
+    const pointerDownWorld = this.screenToWorld(event.clientX, event.clientY);
+    this.shiftPressed.set(shiftHeld);
+    this.lastPointerWorld.set(pointerDownWorld);
+
+    const isChainingMove = Boolean(
+      (chainForToken && chainForToken.tokenId === item.token.id) ||
+        event.ctrlKey ||
+        event.metaKey
+    );
+    const companions: DragCompanionTokenState[] = isChainingMove
+      ? []
+      : this.vttStore
+          .controllableSelectedTokens()
+          .filter((t) => t.id !== item.token.id)
+          .map((compTok) => {
+            const compAnimPt = this.tokenAnimPositions()[compTok.id];
+            const compCenter =
+              compAnimPt ?? getTokenWorldCenter(compTok, geom, gridMode);
+            const compStartHex = compAnimPt
+              ? clampHexToBounds(
+                  worldPointToHex(compCenter, geom),
+                  geom.gridWidth,
+                  geom.gridHeight
+                )
+              : { col: compTok.x, row: compTok.y };
+            return {
+              tokenId: compTok.id,
+              startHex: compStartHex,
+              currentHex: compStartHex,
+              startWorld: compCenter,
+              currentWorld: compCenter,
+              reachable: true,
+              feet: 0,
+            };
+          });
+
+    this.dragTokenState.set({
+      tokenId: item.token.id,
+      gridMode,
+      freeUnsnap: gridMode === 'gridless' || shiftHeld,
+      startHex,
+      currentHex: startHex,
+      startWorld,
+      currentWorld: startWorld,
+      pointerDownWorld,
+      hasMoved: false,
+      shiftOverride: shiftHeld && this.vttStore.isGm(),
+      pathResult: { reachable: true, path: [startHex], steps: 0, feet: 0 },
+      gridlessBlocked: false,
+      gridlessFeet: 0,
+      companions,
+      toggleOffOnClick,
+      narrowToSingleOnClick,
+    });
   }
 
   onTokenContextMenu(event: MouseEvent, item: RenderableVttToken): void {
@@ -1613,11 +2028,17 @@ export class VttCanvasComponent implements AfterViewInit {
       this.suppressContextMenuUntil = Date.now() + 400;
       return;
     }
-    if (!this.vttStore.isGm()) return;
+    if (!this.vttStore.isGm() && !item.isControllable) return;
 
     this.dragTokenState.set(null);
     this.lightContextMenu.set(null);
-    this.vttStore.selectedTokenId.set(item.token.id);
+    const controllableSelected = this.vttStore.controllableSelectedTokens();
+    const keepMultiSelection =
+      controllableSelected.length > 1 &&
+      controllableSelected.some((t) => t.id === item.token.id);
+    if (!keepMultiSelection) {
+      this.vttStore.selectSingleToken(item.token.id);
+    }
     this.vttStore.selectedLightId.set(null);
 
     const rect = this.viewportRef().nativeElement.getBoundingClientRect();
@@ -1625,11 +2046,11 @@ export class VttCanvasComponent implements AfterViewInit {
     const rawY = event.clientY - rect.top;
     const clampedX = Math.max(
       12,
-      Math.min(this.viewportWidth() - 216, rawX + 8)
+      Math.min(this.viewportWidth() - 240, rawX + 8)
     );
     const clampedY = Math.max(
       12,
-      Math.min(this.viewportHeight() - 170, rawY + 8)
+      Math.min(this.viewportHeight() - 365, rawY + 8)
     );
 
     this.tokenContextMenu.set({
@@ -1639,14 +2060,69 @@ export class VttCanvasComponent implements AfterViewInit {
     });
   }
 
-  toggleTokenHiddenFromMenu(token: VttTokenModel): void {
+  getTokenRotationDegrees(token: VttTokenModel): number {
+    return normalizeTokenRotation(token.npc_stats?.__rotation);
+  }
+
+  private resolveMenuTargetTokenIds(fallbackId?: string): string[] {
+    const targets = this.contextMenuTargetTokens();
+    if (targets.length > 0) {
+      return targets.map((t) => t.id);
+    }
+    return fallbackId ? [fallbackId] : [];
+  }
+
+  openTokenSheetFromMenu(tokenId: string): void {
     this.tokenContextMenu.set(null);
-    void this.vttStore.toggleTokenHidden(token.id);
+    this.vttStore.openTokenSheet(tokenId);
+  }
+
+  toggleTokenHiddenFromMenu(token: VttTokenModel): void {
+    const ids = this.resolveMenuTargetTokenIds(token.id);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.toggleTokensHiddenBatch(ids);
+  }
+
+  toggleTokenFlipXFromMenu(tokenId: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.flipTokensHorizontal(ids);
+  }
+
+  toggleTokenFlipYFromMenu(tokenId: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.flipTokensVertical(ids);
+  }
+
+  rotateTokens90FromMenu(tokenId?: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.rotateTokensByDelta(ids, 90);
+  }
+
+  resetTokensRotationFromMenu(tokenId?: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.setTokensRotation(ids, 0);
+  }
+
+  bringTokenToFrontFromMenu(tokenId: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.bringTokensToFront(ids);
+  }
+
+  sendTokenToBackFromMenu(tokenId: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
+    this.tokenContextMenu.set(null);
+    void this.vttStore.sendTokensToBack(ids);
   }
 
   removeTokenFromMenu(tokenId: string): void {
+    const ids = this.resolveMenuTargetTokenIds(tokenId);
     this.tokenContextMenu.set(null);
-    void this.vttStore.removeToken(tokenId);
+    void this.vttStore.removeTokensBatch(ids);
   }
 
   onDoorButtonClick(event: MouseEvent, wallId: string): void {
@@ -1820,7 +2296,9 @@ export class VttCanvasComponent implements AfterViewInit {
 
     if (
       (event.buttons & 2) !== 0 &&
-      (this.dragTokenState() !== null || this.chainedTokenMove() !== null)
+      (this.dragTokenState() !== null ||
+        this.chainedTokenMove() !== null ||
+        this.marqueeSelectState() !== null)
     ) {
       this.cancelActiveMovementOrDraft();
       this.suppressContextMenuUntil = Date.now() + 400;
@@ -1864,6 +2342,34 @@ export class VttCanvasComponent implements AfterViewInit {
       }
     } else if (this.hoveredHex() !== null) {
       this.hoveredHex.set(null);
+    }
+
+    const marquee = this.marqueeSelectState();
+    if (marquee) {
+      const currentScreen = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      const screenDist = Math.hypot(
+        currentScreen.x - marquee.startScreen.x,
+        currentScreen.y - marquee.startScreen.y
+      );
+      const hasMoved = marquee.hasMoved || screenDist > 4;
+      this.marqueeSelectState.set({
+        ...marquee,
+        currentWorld: worldPt,
+        currentScreen,
+        hasMoved,
+      });
+      if (hasMoved) {
+        const matched = this.computeMarqueeTokenIds(
+          marquee.startWorld,
+          worldPt,
+          marquee.additive ? marquee.initialSelectedIds : []
+        );
+        this.vttStore.setSelectedTokens(matched);
+      }
+      return;
     }
 
     const dragLight = this.dragLightState();
@@ -1941,6 +2447,34 @@ export class VttCanvasComponent implements AfterViewInit {
       return;
     }
 
+    const marquee = this.marqueeSelectState();
+    if (marquee) {
+      this.marqueeSelectState.set(null);
+      const vpEl = this.viewportRef()?.nativeElement;
+      if (vpEl) {
+        const rect = vpEl.getBoundingClientRect();
+        const endScreen = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+        const moved =
+          marquee.hasMoved ||
+          Math.hypot(
+            endScreen.x - marquee.startScreen.x,
+            endScreen.y - marquee.startScreen.y
+          ) > 4;
+        if (moved) {
+          const endWorld = this.screenToWorld(event.clientX, event.clientY);
+          const matched = this.computeMarqueeTokenIds(
+            marquee.startWorld,
+            endWorld,
+            marquee.additive ? marquee.initialSelectedIds : []
+          );
+          this.vttStore.setSelectedTokens(matched);
+        }
+      }
+    }
+
     const dragLight = this.dragLightState();
     if (dragLight) {
       this.dragLightState.set(null);
@@ -2014,7 +2548,62 @@ export class VttCanvasComponent implements AfterViewInit {
             dragTok.currentHex.row !== dragTok.startHex.row ||
             startedOffCenter);
 
-      if (legValid) {
+      if (legValid && dragTok.companions.length > 0 && !keepChaining) {
+        this.chainedTokenMove.set(null);
+        const batchMoves: BatchTokenMoveInput[] = [];
+        if (dragTok.freeUnsnap) {
+          this.queueTokenTravelWaypoints(dragTok.tokenId, [
+            dragTok.startWorld,
+            dragTok.currentWorld,
+          ]);
+          batchMoves.push({
+            tokenId: dragTok.tokenId,
+            distanceFeet: dragTok.gridlessFeet,
+            freeOverride: dragTok.shiftOverride,
+            targetWorld: dragTok.currentWorld,
+          });
+        } else {
+          const pathSteps =
+            dragTok.pathResult.path.length > 1
+              ? dragTok.pathResult.path.slice(1)
+              : [dragTok.currentHex];
+          this.queueTokenTravelWaypoints(dragTok.tokenId, [
+            dragTok.startWorld,
+            ...pathSteps.map((h) => hexToWorldCenter(h, geom)),
+          ]);
+          batchMoves.push({
+            tokenId: dragTok.tokenId,
+            distanceFeet: dragTok.pathResult.feet,
+            freeOverride: dragTok.shiftOverride,
+            targetHex: dragTok.currentHex,
+          });
+        }
+
+        for (const comp of dragTok.companions) {
+          if (!comp.reachable && !dragTok.shiftOverride) continue;
+          this.queueTokenTravelWaypoints(comp.tokenId, [
+            comp.startWorld,
+            comp.currentWorld,
+          ]);
+          if (dragTok.freeUnsnap) {
+            batchMoves.push({
+              tokenId: comp.tokenId,
+              distanceFeet: comp.feet,
+              freeOverride: dragTok.shiftOverride,
+              targetWorld: comp.currentWorld,
+            });
+          } else {
+            batchMoves.push({
+              tokenId: comp.tokenId,
+              distanceFeet: comp.feet,
+              freeOverride: dragTok.shiftOverride,
+              targetHex: comp.currentHex,
+            });
+          }
+        }
+
+        void this.vttStore.moveTokensBatch(batchMoves, this.worldBounds());
+      } else if (legValid) {
         const legFeet = dragTok.freeUnsnap
           ? dragTok.gridlessFeet
           : dragTok.pathResult.feet;
@@ -2100,8 +2689,17 @@ export class VttCanvasComponent implements AfterViewInit {
             );
           }
         }
-      } else if (!keepChaining && existingChain) {
-        this.commitActiveChainedMove();
+      } else {
+        if (!dragTok.hasMoved) {
+          if (dragTok.toggleOffOnClick) {
+            this.vttStore.toggleTokenInSelection(dragTok.tokenId);
+          } else if (dragTok.narrowToSingleOnClick && !keepChaining) {
+            this.vttStore.selectSingleToken(dragTok.tokenId);
+          }
+        }
+        if (!keepChaining && existingChain) {
+          this.commitActiveChainedMove();
+        }
       }
     }
   }
@@ -3098,6 +3696,32 @@ export class VttCanvasComponent implements AfterViewInit {
           stroke,
           z
         );
+      }
+
+      if (dragTok.companions.length > 0) {
+        const sceneToks = this.vttStore.sceneTokens();
+        for (const comp of dragTok.companions) {
+          const compTok = sceneToks.find((t) => t.id === comp.tokenId);
+          const compStroke =
+            comp.reachable || dragTok.shiftOverride ? '#38B29A' : '#F43F5E';
+          this.strokeWorldRay(
+            ctx,
+            comp.startWorld,
+            comp.currentWorld,
+            compStroke,
+            z
+          );
+          if (compTok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
+            this.drawTokenDestinationGhost(
+              ctx,
+              comp.currentWorld,
+              compTok,
+              compStroke,
+              hexRadius,
+              z
+            );
+          }
+        }
       }
     }
 

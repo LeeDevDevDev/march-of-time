@@ -17,9 +17,15 @@ import { NotificationStore } from '../../core/notifications/notification.store';
 import { CompendiumIconComponent } from '../../shared/compendium-icon/compendium-icon.component';
 import { KeywordTextComponent } from '../../shared/keyword-text/keyword-text.component';
 import { SkillTreeCanvasComponent } from '../../shared/skill-tree-canvas/skill-tree-canvas.component';
+import { TokenAvatarComponent } from '../../shared/token-avatar/token-avatar.component';
+import {
+  TokenizerEditorComponent,
+  TokenizerVisualsPayload,
+} from '../../shared/token-avatar/tokenizer-editor.component';
 import {
   ARMOR_TIERS,
   ATTRIBUTE_LIST,
+  ActorInventoryItem,
   COMBAT_SKILL_LIST,
   CharacterModel,
   DerivedCharacterStats,
@@ -35,10 +41,12 @@ import {
   formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
   getUpgradeSlotKey,
+  hasCustomTokenAppearance,
   isCombatArtUpgradeNode,
   isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
+  normalizeInventoryItems,
 } from './models/character.model';
 import { CharacterStore } from './store/character.store';
 
@@ -60,6 +68,8 @@ export interface SheetRollResult {
     CompendiumIconComponent,
     KeywordTextComponent,
     SkillTreeCanvasComponent,
+    TokenAvatarComponent,
+    TokenizerEditorComponent,
   ],
   templateUrl: './character-detail.component.html',
 })
@@ -80,6 +90,8 @@ export class CharacterDetailComponent {
 
   readonly perkPickerOpen = signal(false);
   readonly perkPickerTab = signal<string>('');
+  readonly tokenizerModalOpen = signal(false);
+  readonly brokenPortraitUrl = signal<string | null>(null);
   readonly lastRoll = signal<SheetRollResult | null>(null);
 
   readonly characterId = computed(() => this.route.snapshot.paramMap.get('id') ?? '');
@@ -130,9 +142,33 @@ export class CharacterDetailComponent {
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
+    if (this.tokenizerModalOpen()) {
+      this.tokenizerModalOpen.set(false);
+      return;
+    }
     if (this.perkPickerOpen()) {
       this.perkPickerOpen.set(false);
     }
+  }
+
+  hasCustomToken(char: CharacterModel): boolean {
+    return (
+      Boolean(char.token_image_url) ||
+      hasCustomTokenAppearance(char.token_appearance)
+    );
+  }
+
+  async onCharacterVisualsChange(
+    char: CharacterModel,
+    payload: TokenizerVisualsPayload
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      portrait_url: payload.portrait_url,
+      token_image_url: payload.token_image_url,
+      token_appearance: payload.token_appearance,
+    }));
   }
 
   openPerkPicker(): void {
@@ -558,5 +594,87 @@ export class CharacterDetailComponent {
         unlocked_perk_ids: [...c.unlocked_perk_ids, node.id],
       };
     });
+  }
+
+  canEditCharacter(char: CharacterModel): boolean {
+    const uid = this.authStore.user()?.id ?? null;
+    return (uid !== null && char.owner_id === uid) || this.authStore.isAdmin();
+  }
+
+  getInventoryItems(char: CharacterModel): ActorInventoryItem[] {
+    return normalizeInventoryItems(char.inventory);
+  }
+
+  async addInventoryItem(char: CharacterModel): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    const newItem: ActorInventoryItem = {
+      id:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: 'New Item',
+      quantity: 1,
+      description: '',
+    };
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      inventory: [...normalizeInventoryItems(c.inventory), newItem],
+    }));
+  }
+
+  async updateInventoryItemField(
+    char: CharacterModel,
+    itemId: string,
+    field: 'name' | 'description',
+    value: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      inventory: normalizeInventoryItems(c.inventory).map((item) =>
+        item.id === itemId ? { ...item, [field]: value } : item
+      ),
+    }));
+  }
+
+  async adjustInventoryItemQuantity(
+    char: CharacterModel,
+    itemId: string,
+    delta: number
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      inventory: normalizeInventoryItems(c.inventory).map((item) =>
+        item.id === itemId
+          ? { ...item, quantity: Math.max(0, item.quantity + delta) }
+          : item
+      ),
+    }));
+  }
+
+  async removeInventoryItem(
+    char: CharacterModel,
+    itemId: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      inventory: normalizeInventoryItems(c.inventory).filter(
+        (item) => item.id !== itemId
+      ),
+    }));
+  }
+
+  async saveCharacterNotes(
+    char: CharacterModel,
+    notes: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    if ((char.notes ?? '') === notes) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      notes,
+    }));
   }
 }

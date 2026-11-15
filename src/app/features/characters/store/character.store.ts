@@ -8,8 +8,14 @@ import {
   UPGRADE_SLOT_PREFIX,
   computeDerivedStats,
   getUpgradeSlotKey,
+  normalizeInventoryItems,
+  normalizeTokenAppearance,
+  sanitizeOptionalImageUrl,
 } from '../models/character.model';
-import { CharacterService } from '../services/character.service';
+import {
+  CharacterService,
+  normalizeCharacterRecord,
+} from '../services/character.service';
 
 interface CharacterState {
   characters: CharacterModel[];
@@ -279,11 +285,56 @@ export class CharacterStore {
     return task;
   }
 
+  upsertRealtimeCharacter(incoming: CharacterModel): void {
+    const normalized = normalizeCharacterRecord(incoming);
+    const currentUserId = this.authStore.user()?.id ?? null;
+    this.#state.update((s) => {
+      const isOwned = currentUserId !== null && normalized.owner_id === currentUserId;
+      const hasInOwned = s.characters.some((c) => c.id === normalized.id);
+      const nextCharacters = isOwned
+        ? hasInOwned
+          ? s.characters.map((c) => (c.id === normalized.id ? normalized : c))
+          : s.hasLoaded
+            ? [normalized, ...s.characters]
+            : s.characters
+        : s.characters.filter((c) => c.id !== normalized.id);
+
+      const hasInExternal = s.externalCharacters.some(
+        (c) => c.id === normalized.id
+      );
+      const nextExternal = !isOwned
+        ? hasInExternal
+          ? s.externalCharacters.map((c) =>
+              c.id === normalized.id ? normalized : c
+            )
+          : [...s.externalCharacters, normalized]
+        : hasInExternal
+          ? s.externalCharacters.map((c) =>
+              c.id === normalized.id ? normalized : c
+            )
+          : s.externalCharacters;
+
+      const nextAdmin = s.adminDirectory.some((c) => c.id === normalized.id)
+        ? s.adminDirectory.map((c) =>
+            c.id === normalized.id ? normalized : c
+          )
+        : s.adminDirectory;
+
+      return {
+        ...s,
+        characters: nextCharacters,
+        externalCharacters: nextExternal,
+        adminDirectory: nextAdmin,
+      };
+    });
+  }
+
   async toggleAdminGrantedPerk(
     characterId: string,
-    node: PerkNodeModel
+    node: PerkNodeModel,
+    allowGmOverride = false
   ): Promise<void> {
-    if (!this.authStore.isAdmin()) return;
+    if (!this.authStore.isAdmin() && !allowGmOverride) return;
     const target = this.getCharacterById(characterId);
     if (!target) return;
     const has = target.unlocked_perk_ids.includes(node.id);
@@ -318,7 +369,8 @@ export class CharacterStore {
     draft: Omit<
       CharacterModel,
       'id' | 'owner_id' | 'current_hp' | 'current_sp' | 'current_ap' | 'active_cooldowns'
-    >
+    >,
+    options?: { silent?: boolean }
   ): Promise<CharacterModel | null> {
     const user = this.authStore.user();
     if (!user) return null;
@@ -350,6 +402,11 @@ export class CharacterStore {
         current_sp: derived.maxSp,
         current_ap: 4,
         active_cooldowns: {},
+        inventory: normalizeInventoryItems(draft.inventory),
+        notes: draft.notes ?? '',
+        portrait_url: sanitizeOptionalImageUrl(draft.portrait_url),
+        token_image_url: sanitizeOptionalImageUrl(draft.token_image_url),
+        token_appearance: normalizeTokenAppearance(draft.token_appearance),
       });
 
       if (error || !data) {
@@ -372,10 +429,12 @@ export class CharacterStore {
           : s.adminDirectory,
         isLoading: false,
       }));
-      this.notifications.success(
-        'Character Created',
-        `${data.name} (Level ${data.level}) is ready for the table.`
-      );
+      if (!options?.silent) {
+        this.notifications.success(
+          'Character Created',
+          `${data.name} (Level ${data.level}) is ready for the table.`
+        );
+      }
       return data;
     } catch {
       this.#state.update((s) => ({ ...s, isLoading: false }));
@@ -401,6 +460,20 @@ export class CharacterStore {
       ...updated,
       current_hp: Math.min(updated.current_hp, derived.maxHp),
       current_sp: Math.min(updated.current_sp, derived.maxSp),
+      inventory: normalizeInventoryItems(updated.inventory),
+      notes: updated.notes ?? current.notes ?? '',
+      portrait_url:
+        updated.portrait_url !== undefined
+          ? sanitizeOptionalImageUrl(updated.portrait_url)
+          : sanitizeOptionalImageUrl(current.portrait_url),
+      token_image_url:
+        updated.token_image_url !== undefined
+          ? sanitizeOptionalImageUrl(updated.token_image_url)
+          : sanitizeOptionalImageUrl(current.token_image_url),
+      token_appearance:
+        updated.token_appearance !== undefined
+          ? normalizeTokenAppearance(updated.token_appearance)
+          : normalizeTokenAppearance(current.token_appearance),
     };
 
     this.#state.update((s) => ({
@@ -461,6 +534,23 @@ export class CharacterStore {
       unlocked_perk_ids: draft.unlocked_perk_ids,
       current_hp: Math.min(nextDerived.maxHp, current.current_hp + hpDelta),
       current_sp: Math.min(nextDerived.maxSp, current.current_sp + spDelta),
+      inventory:
+        draft.inventory !== undefined
+          ? normalizeInventoryItems(draft.inventory)
+          : normalizeInventoryItems(current.inventory),
+      notes: draft.notes !== undefined ? draft.notes : (current.notes ?? ''),
+      portrait_url:
+        draft.portrait_url !== undefined
+          ? sanitizeOptionalImageUrl(draft.portrait_url)
+          : sanitizeOptionalImageUrl(current.portrait_url),
+      token_image_url:
+        draft.token_image_url !== undefined
+          ? sanitizeOptionalImageUrl(draft.token_image_url)
+          : sanitizeOptionalImageUrl(current.token_image_url),
+      token_appearance:
+        draft.token_appearance !== undefined
+          ? normalizeTokenAppearance(draft.token_appearance)
+          : normalizeTokenAppearance(current.token_appearance),
     };
 
     this.#state.update((s) => ({

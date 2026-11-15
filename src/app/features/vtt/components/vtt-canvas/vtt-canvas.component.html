@@ -141,13 +141,14 @@
 
     @for (item of renderableTokens(); track item.token.id) {
       <div
+        [attr.data-token-id]="item.token.id"
         (pointerdown)="onTokenPointerDown($event, item)"
         (contextmenu)="onTokenContextMenu($event, item)"
         [style.left.px]="item.center.x"
         [style.top.px]="item.center.y"
         class="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 select-none group"
-        [class.z-20]="item.isSelected || item.isTurnActive"
-        [class.z-10]="!item.isSelected && !item.isTurnActive"
+        [class.z-20]="dragTokenState()?.tokenId === item.token.id"
+        [class.z-10]="dragTokenState()?.tokenId !== item.token.id"
         [class.opacity-55]="item.token.is_hidden"
       >
         @if (item.isTurnActive) {
@@ -171,25 +172,38 @@
         <div
           [style.width.px]="item.radiusPx * 2"
           [style.height.px]="item.radiusPx * 2"
-          class="relative flex items-center justify-center rounded-full border-[3px] bg-[#0D1715] shadow-[0_6px_16px_rgba(0,0,0,0.75)] transition-transform"
-          [class.border-[#38B29A]]="item.token.faction === 'ally'"
-          [class.border-[#F43F5E]]="item.token.faction === 'enemy'"
-          [class.border-[#F59E0B]]="item.token.faction === 'neutral'"
-          [class.border-dashed]="item.token.is_hidden"
+          class="relative flex cursor-pointer items-center justify-center rounded-full shadow-[0_6px_16px_rgba(0,0,0,0.75)] transition-transform"
           [class.ring-2]="item.isSelected"
           [class.ring-white]="item.isSelected"
-          [class.grayscale]="item.token.current_hp <= 0"
-          [class.cursor-pointer]="item.isTargetable || item.isControllable"
         >
-          <app-compendium-icon
-            [icon]="item.token.icon || 'greatsword'"
-            [color]="item.token.color || (item.token.faction === 'ally' ? '#5EEAD4' : '#FDA4AF')"
-            sizeClass="h-6 w-6"
-          />
+          @if (item.rotationDeg !== 0) {
+            <div
+              class="pointer-events-none absolute inset-0 z-10"
+              [style.transform]="'rotate(' + item.rotationDeg + 'deg)'"
+            >
+              <span
+                class="absolute -top-1.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-[2px] border border-black/80 bg-[#5EEAD4] shadow"
+              ></span>
+            </div>
+          }
+
+          <div class="h-full w-full">
+            <app-token-avatar
+              [tokenImageUrl]="item.tokenImageUrl"
+              [appearance]="item.tokenAppearance"
+              [icon]="item.token.icon || 'greatsword'"
+              [color]="item.token.color || (item.token.faction === 'ally' ? '#5EEAD4' : '#FDA4AF')"
+              [faction]="item.token.faction"
+              [artTransform]="item.artTransform"
+              [isHidden]="item.token.is_hidden"
+              [grayscale]="item.token.current_hp <= 0"
+              iconSizeClass="h-1/2 w-1/2"
+            />
+          </div>
 
           @if (item.token.current_hp <= 0) {
             <div
-              class="absolute inset-0 flex items-center justify-center rounded-full bg-black/70 text-xs font-extrabold text-[#FDA4AF]"
+              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-full bg-black/70 text-xs font-extrabold text-[#FDA4AF]"
             >
               KO
             </div>
@@ -198,7 +212,7 @@
           @if (item.token.shield_raised) {
             <span
               title="Shield / Guard Raised"
-              class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[#7DD3FC] bg-[#0C2530] text-[10px] font-bold text-[#7DD3FC] shadow"
+              class="pointer-events-none absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-[#7DD3FC] bg-[#0C2530] text-[10px] font-bold text-[#7DD3FC] shadow"
             >
               🛡
             </span>
@@ -207,7 +221,7 @@
           @if (item.token.is_hidden) {
             <span
               title="Hidden from Players"
-              class="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[#FCD34D] bg-[#261909] text-[9px] font-bold text-[#FDE68A]"
+              class="pointer-events-none absolute -left-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-[#FCD34D] bg-[#261909] text-[9px] font-bold text-[#FDE68A]"
             >
               H
             </span>
@@ -280,47 +294,210 @@
     }
   </div>
 
+  @if (marqueeBoxRect(); as mBox) {
+    <div
+      data-vtt-marquee="true"
+      [style.left.px]="mBox.left"
+      [style.top.px]="mBox.top"
+      [style.width.px]="mBox.width"
+      [style.height.px]="mBox.height"
+      class="pointer-events-none absolute z-40 rounded-xs border border-[#5EEAD4] bg-[#38B29A]/15 shadow-[0_0_0_1px_rgba(6,11,10,0.45)]"
+    >
+      @if (mBox.count > 0) {
+        <span
+          class="absolute -top-5 left-0 whitespace-nowrap rounded bg-[#09100F]/95 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#5EEAD4] shadow"
+        >
+          {{ mBox.count }} selected
+        </span>
+      }
+    </div>
+  }
+
   @if (tokenContextMenu(); as tMenu) {
     @if (contextMenuToken(); as menuToken) {
+      @let targetTokens = contextMenuTargetTokens();
       <div
         (pointerdown)="$event.stopPropagation()"
         (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
         [style.left.px]="tMenu.screenX"
         [style.top.px]="tMenu.screenY"
-        class="mot-float absolute z-40 w-48 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+        class="mot-float absolute z-[75] w-56 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
       >
         <div class="flex items-center justify-between gap-1.5 border-b border-[#243B37] px-2.5 py-1.5">
           <span class="truncate font-display text-[11px] font-bold text-white">
-            {{ menuToken.name }}
+            @if (targetTokens.length > 1) {
+              {{ targetTokens.length }} Tokens Selected
+            } @else {
+              {{ menuToken.name }}
+            }
           </span>
-          <span
-            class="shrink-0 rounded px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase"
-            [class.bg-[#2B1D0E]]="menuToken.is_hidden"
-            [class.text-[#FDE68A]]="menuToken.is_hidden"
-            [class.bg-[#102B26]]="!menuToken.is_hidden"
-            [class.text-[#5EEAD4]]="!menuToken.is_hidden"
-          >
-            {{ menuToken.is_hidden ? 'Invisible' : 'Visible' }}
-          </span>
+          @if (targetTokens.length > 1) {
+            <span
+              class="shrink-0 rounded px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase"
+              [class.bg-[#2B1D0E]]="contextMenuSomeHidden()"
+              [class.text-[#FDE68A]]="contextMenuSomeHidden()"
+              [class.bg-[#102B26]]="!contextMenuSomeHidden()"
+              [class.text-[#5EEAD4]]="!contextMenuSomeHidden()"
+            >
+              {{ contextMenuAllHidden() ? 'Invisible' : contextMenuSomeHidden() ? 'Mixed' : 'Visible' }}
+            </span>
+          } @else {
+            <span
+              class="shrink-0 rounded px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase"
+              [class.bg-[#2B1D0E]]="menuToken.is_hidden"
+              [class.text-[#FDE68A]]="menuToken.is_hidden"
+              [class.bg-[#102B26]]="!menuToken.is_hidden"
+              [class.text-[#5EEAD4]]="!menuToken.is_hidden"
+            >
+              {{ menuToken.is_hidden ? 'Invisible' : 'Visible' }}
+            </span>
+          }
         </div>
 
         <div class="mt-1 space-y-0.5">
+          @if (targetTokens.length === 1) {
+            <button
+              type="button"
+              (click)="openTokenSheetFromMenu(menuToken.id)"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+            >
+              <svg class="h-3.5 w-3.5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <span>Open Sheet</span>
+            </button>
+          }
+
+          @if (vttStore.isGm()) {
+            <button
+              type="button"
+              (click)="toggleTokenHiddenFromMenu(menuToken)"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+            >
+              <svg class="h-3.5 w-3.5 text-[#FBBF24]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                @if (contextMenuAllHidden()) {
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                } @else {
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                }
+              </svg>
+              <span>
+                @if (targetTokens.length > 1) {
+                  {{ contextMenuAllHidden() ? 'Reveal All to Players' : 'Make Invisible (Hide)' }}
+                } @else {
+                  {{ menuToken.is_hidden ? 'Reveal to Players' : 'Make Invisible (Hide)' }}
+                }
+              </span>
+            </button>
+          }
+
+          @if (targetTokens.length === 1 || vttStore.isGm()) {
+            <div class="my-0.5 border-t border-[#243B37]"></div>
+          }
+
           <button
             type="button"
-            (click)="toggleTokenHiddenFromMenu(menuToken)"
+            (click)="toggleTokenFlipXFromMenu(menuToken.id)"
+            class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span class="flex items-center gap-2">
+              <svg class="h-3.5 w-3.5 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="7 8 3 12 7 16" />
+                <polyline points="17 8 21 12 17 16" />
+                <line x1="12" y1="4" x2="12" y2="20" />
+              </svg>
+              <span>Flip Horizontal</span>
+            </span>
+            @if (targetTokens.length === 1 && menuToken.npc_stats?.__flip_x) {
+              <span class="rounded bg-[#102B26] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                Flipped
+              </span>
+            }
+          </button>
+
+          <button
+            type="button"
+            (click)="toggleTokenFlipYFromMenu(menuToken.id)"
+            class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span class="flex items-center gap-2">
+              <svg class="h-3.5 w-3.5 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="8 7 12 3 16 7" />
+                <polyline points="8 17 12 21 16 17" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+              </svg>
+              <span>Flip Vertical</span>
+            </span>
+            @if (targetTokens.length === 1 && menuToken.npc_stats?.__flip_y) {
+              <span class="rounded bg-[#102B26] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                Flipped
+              </span>
+            }
+          </button>
+
+          <button
+            type="button"
+            (click)="rotateTokens90FromMenu(menuToken.id)"
+            class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span class="flex items-center gap-2">
+              <svg class="h-3.5 w-3.5 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <polyline points="21 3 21 8 16 8" />
+              </svg>
+              <span>Rotate 90° CW</span>
+            </span>
+            @if (targetTokens.length === 1 && getTokenRotationDegrees(menuToken) !== 0) {
+              <span class="rounded bg-[#102B26] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                {{ getTokenRotationDegrees(menuToken) }}°
+              </span>
+            } @else {
+              <span class="font-mono-num text-[9px] text-[#6B8E89]">Shift+Wheel</span>
+            }
+          </button>
+
+          @if (contextMenuAnyRotated()) {
+            <button
+              type="button"
+              (click)="resetTokensRotationFromMenu(menuToken.id)"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#8AB0AB] hover:bg-[#192B28] hover:text-white"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <polyline points="3 3 3 8 8 8" />
+              </svg>
+              <span>Reset Rotation (0°)</span>
+            </button>
+          }
+
+          <div class="my-0.5 border-t border-[#243B37]"></div>
+
+          <button
+            type="button"
+            (click)="bringTokenToFrontFromMenu(menuToken.id)"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
           >
-            <svg class="h-3.5 w-3.5 text-[#FBBF24]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              @if (menuToken.is_hidden) {
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                <circle cx="12" cy="12" r="3" />
-              } @else {
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              }
+            <svg class="h-3.5 w-3.5 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="17 11 12 6 7 11" />
+              <polyline points="17 18 12 13 7 18" />
             </svg>
-            <span>{{ menuToken.is_hidden ? 'Reveal to Players' : 'Make Invisible (Hide)' }}</span>
+            <span>Bring to Front</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="sendTokenToBackFromMenu(menuToken.id)"
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <svg class="h-3.5 w-3.5 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="7 13 12 18 17 13" />
+              <polyline points="7 6 12 11 17 6" />
+            </svg>
+            <span>Send to Back</span>
           </button>
 
           <div class="my-0.5 border-t border-[#243B37]"></div>
@@ -328,13 +505,18 @@
           <button
             type="button"
             (click)="removeTokenFromMenu(menuToken.id)"
-            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDA4AF] hover:bg-[#3B1822] hover:text-white"
+            class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDA4AF] hover:bg-[#3B1822] hover:text-white"
           >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-            <span>Remove Token</span>
+            <span class="flex items-center gap-2">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span>{{ targetTokens.length > 1 ? 'Remove ' + targetTokens.length + ' Tokens' : 'Remove Token' }}</span>
+            </span>
+            @if (settingsStore.preferences().showHotkeyBadges) {
+              <span class="font-mono-num text-[9px] text-[#FDA4AF]/75">{{ settingsStore.badges().delete_tokens }}</span>
+            }
           </button>
         </div>
       </div>
@@ -348,7 +530,7 @@
         (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
         [style.left.px]="menu.screenX"
         [style.top.px]="menu.screenY"
-        class="mot-float absolute z-40 w-44 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+        class="mot-float absolute z-[75] w-44 rounded-xl border border-[#243B37] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
       >
         <div class="flex items-center justify-between border-b border-[#243B37] px-2.5 py-1.5">
           <span class="font-display text-[11px] font-bold text-white">Light Source</span>
@@ -401,108 +583,102 @@
   }
 
   @if (editingLightDraft(); as draft) {
-    <div
-      (pointerdown)="$event.stopPropagation()"
-      (wheel)="$event.stopPropagation()"
-      (contextmenu)="$event.stopPropagation()"
-      class="mot-float absolute left-1/2 top-1/2 z-50 w-[min(92vw,340px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[#C4491A] bg-[#0D1615]/98 p-4 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-3.5"
+    <app-vtt-floating-window
+      windowTitle="Edit Light Source"
+      widthClass="w-[min(92vw,340px)]"
+      [estimatedWidth]="340"
+      [estimatedHeight]="360"
+      [accentBorder]="true"
+      [allowOverflow]="true"
+      (closed)="cancelEditingLight()"
     >
-      <div class="flex items-center justify-between border-b border-[#243B37] pb-2.5">
-        <div class="flex items-center gap-2">
-          <span
-            class="h-3 w-3 rounded-full border border-white/30"
-            [style.background-color]="draft.color"
-          ></span>
-          <h3 class="font-display text-sm font-bold text-white">Edit Light Source</h3>
-        </div>
-        <button
-          type="button"
-          (click)="cancelEditingLight()"
-          class="text-sm font-bold text-[#8AB0AB] hover:text-white"
-        >
-          &times;
-        </button>
-      </div>
+      <span
+        headerPrefix
+        class="h-3 w-3 shrink-0 rounded-full border border-white/30"
+        [style.background-color]="draft.color"
+      ></span>
 
-      <div class="grid grid-cols-2 gap-3">
-        <label class="block space-y-1">
-          <span class="font-bold text-white">Dim Range (ft)</span>
-          <input
-            type="number"
-            min="0"
-            max="300"
-            step="5"
-            [ngModel]="draft.dim_feet"
-            (ngModelChange)="updateEditLightDimFeet($event)"
-            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
+      <div class="p-4 space-y-3.5">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block space-y-1">
+            <span class="font-bold text-white">Dim Range (ft)</span>
+            <input
+              type="number"
+              min="0"
+              max="300"
+              step="5"
+              [ngModel]="draft.dim_feet"
+              (ngModelChange)="updateEditLightDimFeet($event)"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
+            />
+            <span class="block text-[10px] text-[#8AB0AB]">Total emitted radius</span>
+          </label>
+
+          <label class="block space-y-1">
+            <span class="font-bold text-white">Bright Range (ft)</span>
+            <input
+              type="number"
+              min="0"
+              max="300"
+              step="5"
+              [ngModel]="draft.bright_feet"
+              (ngModelChange)="updateEditLightBrightFeet($event)"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
+            />
+            <span class="block text-[10px] text-[#8AB0AB]">Inner bright core</span>
+          </label>
+        </div>
+
+        <div class="space-y-1.5">
+          <span class="block font-bold text-white">Light Color</span>
+          <app-color-picker
+            [color]="draft.color"
+            [presets]="lightColorSwatches"
+            mode="popover"
+            popoverAlign="right"
+            surfaceTheme="dark"
+            (colorChange)="updateEditLightColor($event)"
           />
-          <span class="block text-[10px] text-[#8AB0AB]">Total emitted radius</span>
+        </div>
+
+        <label class="flex cursor-pointer items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold">
+          <span>Emit Illumination</span>
+          <input
+            type="checkbox"
+            [ngModel]="draft.enabled"
+            (ngModelChange)="updateEditLightEnabled($event)"
+            class="h-4 w-4 accent-[#C4491A]"
+          />
         </label>
 
-        <label class="block space-y-1">
-          <span class="font-bold text-white">Bright Range (ft)</span>
-          <input
-            type="number"
-            min="0"
-            max="300"
-            step="5"
-            [ngModel]="draft.bright_feet"
-            (ngModelChange)="updateEditLightBrightFeet($event)"
-            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 font-mono-num text-sm font-bold text-white focus:border-[#C4491A] focus:outline-none"
-          />
-          <span class="block text-[10px] text-[#8AB0AB]">Inner bright core</span>
-        </label>
-      </div>
-
-      <div class="space-y-1.5">
-        <span class="block font-bold text-white">Light Color</span>
-        <app-color-picker
-          [color]="draft.color"
-          [presets]="lightColorSwatches"
-          mode="popover"
-          popoverAlign="right"
-          surfaceTheme="dark"
-          (colorChange)="updateEditLightColor($event)"
-        />
-      </div>
-
-      <label class="flex cursor-pointer items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold">
-        <span>Emit Illumination</span>
-        <input
-          type="checkbox"
-          [ngModel]="draft.enabled"
-          (ngModelChange)="updateEditLightEnabled($event)"
-          class="h-4 w-4 accent-[#C4491A]"
-        />
-      </label>
-
-      <div class="flex items-center justify-between gap-2 border-t border-[#243B37] pt-2.5">
-        <button
-          type="button"
-          (click)="deleteLightFromMenu(draft.lightId)"
-          class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-1.5 font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
-        >
-          Delete
-        </button>
-
-        <div class="flex items-center gap-2">
+        <div class="flex items-center justify-between gap-2 border-t border-[#243B37] pt-2.5">
           <button
             type="button"
-            (click)="cancelEditingLight()"
-            class="rounded-lg border border-[#243B37] bg-[#142220] px-3 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+            (click)="deleteLightFromMenu(draft.lightId)"
+            class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-1.5 font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
           >
-            Cancel
+            Delete
           </button>
-          <button
-            type="button"
-            (click)="saveEditingLight()"
-            class="btn-copper rounded-lg px-3.5 py-1.5 font-bold"
-          >
-            Save Light
-          </button>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              (click)="cancelEditingLight()"
+              class="rounded-lg border border-[#243B37] bg-[#142220] px-3 py-1.5 font-semibold text-[#8AB0AB] hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              (click)="saveEditingLight()"
+              class="btn-copper rounded-lg px-3.5 py-1.5 font-bold"
+            >
+              Save Light
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (chainedTokenMove(); as chain) {

@@ -121,11 +121,45 @@
                 class="flex items-center justify-between border-b border-[#243B37] bg-[#122220] px-5 py-4 text-[#EBF5F3]"
               >
                 <div class="flex items-center gap-3">
-                  <div
-                    class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C4491A] font-display text-sm font-bold text-white"
-                  >
-                    {{ char.name.slice(0, 2).toUpperCase() }}
-                  </div>
+                  @if (char.portrait_url && !brokenPortraitIds()[char.id]) {
+                    <div class="relative h-11 w-11 shrink-0">
+                      <img
+                        [src]="char.portrait_url"
+                        [alt]="char.name + ' portrait'"
+                        class="h-full w-full rounded-xl border border-[#243B37] object-cover"
+                        (error)="markPortraitError(char.id)"
+                      />
+                      @if (hasCustomToken(char)) {
+                        <div class="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-[#0D1615] p-0.5 shadow-sm">
+                          <app-token-avatar
+                            [tokenImageUrl]="char.token_image_url"
+                            [appearance]="char.token_appearance"
+                            icon="user"
+                            color="#38B29A"
+                            faction="ally"
+                            iconSizeClass="h-2.5 w-2.5"
+                          />
+                        </div>
+                      }
+                    </div>
+                  } @else if (hasCustomToken(char)) {
+                    <div class="h-11 w-11 shrink-0">
+                      <app-token-avatar
+                        [tokenImageUrl]="char.token_image_url"
+                        [appearance]="char.token_appearance"
+                        icon="user"
+                        color="#38B29A"
+                        faction="ally"
+                        iconSizeClass="h-5 w-5"
+                      />
+                    </div>
+                  } @else {
+                    <div
+                      class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#C4491A] font-display text-sm font-bold text-white"
+                    >
+                      {{ char.name.slice(0, 2).toUpperCase() }}
+                    </div>
+                  }
                   <div>
                     <h2 class="font-display text-base font-bold text-white">
                       {{ char.name }}

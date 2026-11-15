@@ -1,0 +1,330 @@
+@let portrait = displayPortraitUrl();
+@let tokenArt = cleanTokenImageUrl();
+@let app = liveAppearance();
+@let canEdit = editable();
+
+<div data-tokenizer-editor="true" class="space-y-3 text-xs text-[#EBF5F3]">
+  <div class="grid gap-3 sm:grid-cols-[200px_1fr]">
+    <div class="flex flex-col justify-between rounded-xl border border-[#243B37] bg-[#142220] p-3">
+      <div>
+        <div class="mb-2 flex items-center justify-between gap-1.5">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+              Sheet Portrait
+            </div>
+            <div class="text-[10px] text-[#648782]">
+              Character &amp; directory art
+            </div>
+          </div>
+          @if (portrait) {
+            <span class="rounded bg-[#38B29A]/15 px-1.5 py-0.5 font-mono-num text-[9px] font-bold uppercase text-[#5EEAD4]">
+              Custom
+            </span>
+          }
+        </div>
+
+        <div class="relative mx-auto flex aspect-[3/4] w-full max-w-[168px] items-center justify-center overflow-hidden rounded-xl border border-[#243B37] bg-[#09100F] shadow-inner">
+          @if (portrait) {
+            <img
+              data-portrait-preview="true"
+              [src]="portrait"
+              [alt]="actorName()"
+              (error)="onPortraitImageError()"
+              class="h-full w-full object-cover"
+            />
+          } @else {
+            <div class="flex flex-col items-center gap-1.5 px-3 text-center">
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl border border-[#243B37] bg-[#142220] font-display text-xl font-bold text-[#8AB0AB]">
+                {{ actorInitial() }}
+              </div>
+              <span class="text-[10px] text-[#648782]">No portrait selected</span>
+            </div>
+          }
+
+          @if (uploadingSlot() === 'portrait') {
+            <div class="absolute inset-0 flex items-center justify-center bg-black/70 text-[11px] font-bold text-[#FDBA74]">
+              Uploading...
+            </div>
+          }
+        </div>
+      </div>
+
+      @if (canEdit) {
+        <div class="mt-2.5 space-y-1.5">
+          <div class="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              (click)="openAssetPickerForSlot('portrait')"
+              class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] hover:text-white"
+            >
+              Library
+            </button>
+            <label class="flex cursor-pointer items-center justify-center rounded-lg border border-[#C4491A]/60 bg-[#27160E] px-2 py-1.5 text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white">
+              <span>Upload</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                class="hidden"
+                (change)="onQuickUploadFile('portrait', $event)"
+              />
+            </label>
+          </div>
+          @if (cleanPortraitUrl()) {
+            <button
+              type="button"
+              (click)="applyUrlToSlot('portrait', null)"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+            >
+              Clear Portrait
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="rounded-xl border border-[#243B37] bg-[#142220] p-3">
+      <div class="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+            Tokenizer Studio
+          </div>
+          <div class="text-[10px] text-[#648782]">
+            Independent battlemap token art, crop &amp; border frame
+          </div>
+        </div>
+        <span class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+          Shape: Circle
+        </span>
+      </div>
+
+      <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+        <div class="flex shrink-0 flex-col items-center gap-1.5">
+          <div
+            #tokenStage
+            data-tokenizer-stage="true"
+            (pointerdown)="onStagePointerDown($event)"
+            (pointermove)="onStagePointerMove($event)"
+            (pointerup)="onStagePointerUp($event)"
+            (pointercancel)="onStagePointerUp($event)"
+            (wheel)="onStageWheel($event)"
+            class="relative flex h-36 w-36 items-center justify-center rounded-2xl border border-[#243B37] bg-[#09100F] p-2.5 shadow-inner touch-none"
+            [class.cursor-grab]="canEdit && !!tokenArt && !isPanning()"
+            [class.cursor-grabbing]="isPanning()"
+            [title]="tokenArt && canEdit ? 'Drag to pan token art · Mouse wheel to zoom' : 'Token preview'"
+          >
+            <div class="pointer-events-none h-full w-full">
+              <app-token-avatar
+                [tokenImageUrl]="tokenArt"
+                [appearance]="app"
+                [icon]="fallbackIcon()"
+                [color]="fallbackColor()"
+                [faction]="faction()"
+                iconSizeClass="h-12 w-12"
+              />
+            </div>
+
+            @if (uploadingSlot() === 'token' || uploadingSlot() === 'frame') {
+              <div class="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/70 text-[11px] font-bold text-[#FDBA74]">
+                Uploading...
+              </div>
+            }
+          </div>
+
+          <span class="text-center text-[10px] text-[#648782]">
+            @if (tokenArt && canEdit) {
+              Drag to pan &middot; Scroll to zoom
+            } @else if (tokenArt) {
+              Custom token art active
+            } @else {
+              Using emblem fallback
+            }
+          </span>
+        </div>
+
+        <div class="min-w-0 flex-1 space-y-2.5 w-full">
+          @if (canEdit) {
+            <div class="flex flex-wrap gap-1.5">
+              @if (cleanPortraitUrl()) {
+                <button
+                  type="button"
+                  data-stamp-from-portrait="true"
+                  (click)="stampTokenFromPortrait()"
+                  class="rounded-lg border border-[#38B29A]/60 bg-[#0E2823] px-2.5 py-1.5 text-[11px] font-bold text-[#5EEAD4] hover:border-[#38B29A] hover:text-white"
+                  title="Copy the Sheet Portrait into Token Art so you can zoom and frame the face independently"
+                >
+                  Stamp from Portrait
+                </button>
+              }
+              <button
+                type="button"
+                (click)="openAssetPickerForSlot('token')"
+                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] hover:text-white"
+              >
+                Token Library
+              </button>
+              <label class="flex cursor-pointer items-center justify-center rounded-lg border border-[#C4491A]/60 bg-[#27160E] px-2.5 py-1.5 text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white">
+                <span>Upload Token</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  class="hidden"
+                  (change)="onQuickUploadFile('token', $event)"
+                />
+              </label>
+              @if (tokenArt) {
+                <button
+                  type="button"
+                  (click)="applyUrlToSlot('token', null)"
+                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                >
+                  Use Emblem
+                </button>
+              }
+            </div>
+          }
+
+          @if (tokenArt && canEdit) {
+            <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-2">
+              <div class="mb-1 flex items-center justify-between gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Zoom ({{ (app.scale * 100).toFixed(0) }}%)
+                </span>
+                @if (hasCropAdjustment()) {
+                  <button
+                    type="button"
+                    (click)="resetTokenCrop()"
+                    class="text-[10px] font-bold text-[#FDBA74] hover:underline"
+                  >
+                    Reset Crop
+                  </button>
+                }
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="3"
+                step="0.05"
+                [value]="app.scale"
+                (input)="onScaleSliderInput($any($event.target).value)"
+                (change)="onScaleSliderCommit($any($event.target).value)"
+                class="w-full accent-[#C4491A]"
+              />
+            </div>
+          }
+
+          <div>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Token Border Frame
+              </span>
+              <span class="truncate text-[10px] text-[#648782]">
+                {{ activeFrameMeta().label }}
+              </span>
+            </div>
+            <div class="grid grid-cols-4 gap-1 sm:grid-cols-7">
+              @for (preset of framePresets; track preset.id) {
+                <button
+                  type="button"
+                  [disabled]="!canEdit"
+                  [attr.data-frame-preset]="preset.id"
+                  (click)="selectFramePreset(preset.id)"
+                  class="rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold transition-colors disabled:opacity-60"
+                  [class.border-[#C4491A]]="app.frame === preset.id"
+                  [class.bg-[#27160E]]="app.frame === preset.id"
+                  [class.text-[#FDBA74]]="app.frame === preset.id"
+                  [class.border-[#243B37]]="app.frame !== preset.id"
+                  [class.bg-[#09100F]]="app.frame !== preset.id"
+                  [class.text-[#8AB0AB]]="app.frame !== preset.id"
+                  [class.hover:text-white]="canEdit && app.frame !== preset.id"
+                  [title]="preset.description"
+                >
+                  {{ preset.shortLabel }}
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (app.frame === 'custom_png') {
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-2">
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Custom Frame PNG
+                </div>
+                <div class="truncate text-[10px] text-[#648782]">
+                  {{ app.custom_frame_url ? 'Transparent PNG ring active' : 'Select or upload a transparent ring PNG' }}
+                </div>
+              </div>
+              @if (canEdit) {
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    (click)="openAssetPickerForSlot('frame')"
+                    class="rounded-lg border border-[#243B37] bg-[#142220] px-2 py-1 text-[10px] font-semibold text-[#EBF5F3] hover:border-[#C4491A]"
+                  >
+                    Library PNG
+                  </button>
+                  <label class="flex cursor-pointer items-center justify-center rounded-lg border border-[#C4491A]/60 bg-[#27160E] px-2 py-1 text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]">
+                    <span>Upload PNG</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/webp,image/svg+xml"
+                      class="hidden"
+                      (change)="onQuickUploadFile('frame', $event)"
+                    />
+                  </label>
+                  @if (app.custom_frame_url) {
+                    <button
+                      type="button"
+                      (click)="applyUrlToSlot('frame', null)"
+                      class="rounded-lg border border-[#243B37] bg-[#142220] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                    >
+                      Clear
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          } @else if (app.frame !== 'none' && canEdit) {
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Frame Tint
+              </span>
+              <div class="flex items-center gap-2">
+                <app-color-picker
+                  mode="popover"
+                  surfaceTheme="dark"
+                  popoverAlign="right"
+                  [color]="effectiveRingColor()"
+                  [presets]="ringColorSwatches"
+                  (colorChange)="onFrameColorChange($event)"
+                />
+                @if (app.frame_color) {
+                  <button
+                    type="button"
+                    (click)="clearCustomFrameColor()"
+                    class="rounded border border-[#243B37] bg-[#142220] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
+                    title="Inherit Actor or Faction Color"
+                  >
+                    Auto Color
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@if (!externalAssetPicker() && internalPickerSlot() !== null) {
+  <app-asset-browser-modal
+    [open]="true"
+    [floating]="floatingAssetPicker()"
+    mode="picker"
+    purpose="characters"
+    [currentUrl]="internalPickerCurrentUrl()"
+    (closed)="closeInternalAssetPicker()"
+    (assetSelected)="onInternalAssetSelected($event)"
+  />
+}

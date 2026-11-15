@@ -895,39 +895,175 @@
           </div>
         }
 
-        @if (vttStore.selectedToken(); as tok) {
+        @if (multiSelectedTokens().length > 1) {
           <div
-            class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+            data-vtt-multi-hud="true"
+            class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#38B29A]/70 bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
           >
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div class="flex items-center gap-2.5">
-                <div
-                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 bg-[#142220]"
-                  [class.border-[#38B29A]]="tok.faction === 'ally'"
-                  [class.border-[#F43F5E]]="tok.faction === 'enemy'"
-                  [class.border-[#F59E0B]]="tok.faction === 'neutral'"
-                >
-                  <app-compendium-icon
-                    [icon]="tok.icon || 'greatsword'"
-                    [color]="tok.color || '#5EEAD4'"
-                    sizeClass="h-4 w-4"
-                  />
+                <div class="flex -space-x-2">
+                  @for (mTok of multiSelectedTokens().slice(0, 4); track mTok.id) {
+                    @let mVis = vttStore.resolveTokenVisuals(mTok);
+                    <div
+                      class="h-7 w-7 shrink-0 rounded-full ring-1 ring-[#09100F]"
+                    >
+                      <app-token-avatar
+                        [tokenImageUrl]="mVis.tokenImageUrl"
+                        [appearance]="mVis.tokenAppearance"
+                        [icon]="mTok.icon || 'greatsword'"
+                        [color]="mTok.color || '#5EEAD4'"
+                        [faction]="mTok.faction"
+                        [isHidden]="mTok.is_hidden"
+                        [grayscale]="mTok.current_hp <= 0"
+                        iconSizeClass="h-3.5 w-3.5"
+                      />
+                    </div>
+                  }
                 </div>
                 <div>
-                  <div class="flex items-center gap-2">
-                    <span class="font-display text-sm font-bold text-white">{{ tok.name }}</span>
-                    <span class="font-mono-num text-[11px] text-[#8AB0AB]">
-                      Move {{ tok.move_feet }} ft &middot; DR {{ tok.armor_dr }}
-                      @if (tok.shield_block > 0) {
-                        &middot; Block {{ tok.shield_block }}
-                      }
-                    </span>
+                  <div class="font-display text-sm font-bold text-white">
+                    {{ multiSelectedTokens().length }} Tokens Selected
+                  </div>
+                  <div class="text-[10px] text-[#8AB0AB]">
+                    Drag group to move &middot; Shift+Scroll to rotate
                   </div>
                 </div>
               </div>
 
-              <div class="flex flex-wrap items-center gap-2">
-                @if (vttStore.canControlToken(tok)) {
+              <div class="flex flex-wrap items-center gap-1.5">
+                @if (vttStore.isGm()) {
+                  <button
+                    type="button"
+                    (click)="toggleMultiSelectedHidden()"
+                    class="rounded-md border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                    [class.border-[#FBBF24]]="multiSelectedAllHidden()"
+                    [class.bg-[#2B1D0E]]="multiSelectedAllHidden()"
+                    [class.text-[#FDE68A]]="multiSelectedAllHidden()"
+                    [class.border-[#243B37]]="!multiSelectedAllHidden()"
+                    [class.bg-[#142220]]="!multiSelectedAllHidden()"
+                    [class.text-[#EBF5F3]]="!multiSelectedAllHidden()"
+                    [class.hover:border-[#FBBF24]]="!multiSelectedAllHidden()"
+                  >
+                    {{ multiSelectedAllHidden() ? 'Reveal All' : 'Make Invisible' }}
+                  </button>
+                }
+
+                <button
+                  type="button"
+                  (click)="flipMultiSelectedHorizontal()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+                  title="Flip Horizontal"
+                >
+                  Flip H
+                </button>
+
+                <button
+                  type="button"
+                  (click)="flipMultiSelectedVertical()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+                  title="Flip Vertical"
+                >
+                  Flip V
+                </button>
+
+                <button
+                  type="button"
+                  (click)="rotateMultiSelectedBy(90)"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+                  title="Rotate 90° Clockwise (or hold Shift + Mouse Wheel)"
+                >
+                  Rotate 90°
+                </button>
+
+                @if (multiSelectedAnyRotated()) {
+                  <button
+                    type="button"
+                    (click)="resetMultiSelectedRotation()"
+                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+                    title="Reset Rotation to 0°"
+                  >
+                    Reset 0°
+                  </button>
+                }
+
+                <button
+                  type="button"
+                  (click)="bringMultiSelectedToFront()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+                  title="Bring Selected Tokens to Front"
+                >
+                  Front
+                </button>
+
+                <button
+                  type="button"
+                  (click)="sendMultiSelectedToBack()"
+                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+                  title="Send Selected Tokens to Back"
+                >
+                  Back
+                </button>
+
+                <button
+                  type="button"
+                  (click)="removeMultiSelectedTokens()"
+                  class="rounded-md border border-[#6E293B] bg-[#3B1822] px-2.5 py-1 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+                  [title]="'Remove Selected Tokens from Scene (' + settingsStore.badges().delete_tokens + ')'"
+                >
+                  Remove
+                </button>
+
+                <button
+                  type="button"
+                  (click)="vttStore.clearTokenSelection()"
+                  class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                  title="Clear Selection"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        } @else if (vttStore.selectedToken(); as tok) {
+          @if (vttStore.isGm() || vttStore.canControlToken(tok)) {
+            @let tokVis = vttStore.resolveTokenVisuals(tok);
+            <div
+              class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    (click)="vttStore.openTokenSheet(tok.id)"
+                    title="Open Sheet"
+                    class="h-9 w-9 shrink-0 rounded-full transition-transform hover:scale-105"
+                  >
+                    <app-token-avatar
+                      [tokenImageUrl]="tokVis.tokenImageUrl"
+                      [appearance]="tokVis.tokenAppearance"
+                      [icon]="tok.icon || 'greatsword'"
+                      [color]="tok.color || '#5EEAD4'"
+                      [faction]="tok.faction"
+                      [isHidden]="tok.is_hidden"
+                      [grayscale]="tok.current_hp <= 0"
+                      iconSizeClass="h-4 w-4"
+                    />
+                  </button>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="font-display text-sm font-bold text-white">{{ tok.name }}</span>
+                      <span class="font-mono-num text-[11px] text-[#8AB0AB]">
+                        Move {{ tok.move_feet }} ft &middot; DR {{ tok.armor_dr }}
+                        @if (tok.shield_block > 0) {
+                          &middot; Block {{ tok.shield_block }}
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
                   <div class="flex items-center gap-1 rounded-lg border border-[#6E293B] bg-[#251018] px-2 py-0.5 font-mono-num">
                     <span class="text-[10px] font-bold text-[#FDA4AF]">HP</span>
                     <button type="button" (click)="adjustTokenStat(tok, 'current_hp', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
@@ -948,188 +1084,156 @@
                     <span class="font-bold text-white">{{ tok.current_ap }}/{{ tok.max_ap }}</span>
                     <button type="button" (click)="adjustTokenStat(tok, 'current_ap', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
                   </div>
-                } @else {
-                  <span class="font-mono-num text-[#8AB0AB]">
-                    HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }}
-                  </span>
-                }
 
-                @if (vttStore.isGm()) {
-                  <button
-                    type="button"
-                    (click)="vttStore.toggleTokenHidden(tok.id)"
-                    class="rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
-                    [class.border-[#FBBF24]]="tok.is_hidden"
-                    [class.bg-[#2B1D0E]]="tok.is_hidden"
-                    [class.text-[#FDE68A]]="tok.is_hidden"
-                    [class.border-[#243B37]]="!tok.is_hidden"
-                    [class.bg-[#142220]]="!tok.is_hidden"
-                    [class.text-[#8AB0AB]]="!tok.is_hidden"
-                    title="Toggle Token Visibility to Players (Stage invisible tokens in the scene padding)"
-                  >
-                    {{ tok.is_hidden ? 'Invisible (Reveal)' : 'Hide Token' }}
-                  </button>
-                }
-
-                <button
-                  type="button"
-                  (click)="dockCollapsed.update(v => !v)"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
-                >
-                  {{ dockCollapsed() ? 'Expand' : 'Minimize' }}
-                </button>
-              </div>
-            </div>
-
-            @if (!dockCollapsed() && vttStore.canControlToken(tok)) {
-              <div class="mt-2.5 space-y-2 border-t border-[#243B37] pt-2.5">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    [disabled]="tok.current_ap < 1 || tok.current_sp >= tok.max_sp"
-                    (click)="vttStore.performStanceRecovery(tok)"
-                    class="rounded-lg border border-[#1E5263] bg-[#112E38] px-2.5 py-1 text-[11px] font-bold text-[#7DD3FC] hover:border-[#38BDF8] disabled:opacity-45"
-                  >
-                    1 AP: Stance Recovery
-                  </button>
-
-                  @if (tok.shield_block > 0) {
+                  @if (vttStore.isGm()) {
                     <button
                       type="button"
-                      [disabled]="!tok.shield_raised && tok.current_ap < 1"
-                      (click)="vttStore.toggleTokenRaiseShield(tok)"
-                      class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:opacity-45"
-                      [class.border-[#38BDF8]]="tok.shield_raised"
-                      [class.bg-[#0E3342]]="tok.shield_raised"
-                      [class.text-white]="tok.shield_raised"
-                      [class.border-[#243B37]]="!tok.shield_raised"
-                      [class.bg-[#142220]]="!tok.shield_raised"
-                      [class.text-[#BAE6FD]]="!tok.shield_raised"
+                      (click)="vttStore.toggleTokenHidden(tok.id)"
+                      class="rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
+                      [class.border-[#FBBF24]]="tok.is_hidden"
+                      [class.bg-[#2B1D0E]]="tok.is_hidden"
+                      [class.text-[#FDE68A]]="tok.is_hidden"
+                      [class.border-[#243B37]]="!tok.is_hidden"
+                      [class.bg-[#142220]]="!tok.is_hidden"
+                      [class.text-[#8AB0AB]]="!tok.is_hidden"
+                      title="Toggle Token Visibility to Players (Stage invisible tokens in the scene padding)"
                     >
-                      {{ tok.shield_raised ? 'Guard Raised (Lower)' : '1 AP: Raise Guard' }}
+                      {{ tok.is_hidden ? 'Invisible (Reveal)' : 'Hide Token' }}
                     </button>
                   }
 
-                  @if (vttStore.selectedTokenDerived(); as stats) {
+                  <button
+                    type="button"
+                    (click)="vttStore.openTokenSheet(tok.id)"
+                    class="rounded-md border border-[#C4491A]/70 bg-[#27160E] px-2 py-0.5 text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white"
+                  >
+                    Sheet
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="dockCollapsed.update(v => !v)"
+                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                  >
+                    {{ dockCollapsed() ? 'Expand' : 'Minimize' }}
+                  </button>
+                </div>
+              </div>
+
+              @if (!dockCollapsed()) {
+                <div class="mt-2.5 space-y-2 border-t border-[#243B37] pt-2.5">
+                  <div class="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
-                      [disabled]="tok.current_ap < 1"
-                      (click)="vttStore.switchCharacterWeaponSlotInVtt(tok)"
-                      class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-45"
+                      [disabled]="tok.current_ap < 1 || tok.current_sp >= tok.max_sp"
+                      (click)="vttStore.performStanceRecovery(tok)"
+                      class="rounded-lg border border-[#1E5263] bg-[#112E38] px-2.5 py-1 text-[11px] font-bold text-[#7DD3FC] hover:border-[#38BDF8] disabled:opacity-45"
                     >
-                      1 AP: Switch Slot
+                      1 AP: Stance Recovery
                     </button>
 
-                    <button
-                      type="button"
-                      [disabled]="tok.current_ap < (stats.activeWeapon?.ap_cost ?? 1)"
-                      (click)="vttStore.beginWeaponTargetSelection(tok, stats.activeWeapon, stats)"
-                      class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
-                    >
-                      {{ stats.activeWeapon?.ap_cost ?? 1 }} AP: {{ stats.activeWeapon?.name || 'Unarmed' }} (+{{ stats.attackRollMod }} &middot; {{ stats.flatWeaponDamage }} DMG)
-                    </button>
-
-                    @for (art of stats.resolvedCombatArts; track art.baseNode.id) {
-                      @let cd = vttStore.getPerkCooldown(vttStore.selectedTokenCharacter(), art.baseNode.id);
+                    @if (tok.shield_block > 0) {
                       <button
                         type="button"
-                        [disabled]="cd > 0 || tok.current_ap < art.apCost || !art.meetsWeaponRequirement"
-                        (click)="triggerArtFromDock(tok, art)"
-                        [title]="!art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description"
-                        class="flex items-center gap-1.5 rounded-lg border border-[#784321] bg-[#2B180C] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] hover:border-[#FB923C] disabled:opacity-40"
+                        [disabled]="!tok.shield_raised && tok.current_ap < 1"
+                        (click)="vttStore.toggleTokenRaiseShield(tok)"
+                        class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:opacity-45"
+                        [class.border-[#38BDF8]]="tok.shield_raised"
+                        [class.bg-[#0E3342]]="tok.shield_raised"
+                        [class.text-white]="tok.shield_raised"
+                        [class.border-[#243B37]]="!tok.shield_raised"
+                        [class.bg-[#142220]]="!tok.shield_raised"
+                        [class.text-[#BAE6FD]]="!tok.shield_raised"
                       >
-                        <span>{{ art.apCost }} AP: {{ art.baseNode.name }}</span>
-                        @if (art.appliedUpgrades.length > 0) {
-                          <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
-                        }
-                        @if (cd > 0) {
-                          <span class="rounded bg-black/50 px-1 font-mono-num text-[10px] text-[#FDA4AF]">
-                            CD {{ cd }}
-                          </span>
-                        } @else if (!art.meetsWeaponRequirement) {
-                          <span class="rounded bg-black/50 px-1 text-[10px] text-[#FDA4AF]">
-                            Req Weapon
-                          </span>
-                        }
+                        {{ tok.shield_raised ? 'Guard Raised (Lower)' : '1 AP: Raise Guard' }}
                       </button>
                     }
-                  } @else {
-                    <button
-                      type="button"
-                      [disabled]="tok.current_ap < (tok.npc_stats.attack_ap ?? 1)"
-                      (click)="vttStore.beginWeaponTargetSelection(tok)"
-                      class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
-                    >
-                      {{ tok.npc_stats.attack_ap ?? 1 }} AP: {{ tok.npc_stats.weapon_name || 'Melee Strike' }} (+{{ tok.npc_stats.attack_mod ?? 3 }} &middot; {{ tok.npc_stats.flat_damage ?? 4 }} DMG)
-                    </button>
-                  }
-                </div>
 
-                <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                  <div class="flex flex-wrap items-center gap-1">
-                    <span class="text-[#8AB0AB]">Statuses:</span>
-                    @for (st of statusOptions; track st) {
+                    @if (vttStore.selectedTokenDerived(); as stats) {
                       <button
                         type="button"
-                        (click)="vttStore.toggleTokenStatus(tok, st)"
-                        class="rounded border px-1.5 py-0.5 text-[10px] font-bold transition-colors"
-                        [class.border-[#F43F5E]]="tok.statuses.includes(st)"
-                        [class.bg-[#3B1822]]="tok.statuses.includes(st)"
-                        [class.text-[#FDA4AF]]="tok.statuses.includes(st)"
-                        [class.border-[#243B37]]="!tok.statuses.includes(st)"
-                        [class.bg-[#142220]]="!tok.statuses.includes(st)"
-                        [class.text-[#8AB0AB]]="!tok.statuses.includes(st)"
+                        [disabled]="tok.current_ap < 1"
+                        (click)="vttStore.switchCharacterWeaponSlotInVtt(tok)"
+                        class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-45"
                       >
-                        {{ st }}
+                        1 AP: Switch Slot
+                      </button>
+
+                      <button
+                        type="button"
+                        [disabled]="tok.current_ap < (stats.activeWeapon?.ap_cost ?? 1)"
+                        (click)="vttStore.beginWeaponTargetSelection(tok, stats.activeWeapon, stats)"
+                        class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
+                      >
+                        {{ stats.activeWeapon?.ap_cost ?? 1 }} AP: {{ stats.activeWeapon?.name || 'Unarmed' }} (+{{ stats.attackRollMod }} &middot; {{ stats.flatWeaponDamage }} DMG)
+                      </button>
+
+                      @for (art of stats.resolvedCombatArts; track art.baseNode.id) {
+                        @let cd = vttStore.getPerkCooldown(vttStore.selectedTokenCharacter(), art.baseNode.id);
+                        <button
+                          type="button"
+                          [disabled]="cd > 0 || tok.current_ap < art.apCost || !art.meetsWeaponRequirement"
+                          (click)="triggerArtFromDock(tok, art)"
+                          [title]="!art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description"
+                          class="flex items-center gap-1.5 rounded-lg border border-[#784321] bg-[#2B180C] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] hover:border-[#FB923C] disabled:opacity-40"
+                        >
+                          <span>{{ art.apCost }} AP: {{ art.baseNode.name }}</span>
+                          @if (art.appliedUpgrades.length > 0) {
+                            <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
+                          }
+                          @if (cd > 0) {
+                            <span class="rounded bg-black/50 px-1 font-mono-num text-[10px] text-[#FDA4AF]">
+                              CD {{ cd }}
+                            </span>
+                          } @else if (!art.meetsWeaponRequirement) {
+                            <span class="rounded bg-black/50 px-1 text-[10px] text-[#FDA4AF]">
+                              Req Weapon
+                            </span>
+                          }
+                        </button>
+                      }
+                    } @else {
+                      <button
+                        type="button"
+                        [disabled]="tok.current_ap < (tok.npc_stats.attack_ap ?? 1)"
+                        (click)="vttStore.beginWeaponTargetSelection(tok)"
+                        class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
+                      >
+                        {{ tok.npc_stats.attack_ap ?? 1 }} AP: {{ tok.npc_stats.weapon_name || 'Melee Strike' }} (+{{ tok.npc_stats.attack_mod ?? 3 }} &middot; {{ tok.npc_stats.flat_damage ?? 4 }} DMG)
                       </button>
                     }
                   </div>
 
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div class="flex flex-wrap items-center gap-1">
+                      <span class="text-[#8AB0AB]">Statuses:</span>
+                      @for (st of statusOptions; track st) {
+                        <button
+                          type="button"
+                          (click)="vttStore.toggleTokenStatus(tok, st)"
+                          class="rounded border px-1.5 py-0.5 text-[10px] font-bold transition-colors"
+                          [class.border-[#F43F5E]]="tok.statuses.includes(st)"
+                          [class.bg-[#3B1822]]="tok.statuses.includes(st)"
+                          [class.text-[#FDA4AF]]="tok.statuses.includes(st)"
+                          [class.border-[#243B37]]="!tok.statuses.includes(st)"
+                          [class.bg-[#142220]]="!tok.statuses.includes(st)"
+                          [class.text-[#8AB0AB]]="!tok.statuses.includes(st)"
+                        >
+                          {{ st }}
+                        </button>
+                      }
+                    </div>
+
                     <span
                       class="rounded border border-[#243B37] bg-[#0B1413] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#A7F3D0]"
                     >
                       Sight: {{ getTokenEffectiveSightLabel(tok) }}
                     </span>
-                    <span class="text-[#8AB0AB]">Carried Light:</span>
-                    <button
-                      type="button"
-                      (click)="setTokenTorchPreset(tok, 'off')"
-                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
-                      [class.border-[#C4491A]]="tok.light_dim_feet === 0"
-                      [class.text-white]="tok.light_dim_feet === 0"
-                      [class.border-[#243B37]]="tok.light_dim_feet !== 0"
-                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 0"
-                    >
-                      None
-                    </button>
-                    <button
-                      type="button"
-                      (click)="setTokenTorchPreset(tok, 'lantern')"
-                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
-                      [class.border-[#FBBF24]]="tok.light_dim_feet === 30"
-                      [class.text-[#FDE68A]]="tok.light_dim_feet === 30"
-                      [class.border-[#243B37]]="tok.light_dim_feet !== 30"
-                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 30"
-                    >
-                      Lantern 30ft
-                    </button>
-                    <button
-                      type="button"
-                      (click)="setTokenTorchPreset(tok, 'torch')"
-                      class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
-                      [class.border-[#FB923C]]="tok.light_dim_feet === 40"
-                      [class.text-[#FDBA74]]="tok.light_dim_feet === 40"
-                      [class.border-[#243B37]]="tok.light_dim_feet !== 40"
-                      [class.text-[#8AB0AB]]="tok.light_dim_feet !== 40"
-                    >
-                      Torch 40ft
-                    </button>
                   </div>
                 </div>
-              </div>
-            }
-          </div>
+              }
+            </div>
+          }
         }
       </div>
 
@@ -1229,6 +1333,7 @@
                     @let oocCard = isOocLog(entry);
                     @let gmUserCard = isGmUserLog(entry);
                     @let speakerColor = getLogSpeakerColor(entry);
+                    @let speakerVis = !oocCard ? vttStore.getLogSpeakerVisuals(entry) : null;
                     @let privacyBadge = getLogPrivacyBadge(entry);
                     <div
                       class="group rounded-xl border p-2.5 space-y-1"
@@ -1245,7 +1350,18 @@
                     >
                       <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
                         <div class="flex min-w-0 items-center gap-1.5">
-                          @if (speakerColor && !oocCard) {
+                          @if (speakerVis) {
+                            <div class="h-6 w-6 shrink-0">
+                              <app-token-avatar
+                                [tokenImageUrl]="speakerVis.displayImageUrl"
+                                [appearance]="speakerVis.appearance"
+                                [icon]="speakerVis.icon"
+                                [color]="speakerVis.color"
+                                [faction]="speakerVis.faction"
+                                iconSizeClass="h-3 w-3"
+                              />
+                            </div>
+                          } @else if (speakerColor && !oocCard) {
                             <span
                               class="h-2 w-2 shrink-0 rounded-full"
                               [style.backgroundColor]="speakerColor"
@@ -1383,11 +1499,18 @@
                           [class.shadow-xs]="gmMode === 'character'"
                           [class.text-[var(--mot-muted)]]="gmMode !== 'character'"
                         >
-                          @if (activeChar?.color) {
-                            <span
-                              class="h-1.5 w-1.5 shrink-0 rounded-full"
-                              [style.backgroundColor]="activeChar!.color"
-                            ></span>
+                          @if (activeChar) {
+                            @let gmCompVis = getSpeakerComposerAppearance(activeChar);
+                            <span class="h-4 w-4 shrink-0">
+                              <app-token-avatar
+                                [tokenImageUrl]="gmCompVis.displayImageUrl"
+                                [appearance]="gmCompVis.appearance"
+                                [icon]="activeChar.icon || 'user'"
+                                [color]="activeChar.color || '#38B29A'"
+                                [faction]="activeChar.faction || 'ally'"
+                                iconSizeClass="h-2.5 w-2.5"
+                              />
+                            </span>
                           }
                           <span class="max-w-[92px] truncate">
                             {{ activeChar ? activeChar.name : 'Character' }}
@@ -1398,6 +1521,19 @@
                       @let effSpeaker = vttStore.effectivePublicSpeaker();
                       @let oocActive = activeSlashCommand()?.config?.action === 'ooc';
                       <div class="flex min-w-0 items-center gap-1.5">
+                        @if (!oocActive && effSpeaker.mode === 'character') {
+                          @let plCompVis = getSpeakerComposerAppearance(effSpeaker);
+                          <span class="h-4 w-4 shrink-0">
+                            <app-token-avatar
+                              [tokenImageUrl]="plCompVis.displayImageUrl"
+                              [appearance]="plCompVis.appearance"
+                              [icon]="effSpeaker.icon || 'user'"
+                              [color]="effSpeaker.color || '#38B29A'"
+                              [faction]="effSpeaker.faction || 'ally'"
+                              iconSizeClass="h-2.5 w-2.5"
+                            />
+                          </span>
+                        }
                         <span
                           class="max-w-[104px] truncate text-[var(--mot-muted)]"
                           [title]="'Speaking as ' + (oocActive ? (authStore.displayName() || 'Adventurer') : effSpeaker.name)"
@@ -1713,13 +1849,15 @@
             <ng-template #rosterEntryTpl let-actorItem let-indent="indent">
               @let deployedList = getDeployedTokensForRosterActor(actorItem);
               @let primaryToken = deployedList.length > 0 ? deployedList[0] : null;
+              @let assignedPlayer = vttStore.getActorAssignedParticipant(actorItem);
               @let actorSelected = (primaryToken && vttStore.selectedTokenId() === primaryToken.id) || (!primaryToken && vttStore.selectedRosterActorId() === actorItem.id);
+              @let actorVis = vttStore.resolveRosterActorVisuals(actorItem);
               <div
                 [attr.draggable]="vttStore.canDeployRosterActor(actorItem) || vttStore.isGm() ? 'true' : 'false'"
                 (click)="selectRosterActorRow(actorItem, primaryToken)"
                 (dragstart)="onRosterActorDragStart($event, actorItem)"
                 (dragend)="onDirectoryDragEnd()"
-                (dblclick)="vttStore.canManageRosterActor(actorItem) ? openEditRosterActorModal(actorItem.id) : null"
+                (dblclick)="vttStore.openActorSheet(actorItem.id)"
                 (contextmenu)="openRosterActorContextMenu($event, actorItem.id)"
                 [style.marginLeft.px]="indent || 0"
                 class="group flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2 transition-colors select-none active:cursor-grabbing"
@@ -1728,39 +1866,106 @@
                 [class.border-[var(--mot-border)]]="!actorSelected"
                 [class.bg-[var(--mot-well)]]="!actorSelected"
                 [class.hover:border-[#C4491A]]="!actorSelected"
-                title="Click to select actor · Drag onto battlemap to deploy (hold Shift for free RP placement) · Double-click or Right-click to configure"
+                title="Click to select actor · Double-click or click Sheet to view &amp; edit · Drag onto battlemap to deploy"
               >
                 <div class="flex min-w-0 items-center gap-2.5">
-                  <div
-                    class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 bg-[#0D1615]"
-                    [style.borderColor]="actorItem.color || '#38B29A'"
-                  >
-                    <app-compendium-icon
-                      [icon]="actorItem.icon"
-                      [color]="actorItem.color || '#38B29A'"
-                      sizeClass="h-4 w-4"
-                    />
-                    <span
-                      class="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#0D1615]"
-                      [class.bg-[#38B29A]]="actorItem.faction === 'ally'"
-                      [class.bg-[#F43F5E]]="actorItem.faction === 'enemy'"
-                      [class.bg-[#F59E0B]]="actorItem.faction === 'neutral'"
-                    ></span>
-                  </div>
+                  @if (actorVis.portraitUrl && !isPortraitBroken(actorVis.portraitUrl)) {
+                    <div class="relative shrink-0">
+                      <div
+                        class="h-10 w-9 overflow-hidden rounded-lg border-2 bg-[#0D1615]"
+                        [style.borderColor]="actorItem.color || '#38B29A'"
+                      >
+                        <img
+                          [src]="actorVis.portraitUrl"
+                          [alt]="actorItem.name + ' portrait'"
+                          (error)="markPortraitBroken(actorVis.portraitUrl)"
+                          class="h-full w-full object-cover object-top"
+                        />
+                      </div>
+                      @if (hasCustomTokenArt(actorVis.tokenImageUrl, actorVis.tokenAppearance)) {
+                        <div class="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-[#09100F] p-[1px] shadow">
+                          <app-token-avatar
+                            [tokenImageUrl]="actorVis.tokenImageUrl"
+                            [appearance]="actorVis.tokenAppearance"
+                            [icon]="actorItem.icon"
+                            [color]="actorItem.color || '#38B29A'"
+                            [faction]="actorItem.faction"
+                            iconSizeClass="h-2.5 w-2.5"
+                          />
+                        </div>
+                      } @else {
+                        <span
+                          class="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#0D1615]"
+                          [class.bg-[#38B29A]]="actorItem.faction === 'ally'"
+                          [class.bg-[#F43F5E]]="actorItem.faction === 'enemy'"
+                          [class.bg-[#F59E0B]]="actorItem.faction === 'neutral'"
+                        ></span>
+                      }
+                    </div>
+                  } @else if (hasCustomTokenArt(actorVis.tokenImageUrl, actorVis.tokenAppearance)) {
+                    <div class="relative h-9 w-9 shrink-0">
+                      <app-token-avatar
+                        [tokenImageUrl]="actorVis.tokenImageUrl"
+                        [appearance]="actorVis.tokenAppearance"
+                        [icon]="actorItem.icon"
+                        [color]="actorItem.color || '#38B29A'"
+                        [faction]="actorItem.faction"
+                        iconSizeClass="h-4 w-4"
+                      />
+                      <span
+                        class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[#0D1615]"
+                        [class.bg-[#38B29A]]="actorItem.faction === 'ally'"
+                        [class.bg-[#F43F5E]]="actorItem.faction === 'enemy'"
+                        [class.bg-[#F59E0B]]="actorItem.faction === 'neutral'"
+                      ></span>
+                    </div>
+                  } @else {
+                    <div
+                      class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 bg-[#0D1615]"
+                      [style.borderColor]="actorItem.color || '#38B29A'"
+                    >
+                      <app-compendium-icon
+                        [icon]="actorItem.icon"
+                        [color]="actorItem.color || '#38B29A'"
+                        sizeClass="h-4 w-4"
+                      />
+                      <span
+                        class="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#0D1615]"
+                        [class.bg-[#38B29A]]="actorItem.faction === 'ally'"
+                        [class.bg-[#F43F5E]]="actorItem.faction === 'enemy'"
+                        [class.bg-[#F59E0B]]="actorItem.faction === 'neutral'"
+                      ></span>
+                    </div>
+                  }
 
                   <div class="min-w-0">
                     <div class="flex flex-wrap items-center gap-1.5">
                       <span class="truncate font-bold text-[var(--mot-text)]">
                         {{ actorItem.name }}
                       </span>
-                      @if (!actorItem.is_unique && !actorItem.character_id) {
-                        <span class="shrink-0 rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[var(--mot-muted)]">
-                          NPC
-                        </span>
+                      <span class="shrink-0 rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[var(--mot-muted)]">
+                        {{ actorItem.actor_kind === 'npc' ? 'NPC' : 'PC' }}
+                      </span>
+                      @if (vttStore.isGm()) {
+                        @if (assignedPlayer) {
+                          <span
+                            class="shrink-0 rounded border border-[#38B29A]/40 bg-[#102B26] px-1.5 py-[1px] text-[9px] font-bold text-[#5EEAD4]"
+                            [title]="'Assigned to ' + (assignedPlayer.display_name || '@' + assignedPlayer.handle)"
+                          >
+                            {{ assignedPlayer.display_name || '@' + assignedPlayer.handle }}
+                          </span>
+                        } @else {
+                          <span
+                            class="shrink-0 rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-[1px] text-[9px] font-semibold text-[var(--mot-muted)]"
+                            title="Unassigned (GM Only)"
+                          >
+                            Unassigned
+                          </span>
+                        }
                       }
                       @if (deployedList.length > 0) {
                         <span class="shrink-0 rounded bg-[var(--mot-jade-bg)] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[var(--mot-jade-text)]">
-                          {{ actorItem.is_unique || actorItem.character_id ? 'On Map' : 'x' + deployedList.length }}
+                          {{ deployedList.length > 1 ? 'x' + deployedList.length : 'On Map' }}
                         </span>
                       }
                     </div>
@@ -1774,31 +1979,21 @@
                   class="flex shrink-0 items-center gap-1"
                   (click)="$event.stopPropagation()"
                 >
-                  @if (actorItem.character_id) {
-                    <a
-                      [routerLink]="['/characters', actorItem.character_id]"
-                      target="_blank"
-                      class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
-                      title="Open Character Sheet"
-                    >
-                      Sheet
-                    </a>
-                  }
-                  @if ((actorItem.is_unique || actorItem.character_id) && primaryToken) {
+                  <button
+                    type="button"
+                    (click)="vttStore.openActorSheet(actorItem.id)"
+                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                    title="Open Sheet in VTT"
+                  >
+                    Sheet
+                  </button>
+                  @if (primaryToken) {
                     <button
                       type="button"
                       (click)="vttStore.selectedTokenId.set(primaryToken.id)"
                       class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
                     >
                       Select
-                    </button>
-                  } @else if (vttStore.canDeployRosterActor(actorItem)) {
-                    <button
-                      type="button"
-                      (click)="vttStore.deployRosterActor(actorItem.id)"
-                      class="btn-copper rounded-md px-2 py-1 text-[10px] font-bold"
-                    >
-                      {{ actorItem.is_unique || actorItem.character_id ? 'Deploy' : '+ Spawn' }}
                     </button>
                   }
                   <button
@@ -1899,26 +2094,22 @@
 
             <div class="flex flex-1 min-h-0 flex-col text-xs">
               <div class="shrink-0 space-y-2 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3">
-                <div
-                  class="grid gap-1.5"
-                  [class.grid-cols-3]="vttStore.isGm()"
-                  [class.grid-cols-2]="!vttStore.isGm()"
-                >
-                  <button
-                    type="button"
-                    (click)="openCreateRosterActorModal(null)"
-                    class="btn-copper rounded-lg px-2 py-1.5 text-xs font-bold"
-                  >
-                    + Create
-                  </button>
-                  <button
-                    type="button"
-                    (click)="openRosterImportModal(null)"
-                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
-                  >
-                    Import
-                  </button>
-                  @if (vttStore.isGm()) {
+                @if (vttStore.isGm()) {
+                  <div class="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      (click)="openCreateRosterActorModal(null)"
+                      class="btn-copper rounded-lg px-2 py-1.5 text-xs font-bold"
+                    >
+                      + Create
+                    </button>
+                    <button
+                      type="button"
+                      (click)="openRosterImportModal(null)"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2 py-1.5 text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Import
+                    </button>
                     <button
                       type="button"
                       (click)="openCreateFolderModal('characters', null)"
@@ -1926,8 +2117,8 @@
                     >
                       + Folder
                     </button>
-                  }
-                </div>
+                  </div>
+                }
 
                 <div class="relative">
                   <input
@@ -1951,13 +2142,23 @@
 
                 <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
                   <span>Drag onto map &middot; Hold <strong class="text-[var(--mot-text)]">Shift</strong> for free RP drop</span>
-                  <button
-                    type="button"
-                    (click)="openCollections()"
-                    class="shrink-0 font-bold text-[var(--mot-accent-text)] hover:underline"
-                  >
-                    Collections &rarr;
-                  </button>
+                  @if (vttStore.isGm()) {
+                    <button
+                      type="button"
+                      (click)="openCollections()"
+                      class="shrink-0 font-bold text-[var(--mot-accent-text)] hover:underline"
+                    >
+                      Collections &rarr;
+                    </button>
+                  } @else {
+                    <a
+                      routerLink="/dashboard"
+                      target="_blank"
+                      class="shrink-0 font-bold text-[var(--mot-accent-text)] hover:underline"
+                    >
+                      Character Sheets &rarr;
+                    </a>
+                  }
                 </div>
               </div>
 
@@ -1972,13 +2173,13 @@
                       <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 text-center text-[var(--mot-muted)]">
                         No actors or folders match &ldquo;{{ rosterSearchQuery() }}&rdquo;.
                       </div>
-                    } @else {
+                    } @else if (vttStore.isGm()) {
                       <div class="rounded-2xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] p-4 text-center space-y-2.5">
                         <div class="font-display text-sm font-bold text-[var(--mot-text)]">
                           Actors Directory
                         </div>
                         <p class="text-[11px] leading-relaxed text-[var(--mot-muted)]">
-                          Make characters or adversaries from scratch, import from your Character Vault or Collections, organize into folders, and drag directly onto the map.
+                          Create Player Characters or NPCs, import from your Character Vault or Collections, assign them to players, and drag directly onto the map.
                         </p>
                         <div class="flex flex-wrap items-center justify-center gap-2 pt-0.5">
                           <button
@@ -1986,7 +2187,7 @@
                             (click)="openCreateRosterActorModal(null)"
                             class="btn-copper rounded-lg px-3 py-1.5 text-xs font-bold"
                           >
-                            + Make From Scratch
+                            + Create Actor
                           </button>
                           <button
                             type="button"
@@ -1996,6 +2197,15 @@
                             Import Existing
                           </button>
                         </div>
+                      </div>
+                    } @else {
+                      <div class="rounded-2xl border border-dashed border-[var(--mot-border-strong)] bg-[var(--mot-well)] p-4 text-center space-y-2">
+                        <div class="font-display text-sm font-bold text-[var(--mot-text)]">
+                          No Assigned Actors
+                        </div>
+                        <p class="text-[11px] leading-relaxed text-[var(--mot-muted)]">
+                          Once the GM assigns an actor to you, it will appear here so you can open its sheet, drag it onto the map, and control its token.
+                        </p>
                       </div>
                     }
                   } @else {
@@ -2039,7 +2249,7 @@
                   }
                 </section>
 
-                @if (!rosterSearchQuery().trim() && unimportedDeployableCharacters().length > 0) {
+                @if (vttStore.isGm() && !rosterSearchQuery().trim() && unimportedDeployableCharacters().length > 0) {
                   <section class="space-y-2 border-t border-[var(--mot-border)] pt-3">
                     <div class="flex items-center justify-between">
                       <h3 class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
@@ -2057,9 +2267,11 @@
                       @for (ch of unimportedDeployableCharacters(); track ch.id) {
                         @let deployed = isCharacterDeployed(ch.id);
                         @let charRowSelected = (deployed && vttStore.selectedTokenId() === deployed.id) || (!deployed && vttStore.selectedCharacterId() === ch.id);
+                        @let chVis = getCharacterVisuals(ch);
                         <div
                           draggable="true"
                           (click)="selectAvailableCharacterRow(ch, deployed)"
+                          (dblclick)="vttStore.openCharacterSheetInVtt(ch.id)"
                           (dragstart)="onCharacterDragStart($event, ch)"
                           (dragend)="onDirectoryDragEnd()"
                           class="flex cursor-grab items-center justify-between gap-2 rounded-xl border px-2.5 py-2 select-none active:cursor-grabbing transition-colors"
@@ -2068,19 +2280,50 @@
                           [class.border-[var(--mot-border)]]="!charRowSelected"
                           [class.bg-[var(--mot-well)]]="!charRowSelected"
                           [class.hover:border-[#C4491A]]="!charRowSelected"
-                          title="Click to select character · Drag onto battlemap to deploy, or click + Actors to organize in folders"
+                          title="Click to select · Double-click or click Sheet to view &amp; edit · Drag onto battlemap to deploy"
                         >
-                          <div class="min-w-0">
-                            <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
-                            <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
-                              HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                          <div class="flex min-w-0 items-center gap-2">
+                            @if (chVis.portraitUrl && !isPortraitBroken(chVis.portraitUrl)) {
+                              <div class="h-9 w-8 shrink-0 overflow-hidden rounded-lg border border-[#38B29A]/60 bg-[#0D1615]">
+                                <img
+                                  [src]="chVis.portraitUrl"
+                                  [alt]="ch.name + ' portrait'"
+                                  (error)="markPortraitBroken(chVis.portraitUrl)"
+                                  class="h-full w-full object-cover object-top"
+                                />
+                              </div>
+                            } @else {
+                              <div class="h-8 w-8 shrink-0">
+                                <app-token-avatar
+                                  [tokenImageUrl]="chVis.tokenImageUrl"
+                                  [appearance]="chVis.tokenAppearance"
+                                  icon="greatsword"
+                                  color="#38B29A"
+                                  faction="ally"
+                                  iconSizeClass="h-3.5 w-3.5"
+                                />
+                              </div>
+                            }
+                            <div class="min-w-0">
+                              <div class="truncate font-bold text-[var(--mot-text)]">{{ ch.name }}</div>
+                              <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                                HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                              </div>
                             </div>
                           </div>
 
                           <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
                             <button
                               type="button"
-                              (click)="importCharacterIntoRoster(ch, false)"
+                              (click)="vttStore.openCharacterSheetInVtt(ch.id)"
+                              class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                              title="Open Sheet in VTT"
+                            >
+                              Sheet
+                            </button>
+                            <button
+                              type="button"
+                              (click)="importCharacterIntoRoster(ch)"
                               class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
                               title="Add to Actors Directory"
                             >
@@ -2093,14 +2336,6 @@
                                 class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
                               >
                                 Select
-                              </button>
-                            } @else {
-                              <button
-                                type="button"
-                                (click)="vttStore.deployCharacterToken(ch)"
-                                class="btn-copper rounded-md px-2 py-1 text-[10px] font-bold"
-                              >
-                                Deploy
                               </button>
                             }
                           </div>
@@ -2123,53 +2358,70 @@
                   @if (showActiveSceneTokens()) {
                     @if (visibleRosterTokens().length === 0) {
                       <p class="text-[11px] text-[var(--mot-muted)]">
-                        No tokens deployed on this scene yet. Drag any actor onto the map to place them.
+                        No tokens deployed on this scene yet.
                       </p>
                     } @else {
                       <div class="space-y-1.5">
                         @for (tok of visibleRosterTokens(); track tok.id) {
+                          @let sTokVis = vttStore.resolveTokenVisuals(tok);
                           <div
-                            (click)="vttStore.selectedTokenId.set(tok.id)"
+                            (click)="onSceneTokenRowClick($event, tok)"
                             class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors"
-                            [class.border-[#C4491A]]="vttStore.selectedTokenId() === tok.id"
-                            [class.bg-[var(--mot-surface-raised)]]="vttStore.selectedTokenId() === tok.id"
-                            [class.border-[var(--mot-border)]]="vttStore.selectedTokenId() !== tok.id"
-                            [class.bg-[var(--mot-well)]]="vttStore.selectedTokenId() !== tok.id"
+                            [class.border-[#C4491A]]="vttStore.isTokenSelected(tok.id)"
+                            [class.bg-[var(--mot-surface-raised)]]="vttStore.isTokenSelected(tok.id)"
+                            [class.border-[var(--mot-border)]]="!vttStore.isTokenSelected(tok.id)"
+                            [class.bg-[var(--mot-well)]]="!vttStore.isTokenSelected(tok.id)"
                           >
-                            <div class="min-w-0">
-                              <div class="flex flex-wrap items-center gap-1.5">
-                                <span
-                                  class="h-2 w-2 shrink-0 rounded-full"
-                                  [class.bg-[#38B29A]]="tok.faction === 'ally'"
-                                  [class.bg-[#F43F5E]]="tok.faction === 'enemy'"
-                                  [class.bg-[#F59E0B]]="tok.faction === 'neutral'"
-                                ></span>
-                                <span class="truncate font-bold text-[var(--mot-text)]">{{ tok.name }}</span>
-                                @if (tok.npc_stats?.__unsnapped) {
-                                  <span class="rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold text-[var(--mot-muted)]">
-                                    Free RP
-                                  </span>
-                                }
-                                @if (tok.is_hidden) {
-                                  <span class="rounded bg-black/25 px-1 text-[10px] font-bold text-[var(--mot-accent-text)]">
-                                    Hidden
-                                  </span>
-                                }
+                            <div class="flex min-w-0 items-center gap-2">
+                              <div class="h-7 w-7 shrink-0">
+                                <app-token-avatar
+                                  [tokenImageUrl]="sTokVis.tokenImageUrl"
+                                  [appearance]="sTokVis.tokenAppearance"
+                                  [icon]="tok.icon || 'greatsword'"
+                                  [color]="tok.color || '#5EEAD4'"
+                                  [faction]="tok.faction"
+                                  [isHidden]="tok.is_hidden"
+                                  [grayscale]="tok.current_hp <= 0"
+                                  iconSizeClass="h-3.5 w-3.5"
+                                />
                               </div>
-                              <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
-                                HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }} &middot; AP {{ tok.current_ap }}
+                              <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                  <span
+                                    class="h-2 w-2 shrink-0 rounded-full"
+                                    [class.bg-[#38B29A]]="tok.faction === 'ally'"
+                                    [class.bg-[#F43F5E]]="tok.faction === 'enemy'"
+                                    [class.bg-[#F59E0B]]="tok.faction === 'neutral'"
+                                  ></span>
+                                  <span class="truncate font-bold text-[var(--mot-text)]">{{ tok.name }}</span>
+                                  @if (tok.npc_stats?.__unsnapped) {
+                                    <span class="rounded bg-[var(--mot-surface)] px-1 py-[1px] font-mono-num text-[9px] font-bold text-[var(--mot-muted)]">
+                                      Free RP
+                                    </span>
+                                  }
+                                  @if (tok.is_hidden) {
+                                    <span class="rounded bg-black/25 px-1 text-[10px] font-bold text-[var(--mot-accent-text)]">
+                                      Hidden
+                                    </span>
+                                  }
+                                </div>
+                                @if (vttStore.isGm() || vttStore.canControlToken(tok)) {
+                                  <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                                    HP {{ tok.current_hp }}/{{ tok.max_hp }} &middot; SP {{ tok.current_sp }}/{{ tok.max_sp }} &middot; AP {{ tok.current_ap }}
+                                  </div>
+                                }
                               </div>
                             </div>
 
                             <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
-                              @if (tok.character_id) {
-                                <a
-                                  [routerLink]="['/characters', tok.character_id]"
-                                  target="_blank"
-                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] no-underline hover:text-[var(--mot-text)]"
+                              @if (vttStore.isGm() || vttStore.canControlToken(tok)) {
+                                <button
+                                  type="button"
+                                  (click)="vttStore.openTokenSheet(tok.id)"
+                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
                                 >
                                   Sheet
-                                </a>
+                                </button>
                               }
                               @if (vttStore.canControlToken(tok)) {
                                 @if (vttStore.isGm()) {
@@ -2767,7 +3019,7 @@
 
   @if (directoryContextMenu(); as ctxMenu) {
     <div
-      class="fixed z-50 w-52 rounded-xl border border-[#243B37] bg-[#0D1615] p-1.5 text-xs text-[#EBF5F3] shadow-2xl"
+      class="fixed z-[75] w-52 rounded-xl border border-[#243B37] bg-[#0D1615] p-1.5 text-xs text-[#EBF5F3] shadow-2xl"
       [style.left.px]="ctxMenu.screenX"
       [style.top.px]="ctxMenu.screenY"
       (pointerdown)="$event.stopPropagation()"
@@ -2906,29 +3158,60 @@
       }
 
       @if (ctxMenu.kind === 'roster-actor' && contextMenuRosterActor(); as menuActor) {
+        @let menuAssignedId = vttStore.getActorAssignedUserId(menuActor);
         <div class="truncate border-b border-[#243B37] px-2.5 py-1.5 font-display text-[11px] font-bold text-white">
           {{ menuActor.name }}
         </div>
         <div class="mt-1 space-y-0.5">
-          @if (vttStore.canDeployRosterActor(menuActor)) {
-            <button
-              type="button"
-              (click)="deployRosterActorFromMenu(menuActor.id)"
-              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#5EEAD4] hover:bg-[#192B28]"
-            >
-              <span>
-                {{ menuActor.is_unique || menuActor.character_id ? 'Deploy to Scene' : '+ Spawn on Scene' }}
-              </span>
-            </button>
+          <button
+            type="button"
+            (click)="editRosterActorFromMenu(menuActor.id)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
+          >
+            <span>Open Sheet</span>
+          </button>
+
+          @if (vttStore.isGm()) {
+            <div class="my-1 border-t border-[#243B37] pt-1">
+              <div class="px-2.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Assign to Player
+              </div>
+              <button
+                type="button"
+                (click)="assignRosterActorFromMenu(menuActor.id, null)"
+                class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold hover:bg-[#192B28]"
+                [class.text-[#5EEAD4]]="!menuAssignedId"
+                [class.text-[#8AB0AB]]="!!menuAssignedId"
+              >
+                <span>Unassigned (GM Only)</span>
+                @if (!menuAssignedId) {
+                  <span class="text-[10px] font-bold">&#10003;</span>
+                }
+              </button>
+              @for (p of vttStore.assignablePlayers(); track p.user_id) {
+                <button
+                  type="button"
+                  (click)="assignRosterActorFromMenu(menuActor.id, p.user_id)"
+                  class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left font-semibold hover:bg-[#192B28]"
+                  [class.text-[#5EEAD4]]="menuAssignedId === p.user_id"
+                  [class.text-[#EBF5F3]]="menuAssignedId !== p.user_id"
+                >
+                  <span class="truncate">{{ p.display_name || '@' + p.handle }}</span>
+                  @if (menuAssignedId === p.user_id) {
+                    <span class="shrink-0 text-[10px] font-bold">&#10003;</span>
+                  }
+                </button>
+              }
+              @if (vttStore.assignablePlayers().length === 0) {
+                <div class="px-2.5 py-1 text-[10px] text-[#8AB0AB]">
+                  No players in campaign yet
+                </div>
+              }
+            </div>
+            <div class="my-1 border-t border-[#243B37]"></div>
           }
-          @if (vttStore.canManageRosterActor(menuActor)) {
-            <button
-              type="button"
-              (click)="editRosterActorFromMenu(menuActor.id)"
-              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] hover:bg-[#192B28]"
-            >
-              <span>Edit Actor...</span>
-            </button>
+
+          @if (vttStore.isGm()) {
             <button
               type="button"
               (click)="duplicateRosterActorFromMenu(menuActor.id)"
@@ -2937,13 +3220,15 @@
               <span>Duplicate Actor</span>
             </button>
           }
-          <button
-            type="button"
-            (click)="saveRosterActorToCollectionsFromMenu(menuActor.id)"
-            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
-          >
-            <span>Save to Collections</span>
-          </button>
+          @if (vttStore.isGm()) {
+            <button
+              type="button"
+              (click)="saveRosterActorToCollectionsFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
+            >
+              <span>Save to Collections</span>
+            </button>
+          }
           @if (vttStore.isGm() && menuActor.folder_id) {
             <button
               type="button"
@@ -2953,7 +3238,7 @@
               <span>Move to Root</span>
             </button>
           }
-          @if (vttStore.canManageRosterActor(menuActor)) {
+          @if (vttStore.isGm()) {
             <div class="my-1 border-t border-[#243B37]"></div>
             <button
               type="button"
@@ -2969,33 +3254,18 @@
   }
 
   @if (createMapModal(); as cm) {
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
-      (click)="createMapModal.set(null)"
+    <app-vtt-floating-window
+      windowTitle="Create Blank Scene"
+      [subtitle]="getCreateMapModalSubtitle()"
+      widthClass="w-[min(94vw,448px)]"
+      [estimatedWidth]="448"
+      [estimatedHeight]="340"
+      (closed)="createMapModal.set(null)"
     >
       <form
         (ngSubmit)="submitCreateBlankMap()"
-        (click)="$event.stopPropagation()"
-        class="w-full max-w-md rounded-2xl border border-[#243B37] bg-[#0D1615] p-5 text-xs text-[#EBF5F3] shadow-2xl space-y-4"
+        class="min-h-0 flex-1 overflow-y-auto p-5 space-y-4"
       >
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <h2 class="font-display text-base font-bold text-white">
-              Create Blank Scene
-            </h2>
-            <p class="mt-0.5 text-[11px] text-[#8AB0AB]">
-              Creates a blank {{ defaultSceneWidthPx }}&times;{{ defaultSceneHeightPx }} px scene with a {{ defaultGridSizePx }} px Square Grid (5 ft per tile) and {{ defaultScenePadding }} off-scene padding.
-            </p>
-          </div>
-          <button
-            type="button"
-            (click)="createMapModal.set(null)"
-            class="text-base font-bold text-[#8AB0AB] hover:text-white"
-          >
-            &times;
-          </button>
-        </div>
-
         <div class="space-y-3">
           <label class="block space-y-1">
             <span class="font-semibold text-[#EBF5F3]">Scene Name</span>
@@ -3052,32 +3322,21 @@
           </button>
         </div>
       </form>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (folderModal(); as fm) {
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
-      (click)="folderModal.set(null)"
+    <app-vtt-floating-window
+      [windowTitle]="fm.mode === 'create' ? 'Create Folder' : 'Edit Folder'"
+      widthClass="w-[min(94vw,448px)]"
+      [estimatedWidth]="448"
+      [estimatedHeight]="520"
+      (closed)="folderModal.set(null)"
     >
       <form
         (ngSubmit)="submitFolderModal()"
-        (click)="$event.stopPropagation()"
-        class="w-full max-w-md rounded-2xl border border-[#243B37] bg-[#0D1615] p-5 text-xs text-[#EBF5F3] shadow-2xl space-y-4"
+        class="min-h-0 flex-1 overflow-y-auto p-5 space-y-4"
       >
-        <div class="flex items-center justify-between gap-2">
-          <h2 class="font-display text-base font-bold text-white">
-            {{ fm.mode === 'create' ? 'Create Folder' : 'Edit Folder' }}
-          </h2>
-          <button
-            type="button"
-            (click)="folderModal.set(null)"
-            class="text-base font-bold text-[#8AB0AB] hover:text-white"
-          >
-            &times;
-          </button>
-        </div>
-
         <div class="space-y-3">
           <label class="block space-y-1">
             <span class="font-semibold text-[#EBF5F3]">Folder Name</span>
@@ -3134,37 +3393,22 @@
           </button>
         </div>
       </form>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (editingMapDraft(); as em) {
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
-      (click)="editingMapDraft.set(null)"
+    <app-vtt-floating-window
+      windowTitle="Scene Configuration"
+      subtitle="Configure scene background, grid dimensions, token vision, and global illumination."
+      widthClass="w-[min(94vw,576px)]"
+      [estimatedWidth]="576"
+      [estimatedHeight]="660"
+      (closed)="editingMapDraft.set(null)"
     >
       <form
         (ngSubmit)="saveEditMapModal()"
-        (click)="$event.stopPropagation()"
-        class="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
-          <div>
-            <h2 class="font-display text-base font-bold text-white">
-              Scene Configuration
-            </h2>
-            <p class="text-[11px] text-[#8AB0AB]">
-              Configure scene background, grid dimensions, token vision, and global illumination.
-            </p>
-          </div>
-          <button
-            type="button"
-            (click)="editingMapDraft.set(null)"
-            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
-          >
-            &times;
-          </button>
-        </div>
-
         <div
           role="tablist"
           aria-label="Scene Configuration Tabs"
@@ -3232,7 +3476,7 @@
           </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-5">
+        <div class="min-h-0 flex-1 overflow-y-auto p-5 space-y-5">
           @if (editMapTab() === 'general') {
             <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label class="block space-y-1">
@@ -3990,59 +4234,21 @@
           </div>
         </div>
       </form>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (activeSettingsModal(); as settingsModal) {
-    <div
-      (click)="closeSettingsModal()"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    <app-vtt-floating-window
+      [windowTitle]="getSettingsModalTitle(settingsModal)"
+      [subtitle]="getSettingsModalSubtitle(settingsModal)"
+      [widthClass]="getSettingsModalWidthClass(settingsModal)"
+      [estimatedWidth]="getSettingsModalEstimatedWidth(settingsModal)"
+      [estimatedHeight]="620"
+      surfaceTheme="adaptive"
+      (closed)="closeSettingsModal()"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        (click)="$event.stopPropagation()"
-        class="mot-float flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-[var(--mot-border)] bg-[var(--mot-surface)] text-xs text-[var(--mot-text)] shadow-2xl"
-        [class.max-w-xl]="settingsModal === 'dice'"
-        [class.max-w-lg]="settingsModal !== 'invites' && settingsModal !== 'dice'"
-        [class.max-w-md]="settingsModal === 'invites'"
-      >
-        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-5 py-3.5">
-          <div>
-            <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
-              @if (settingsModal === 'general') {
-                General Settings
-              } @else if (settingsModal === 'dice') {
-                3D Dice &amp; Appearance
-              } @else if (settingsModal === 'controls') {
-                Controls &amp; Hotkeys
-              } @else {
-                Invitation Links
-              }
-            </h2>
-            <p class="text-[11px] text-[var(--mot-muted)]">
-              @if (settingsModal === 'general') {
-                Configure interface theme, token travel speed, audio volume, and table rules.
-              } @else if (settingsModal === 'dice') {
-                Customize 3D physics throws, surface textures, body colors, and number ink.
-              } @else if (settingsModal === 'controls') {
-                Click any shortcut badge to press a new key or key combination.
-              } @else {
-                Share this link or invite code so players can join the campaign.
-              }
-            </p>
-          </div>
-          <button
-            type="button"
-            (click)="closeSettingsModal()"
-            class="text-base font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
-          >
-            &times;
-          </button>
-        </div>
-
-        @if (settingsModal === 'general') {
-          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+      @if (settingsModal === 'general') {
+        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
               <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
                 Appearance &amp; Theme
@@ -4343,7 +4549,7 @@
             </button>
           </div>
         } @else if (settingsModal === 'dice') {
-          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+          <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-2">
@@ -4508,12 +4714,28 @@
             </button>
           </div>
         } @else if (settingsModal === 'controls') {
-          <div class="flex-1 space-y-4 overflow-y-auto p-5">
+          <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div class="space-y-2 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5">
               <div class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-jade-text)]">
-                Chained Movement &amp; Mouse Controls
+                Token Selection, Chained Movement &amp; Mouse Controls
               </div>
               <div class="grid grid-cols-1 gap-1.5 text-[11px] text-[var(--mot-muted)]">
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Drag Empty Map</span>
+                  <span class="text-right">Marquee-select multiple tokens (hold Shift to add)</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Shift + Click Token</span>
+                  <span class="text-right">Add or remove token from selection</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">Shift + Scroll Wheel</span>
+                  <span class="text-right">Rotate selected or hovered token 15° (Ctrl for 5°)</span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-semibold text-[var(--mot-text)]">{{ settingsStore.badges().delete_tokens }}</span>
+                  <span class="text-right">Remove selected token(s) from scene ({{ settingsStore.badges().undo }} to undo)</span>
+                </div>
                 <div class="flex items-start justify-between gap-3">
                   <span class="font-semibold text-[var(--mot-text)]">Hold Shift + Drag / Drop Token</span>
                   <span class="text-right">Free RP placement without snapping to tiles</span>
@@ -4683,478 +4905,194 @@
             </button>
           </div>
         }
-      </div>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (inGameMenuOpen()) {
-    <div
-      (click)="closeInGameMenu()"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+    <app-vtt-floating-window
+      eyebrow="Game Menu"
+      [windowTitle]="vttStore.campaign()?.name || 'March of Time'"
+      ariaLabel="In-Game Menu"
+      widthClass="w-[min(94vw,384px)]"
+      [estimatedWidth]="384"
+      [estimatedHeight]="360"
+      (closed)="closeInGameMenu()"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="In-Game Menu"
-        (click)="$event.stopPropagation()"
-        class="mot-float flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+      <kbd
+        headerExtra
+        class="shrink-0 rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#8AB0AB]"
       >
-        <div class="flex items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-5 py-4">
-          <div class="min-w-0">
-            <div class="font-mono-num text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
-              Game Menu
-            </div>
-            <h2 class="truncate font-display text-base font-bold text-white">
-              {{ vttStore.campaign()?.name || 'March of Time' }}
-            </h2>
-          </div>
-          <kbd class="shrink-0 rounded border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#8AB0AB]">
-            Esc
-          </kbd>
-        </div>
+        Esc
+      </kbd>
 
-        <div class="space-y-2 p-4">
+      <div class="space-y-2 p-4">
+        <button
+          type="button"
+          (click)="closeInGameMenu()"
+          class="btn-copper flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-xs font-bold"
+        >
+          <span>Resume Game</span>
+          <span class="font-mono-num text-[10px] opacity-85">Esc</span>
+        </button>
+
+        <button
+          type="button"
+          (click)="reloadApplication()"
+          class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
+        >
+          <span class="flex items-center gap-2.5">
+            <svg class="h-4 w-4 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span>Reload Application</span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          (click)="openCollections()"
+          class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
+        >
+          <span class="flex items-center gap-2.5">
+            <svg class="h-4 w-4 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span>Open Collections</span>
+          </span>
+        </button>
+
+        @if (authStore.isAdmin()) {
           <button
             type="button"
-            (click)="closeInGameMenu()"
-            class="btn-copper flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-xs font-bold"
-          >
-            <span>Resume Game</span>
-            <span class="font-mono-num text-[10px] opacity-85">Esc</span>
-          </button>
-
-          <button
-            type="button"
-            (click)="reloadApplication()"
+            (click)="openContentManager()"
             class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
           >
             <span class="flex items-center gap-2.5">
-              <svg class="h-4 w-4 text-[#8AB0AB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              <svg class="h-4 w-4 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
               </svg>
-              <span>Reload Application</span>
+              <span>Open Content Manager</span>
+            </span>
+            <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
+              Admin
             </span>
           </button>
+        }
 
-          <button
-            type="button"
-            (click)="openCollections()"
-            class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
-          >
-            <span class="flex items-center gap-2.5">
-              <svg class="h-4 w-4 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              <span>Open Collections</span>
-            </span>
-          </button>
+        <div class="my-1 border-t border-[#243B37]"></div>
 
-          @if (authStore.isAdmin()) {
-            <button
-              type="button"
-              (click)="openContentManager()"
-              class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#142220] px-4 py-2.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:border-[#C4491A] hover:text-white"
-            >
-              <span class="flex items-center gap-2.5">
-                <svg class="h-4 w-4 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
-                <span>Open Content Manager</span>
-              </span>
-              <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
-                Admin
-              </span>
-            </button>
-          }
-
-          <div class="my-1 border-t border-[#243B37]"></div>
-
-          <button
-            type="button"
-            (click)="returnToMainMenu()"
-            class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#09100F] px-4 py-2.5 text-left font-semibold text-[#8AB0AB] transition-colors hover:border-[#C4491A] hover:text-white"
-          >
-            <span class="flex items-center gap-2.5">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-              <span>Return to Main Menu</span>
-            </span>
-          </button>
-        </div>
+        <button
+          type="button"
+          (click)="returnToMainMenu()"
+          class="flex w-full items-center justify-between rounded-xl border border-[#243B37] bg-[#09100F] px-4 py-2.5 text-left font-semibold text-[#8AB0AB] transition-colors hover:border-[#C4491A] hover:text-white"
+        >
+          <span class="flex items-center gap-2.5">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Return to Main Menu</span>
+          </span>
+        </button>
       </div>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (rosterActorModal(); as ram) {
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
-      (click)="rosterActorModal.set(null)"
+    <app-vtt-floating-window
+      windowTitle="Create Actor"
+      subtitle="Choose an actor type and name. Its sheet opens immediately in the VTT so you can edit stats, weapons, and items anytime."
+      widthClass="w-[min(94vw,448px)]"
+      [estimatedWidth]="448"
+      [estimatedHeight]="460"
+      (closed)="rosterActorModal.set(null)"
     >
       <form
         (ngSubmit)="submitRosterActorModal()"
-        (click)="$event.stopPropagation()"
-        class="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
-          <div>
-            <h2 class="font-display text-base font-bold text-white">
-              {{ ram.mode === 'create' ? 'Create Actor' : 'Edit Actor' }}
-            </h2>
-            <p class="text-[11px] text-[#8AB0AB]">
-              Configure combat stats, token icon, and deployment behavior. Drag onto any scene to place.
-            </p>
-          </div>
-          <button
-            type="button"
-            (click)="rosterActorModal.set(null)"
-            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
-          >
-            &times;
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+        <div class="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
           @if (vttStore.isGm()) {
-            <div class="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                (click)="setRosterActorModalKind('character')"
-                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
-                [class.border-[#C4491A]]="ram.actor_kind === 'character'"
-                [class.bg-[#27160E]]="ram.actor_kind === 'character'"
-                [class.border-[#243B37]]="ram.actor_kind !== 'character'"
-                [class.bg-[#142220]]="ram.actor_kind !== 'character'"
-              >
-                <span class="font-display text-xs font-bold text-white">
-                  Unique Character / Persona
-                </span>
-                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
-                  One active token per scene; dragging moves or deploys them.
-                </span>
-              </button>
-
-              <button
-                type="button"
-                (click)="setRosterActorModalKind('npc')"
-                class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
-                [class.border-[#C4491A]]="ram.actor_kind === 'npc'"
-                [class.bg-[#27160E]]="ram.actor_kind === 'npc'"
-                [class.border-[#243B37]]="ram.actor_kind !== 'npc'"
-                [class.bg-[#142220]]="ram.actor_kind !== 'npc'"
-              >
-                <span class="font-display text-xs font-bold text-white">
-                  Adversary / Multi-Spawn NPC
-                </span>
-                <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
-                  Drag onto the map repeatedly to spawn numbered copies.
-                </span>
-              </button>
-            </div>
-          }
-
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="block space-y-1">
-              <span class="font-semibold text-[#EBF5F3]">Actor Name</span>
-              <input
-                type="text"
-                name="rosterActorName"
-                required
-                [ngModel]="ram.name"
-                (ngModelChange)="updateRosterActorModalField('name', $event)"
-                [placeholder]="ram.actor_kind === 'npc' ? 'NPC' : 'Character'"
-                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
-              />
-            </label>
-
-            @if (vttStore.isGm()) {
-              <label class="block space-y-1">
-                <span class="font-semibold text-[#EBF5F3]">Folder</span>
-                <select
-                  name="rosterActorFolder"
-                  [ngModel]="ram.folder_id"
-                  (ngModelChange)="updateRosterActorModalField('folder_id', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
-                >
-                  <option [ngValue]="null">None (Root Directory)</option>
-                  @for (opt of rosterDirectoryTree().flatFolderOptions; track opt.id) {
-                    <option [ngValue]="opt.id">{{ opt.label }}</option>
-                  }
-                </select>
-              </label>
-            }
-          </div>
-
-          @if (vttStore.isGm()) {
-            <div class="grid grid-cols-2 gap-3">
-              <label class="block space-y-1">
-                <span class="font-semibold text-[#EBF5F3]">Faction</span>
-                <select
-                  name="rosterActorFaction"
-                  [ngModel]="ram.faction"
-                  (ngModelChange)="updateRosterActorModalField('faction', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
-                >
-                  <option value="ally">Ally (Party / Companion)</option>
-                  <option value="neutral">Neutral (Townsfolk / Envoy)</option>
-                  <option value="enemy">Enemy (Adversary)</option>
-                </select>
-              </label>
-
-              <label class="flex items-center gap-2 self-end rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
-                <input
-                  type="checkbox"
-                  name="rosterActorUnique"
-                  [ngModel]="ram.is_unique"
-                  (ngModelChange)="updateRosterActorModalField('is_unique', $event)"
-                  class="accent-[#C4491A]"
-                />
-                <span>Unique on Scene</span>
-              </label>
-            </div>
-          }
-
-          <div class="space-y-2 border-t border-[#243B37] pt-3">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-                Token Emblem &amp; Color
-              </span>
-              <app-color-picker
-                [color]="ram.color"
-                [presets]="actorColorSwatches"
-                mode="popover"
-                popoverAlign="right"
-                surfaceTheme="dark"
-                (colorChange)="updateRosterActorModalField('color', $event)"
-              />
-            </div>
-
-            <div class="grid max-h-28 grid-cols-8 gap-1.5 overflow-y-auto rounded-xl border border-[#243B37] bg-[#09100F] p-2 sm:grid-cols-10">
-              @for (preset of iconPresets; track preset.id) {
+            <div class="space-y-1.5">
+              <span class="block font-semibold text-[#EBF5F3]">Actor Type</span>
+              <div class="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  (click)="updateRosterActorModalField('icon', preset.id)"
-                  class="flex h-8 w-8 items-center justify-center rounded-lg border transition-colors"
-                  [class.border-[#C4491A]]="ram.icon === preset.id"
-                  [class.bg-[#27160E]]="ram.icon === preset.id"
-                  [class.border-[#243B37]]="ram.icon !== preset.id"
-                  [class.bg-[#142220]]="ram.icon !== preset.id"
-                  [title]="preset.label"
+                  (click)="setRosterActorModalKind('character')"
+                  class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="ram.actor_kind === 'character'"
+                  [class.bg-[#27160E]]="ram.actor_kind === 'character'"
+                  [class.border-[#243B37]]="ram.actor_kind !== 'character'"
+                  [class.bg-[#142220]]="ram.actor_kind !== 'character'"
                 >
-                  <app-compendium-icon
-                    [icon]="preset.id"
-                    [color]="ram.icon === preset.id ? ram.color : '#8AB0AB'"
-                    sizeClass="h-4 w-4"
-                  />
+                  <span class="font-display text-xs font-bold text-white">
+                    Player Character
+                  </span>
+                  <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                    Full character sheet with attributes, skills, loadout, perks, and inventory.
+                  </span>
                 </button>
-              }
-            </div>
-          </div>
 
-          <div class="space-y-2.5 border-t border-[#243B37] pt-3">
-            <span class="block font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-              Vitality, Movement &amp; Vision
-            </span>
-            <div class="grid grid-cols-3 gap-2.5 font-mono-num sm:grid-cols-5">
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Max HP</span>
-                <input
-                  type="number"
-                  name="ramHp"
-                  min="1"
-                  [ngModel]="ram.max_hp"
-                  (ngModelChange)="updateRosterActorModalField('max_hp', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Max SP</span>
-                <input
-                  type="number"
-                  name="ramSp"
-                  min="0"
-                  [ngModel]="ram.max_sp"
-                  (ngModelChange)="updateRosterActorModalField('max_sp', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Max AP</span>
-                <input
-                  type="number"
-                  name="ramAp"
-                  min="1"
-                  [ngModel]="ram.max_ap"
-                  (ngModelChange)="updateRosterActorModalField('max_ap', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Armor DR</span>
-                <input
-                  type="number"
-                  name="ramDr"
-                  min="0"
-                  [ngModel]="ram.armor_dr"
-                  (ngModelChange)="updateRosterActorModalField('armor_dr', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Move (ft)</span>
-                <input
-                  type="number"
-                  name="ramMove"
-                  step="5"
-                  min="0"
-                  [ngModel]="ram.move_feet"
-                  (ngModelChange)="updateRosterActorModalField('move_feet', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-            </div>
-
-            <div class="grid grid-cols-1 gap-2.5 rounded-xl border border-[#1E332F] bg-[#0B1413] p-2.5 sm:grid-cols-2">
-              <label class="space-y-1 font-mono-num">
-                <span class="text-[10px] font-semibold text-[#A7F3D0]">Dim Vision (ft)</span>
-                <input
-                  type="number"
-                  name="ramVision"
-                  step="5"
-                  min="0"
-                  [ngModel]="ram.vision_feet"
-                  (ngModelChange)="updateRosterActorModalField('vision_feet', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-                <span class="block font-sans text-[10px] text-[#8AB0AB]">
-                  Ambient night sight — scales with Dusk, Woods, or Storm gloom.
-                </span>
-              </label>
-              <label class="space-y-1 font-mono-num">
-                <span class="text-[10px] font-semibold text-[#5EEAD4]">Darkvision (ft)</span>
-                <input
-                  type="number"
-                  name="ramDarkvision"
-                  step="5"
-                  min="0"
-                  [ngModel]="ram.darkvision_feet"
-                  (ngModelChange)="updateRosterActorModalField('darkvision_feet', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-                <span class="block font-sans text-[10px] text-[#8AB0AB]">
-                  Zero-light sight floor in Pitch Black caves or dungeons.
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div class="space-y-2.5 border-t border-[#243B37] pt-3">
-            <span class="block font-display text-xs font-bold uppercase tracking-wider text-[#8AB0AB]">
-              Signature Strike &amp; Defense
-            </span>
-            <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-              <label class="col-span-2 space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Weapon / Attack Name</span>
-                <input
-                  type="text"
-                  name="ramWep"
-                  [ngModel]="ram.weapon_name"
-                  (ngModelChange)="updateRosterActorModalField('weapon_name', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white"
-                />
-              </label>
-              <label class="space-y-1 font-mono-num">
-                <span class="text-[10px] text-[#8AB0AB]">Attack Mod</span>
-                <input
-                  type="number"
-                  name="ramAtkMod"
-                  [ngModel]="ram.attack_mod"
-                  (ngModelChange)="updateRosterActorModalField('attack_mod', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1 font-mono-num">
-                <span class="text-[10px] text-[#8AB0AB]">Flat Damage</span>
-                <input
-                  type="number"
-                  name="ramDmg"
-                  min="0"
-                  [ngModel]="ram.flat_damage"
-                  (ngModelChange)="updateRosterActorModalField('flat_damage', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2.5 font-mono-num sm:grid-cols-4">
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Reach (ft)</span>
-                <input
-                  type="number"
-                  name="ramReach"
-                  step="5"
-                  min="5"
-                  [ngModel]="ram.reach_feet"
-                  (ngModelChange)="updateRosterActorModalField('reach_feet', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Combat Tag</span>
-                <select
-                  name="ramTag"
-                  [ngModel]="ram.combat_tag"
-                  (ngModelChange)="updateRosterActorModalField('combat_tag', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 text-xs font-semibold text-white"
+                <button
+                  type="button"
+                  (click)="setRosterActorModalKind('npc')"
+                  class="flex flex-col items-start rounded-xl border p-3 text-left transition-colors"
+                  [class.border-[#C4491A]]="ram.actor_kind === 'npc'"
+                  [class.bg-[#27160E]]="ram.actor_kind === 'npc'"
+                  [class.border-[#243B37]]="ram.actor_kind !== 'npc'"
+                  [class.bg-[#142220]]="ram.actor_kind !== 'npc'"
                 >
-                  <option value="None">None</option>
-                  <option value="Crushing">Crushing</option>
-                  <option value="Sweeping">Sweeping</option>
-                  <option value="Piercing">Piercing</option>
-                </select>
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Parry Mod</span>
-                <input
-                  type="number"
-                  name="ramParry"
-                  [ngModel]="ram.parry_mod"
-                  (ngModelChange)="updateRosterActorModalField('parry_mod', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-[10px] text-[#8AB0AB]">Dodge Mod</span>
-                <input
-                  type="number"
-                  name="ramDodge"
-                  [ngModel]="ram.dodge_mod"
-                  (ngModelChange)="updateRosterActorModalField('dodge_mod', $event)"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-bold text-white"
-                />
-              </label>
+                  <span class="font-display text-xs font-bold text-white">
+                    NPC
+                  </span>
+                  <span class="mt-0.5 text-[11px] text-[#8AB0AB]">
+                    Streamlined NPC sheet with vitals, attacks, inventory, and multi-spawn support.
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
+          } @else {
+            <div class="rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 text-[11px] text-[#8AB0AB]">
+              Creates a <strong class="text-white">Player Character</strong> and opens your sheet right inside the VTT.
+            </div>
+          }
 
-          <label class="block space-y-1 border-t border-[#243B37] pt-3">
-            <span class="font-semibold text-[#EBF5F3]">RP / Tactical Notes</span>
-            <textarea
-              name="ramNotes"
-              rows="2"
-              [ngModel]="ram.notes"
-              (ngModelChange)="updateRosterActorModalField('notes', $event)"
-              placeholder="Notes"
-              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
-            ></textarea>
+          <label class="block space-y-1">
+            <span class="font-semibold text-[#EBF5F3]">Name</span>
+            <input
+              type="text"
+              name="rosterActorName"
+              required
+              [ngModel]="ram.name"
+              (ngModelChange)="updateRosterActorModalField('name', $event)"
+              placeholder="Name"
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-bold text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            />
           </label>
+
+          @if (vttStore.isGm()) {
+            <label class="block space-y-1">
+              <span class="font-semibold text-[#EBF5F3]">Folder</span>
+              <select
+                name="rosterActorFolder"
+                [ngModel]="ram.folder_id"
+                (ngModelChange)="updateRosterActorModalField('folder_id', $event)"
+                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+              >
+                <option [ngValue]="null">None (Root Directory)</option>
+                @for (opt of rosterDirectoryTree().flatFolderOptions; track opt.id) {
+                  <option [ngValue]="opt.id">{{ opt.label }}</option>
+                }
+              </select>
+            </label>
+          }
 
           <label class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#142220] px-3 py-2 font-semibold text-white">
             <input
@@ -5180,41 +5118,23 @@
             type="submit"
             class="btn-copper rounded-lg px-4 py-1.5 font-bold"
           >
-            {{ ram.mode === 'create' ? 'Create Actor' : 'Save Actor' }}
+            {{ ram.actor_kind === 'npc' ? 'Create NPC' : 'Create Player Character' }}
           </button>
         </div>
       </form>
-    </div>
+    </app-vtt-floating-window>
   }
 
   @if (rosterImportModalOpen()) {
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
-      (click)="closeRosterImportModal()"
+    <app-vtt-floating-window
+      windowTitle="Import into Actors"
+      subtitle="Load characters you created, import reusable templates from Collections, or pull starter NPCs."
+      widthClass="w-[min(94vw,576px)]"
+      [estimatedWidth]="576"
+      [estimatedHeight]="620"
+      (closed)="closeRosterImportModal()"
     >
-      <div
-        (click)="$event.stopPropagation()"
-        class="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615] text-xs text-[#EBF5F3] shadow-2xl"
-      >
-        <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#243B37] bg-[#122220] px-5 py-3.5">
-          <div>
-            <h2 class="font-display text-base font-bold text-white">
-              Import into Actors
-            </h2>
-            <p class="text-[11px] text-[#8AB0AB]">
-              Load characters you created, import reusable templates from Collections, or pull starter adversaries.
-            </p>
-          </div>
-          <button
-            type="button"
-            (click)="closeRosterImportModal()"
-            class="text-lg font-bold text-[#8AB0AB] hover:text-white"
-          >
-            &times;
-          </button>
-        </div>
-
-        <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-5 py-3">
+      <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-5 py-3">
           <div
             class="grid gap-1.5"
             [class.grid-cols-4]="vttStore.isGm()"
@@ -5274,7 +5194,7 @@
                 [class.bg-[#142220]]="rosterImportTab() !== 'presets'"
                 [class.text-[#8AB0AB]]="rosterImportTab() !== 'presets'"
               >
-                Adversaries ({{ filteredImportPresets().length }})
+                Starter NPCs ({{ filteredImportPresets().length }})
               </button>
             }
           </div>
@@ -5303,7 +5223,7 @@
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-2">
+        <div class="min-h-0 flex-1 overflow-y-auto p-5 space-y-2">
           @if (rosterImportTab() === 'my-characters') {
             @if (filteredImportMyCharacters().length === 0) {
               <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB] space-y-2">
@@ -5319,11 +5239,35 @@
             } @else {
               @for (ch of filteredImportMyCharacters(); track ch.id) {
                 @let inRoster = isCharacterInRoster(ch.id);
+                @let chVis = getCharacterVisuals(ch);
                 <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
-                  <div class="min-w-0">
-                    <div class="truncate font-bold text-white">{{ ch.name }}</div>
-                    <div class="font-mono-num text-[11px] text-[#8AB0AB]">
-                      HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                  <div class="flex min-w-0 items-center gap-2.5">
+                    @if (chVis.portraitUrl && !isPortraitBroken(chVis.portraitUrl)) {
+                      <div class="h-9 w-8 shrink-0 overflow-hidden rounded-lg border border-[#38B29A]/60 bg-[#09100F]">
+                        <img
+                          [src]="chVis.portraitUrl"
+                          [alt]="ch.name + ' portrait'"
+                          (error)="markPortraitBroken(chVis.portraitUrl)"
+                          class="h-full w-full object-cover object-top"
+                        />
+                      </div>
+                    } @else {
+                      <div class="h-8 w-8 shrink-0">
+                        <app-token-avatar
+                          [tokenImageUrl]="chVis.tokenImageUrl"
+                          [appearance]="chVis.tokenAppearance"
+                          icon="greatsword"
+                          color="#38B29A"
+                          faction="ally"
+                          iconSizeClass="h-3.5 w-3.5"
+                        />
+                      </div>
+                    }
+                    <div class="min-w-0">
+                      <div class="truncate font-bold text-white">{{ ch.name }}</div>
+                      <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                        HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                      </div>
                     </div>
                   </div>
                   <div class="flex shrink-0 items-center gap-1.5">
@@ -5334,17 +5278,10 @@
                     } @else {
                       <button
                         type="button"
-                        (click)="importCharacterIntoRoster(ch, false)"
-                        class="rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 font-bold text-[#EBF5F3] hover:border-[#C4491A]"
-                      >
-                        + Import
-                      </button>
-                      <button
-                        type="button"
-                        (click)="importCharacterIntoRoster(ch, true)"
+                        (click)="importCharacterIntoRoster(ch)"
                         class="btn-copper rounded-lg px-3 py-1.5 font-bold"
                       >
-                        Import &amp; Deploy
+                        + Import
                       </button>
                     }
                   </div>
@@ -5366,23 +5303,49 @@
             } @else {
               @for (colActor of filteredImportCollectionActors(); track colActor.id) {
                 @let inRoster = isCollectionActorInRoster(colActor.id);
+                @let colVis = getCollectionActorVisuals(colActor);
                 <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
                   <div class="flex min-w-0 items-center gap-2.5">
-                    <div
-                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 bg-[#09100F]"
-                      [style.borderColor]="colActor.color || '#38B29A'"
-                    >
-                      <app-compendium-icon
-                        [icon]="colActor.icon"
-                        [color]="colActor.color || '#38B29A'"
-                        sizeClass="h-4 w-4"
-                      />
-                    </div>
+                    @if (colVis.portraitUrl && !isPortraitBroken(colVis.portraitUrl)) {
+                      <div
+                        class="h-9 w-8 shrink-0 overflow-hidden rounded-lg border-2 bg-[#09100F]"
+                        [style.borderColor]="colActor.color || '#38B29A'"
+                      >
+                        <img
+                          [src]="colVis.portraitUrl"
+                          [alt]="colActor.name + ' portrait'"
+                          (error)="markPortraitBroken(colVis.portraitUrl)"
+                          class="h-full w-full object-cover object-top"
+                        />
+                      </div>
+                    } @else if (hasCustomTokenArt(colVis.tokenImageUrl, colVis.tokenAppearance)) {
+                      <div class="h-8 w-8 shrink-0">
+                        <app-token-avatar
+                          [tokenImageUrl]="colVis.tokenImageUrl"
+                          [appearance]="colVis.tokenAppearance"
+                          [icon]="colActor.icon"
+                          [color]="colActor.color || '#38B29A'"
+                          [faction]="colActor.faction"
+                          iconSizeClass="h-4 w-4"
+                        />
+                      </div>
+                    } @else {
+                      <div
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 bg-[#09100F]"
+                        [style.borderColor]="colActor.color || '#38B29A'"
+                      >
+                        <app-compendium-icon
+                          [icon]="colActor.icon"
+                          [color]="colActor.color || '#38B29A'"
+                          sizeClass="h-4 w-4"
+                        />
+                      </div>
+                    }
                     <div class="min-w-0">
                       <div class="flex items-center gap-1.5">
                         <span class="truncate font-bold text-white">{{ colActor.name }}</span>
                         <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
-                          {{ colActor.actor_kind === 'npc' ? 'NPC' : 'Char' }}
+                          {{ colActor.actor_kind === 'npc' ? 'NPC' : 'Player Character' }}
                         </span>
                       </div>
                       <div class="font-mono-num text-[11px] text-[#8AB0AB]">
@@ -5415,11 +5378,35 @@
             } @else {
               @for (ch of filteredImportPartyCharacters(); track ch.id) {
                 @let inRoster = isCharacterInRoster(ch.id);
+                @let partyVis = getCharacterVisuals(ch);
                 <div class="flex items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#142220] px-3.5 py-2.5">
-                  <div class="min-w-0">
-                    <div class="truncate font-bold text-white">{{ ch.name }}</div>
-                    <div class="font-mono-num text-[11px] text-[#8AB0AB]">
-                      HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                  <div class="flex min-w-0 items-center gap-2.5">
+                    @if (partyVis.portraitUrl && !isPortraitBroken(partyVis.portraitUrl)) {
+                      <div class="h-9 w-8 shrink-0 overflow-hidden rounded-lg border border-[#38B29A]/60 bg-[#09100F]">
+                        <img
+                          [src]="partyVis.portraitUrl"
+                          [alt]="ch.name + ' portrait'"
+                          (error)="markPortraitBroken(partyVis.portraitUrl)"
+                          class="h-full w-full object-cover object-top"
+                        />
+                      </div>
+                    } @else {
+                      <div class="h-8 w-8 shrink-0">
+                        <app-token-avatar
+                          [tokenImageUrl]="partyVis.tokenImageUrl"
+                          [appearance]="partyVis.tokenAppearance"
+                          icon="greatsword"
+                          color="#38B29A"
+                          faction="ally"
+                          iconSizeClass="h-3.5 w-3.5"
+                        />
+                      </div>
+                    }
+                    <div class="min-w-0">
+                      <div class="truncate font-bold text-white">{{ ch.name }}</div>
+                      <div class="font-mono-num text-[11px] text-[#8AB0AB]">
+                        HP {{ ch.current_hp }} &middot; SP {{ ch.current_sp }}
+                      </div>
                     </div>
                   </div>
                   <div>
@@ -5430,7 +5417,7 @@
                     } @else {
                       <button
                         type="button"
-                        (click)="importCharacterIntoRoster(ch, false)"
+                        (click)="importCharacterIntoRoster(ch)"
                         class="btn-copper rounded-lg px-3 py-1.5 font-bold"
                       >
                         + Import
@@ -5489,13 +5476,15 @@
             Done
           </button>
         </div>
-      </div>
-    </div>
+    </app-vtt-floating-window>
   }
+
+  <app-vtt-actor-sheet />
 
   @let abm = assetBrowserModal();
   <app-asset-browser-modal
     [open]="abm !== null"
+    [floating]="true"
     [mode]="abm?.mode ?? 'picker'"
     [purpose]="abm?.purpose ?? 'maps'"
     [initialFolderId]="abm?.initialFolderId"

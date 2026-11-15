@@ -1,0 +1,114 @@
+<section
+  role="dialog"
+  [attr.aria-label]="ariaLabel() || windowTitle()"
+  data-vtt-floating-window="true"
+  (pointerdown)="focusWindow()"
+  (wheel)="$event.stopPropagation()"
+  class="fixed pointer-events-auto flex flex-col rounded-2xl border text-xs shadow-2xl backdrop-blur-xs select-text"
+  [ngClass]="widthClass()"
+  [class.overflow-hidden]="!allowOverflow()"
+  [class.overflow-visible]="allowOverflow()"
+  [class.max-h-[calc(100vh-84px)]]="!minimized() && !allowOverflow()"
+  [class.border-[#C4491A]]="accentBorder()"
+  [class.border-[#243B37]]="!accentBorder() && surfaceTheme() === 'dark'"
+  [class.bg-[#0D1615]/98]="surfaceTheme() === 'dark'"
+  [class.text-[#EBF5F3]]="surfaceTheme() === 'dark'"
+  [class.border-[var(--mot-border)]]="!accentBorder() && surfaceTheme() === 'adaptive'"
+  [class.bg-[var(--mot-surface)]]="surfaceTheme() === 'adaptive'"
+  [class.text-[var(--mot-text)]]="surfaceTheme() === 'adaptive'"
+  [style.left.px]="windowX()"
+  [style.top.px]="windowY()"
+  [style.zIndex]="zIndex()"
+>
+  <div
+    (pointerdown)="onHeaderPointerDown($event)"
+    class="flex shrink-0 cursor-move select-none items-start justify-between gap-2.5 px-4 py-3"
+    [class.rounded-t-2xl]="allowOverflow() && !minimized()"
+    [class.rounded-2xl]="allowOverflow() && minimized()"
+    [class.border-b]="!minimized()"
+    [class.border-[#243B37]]="surfaceTheme() === 'dark'"
+    [class.bg-[#122220]]="surfaceTheme() === 'dark'"
+    [class.border-[var(--mot-border)]]="surfaceTheme() === 'adaptive'"
+    [class.bg-[var(--mot-surface-raised)]]="surfaceTheme() === 'adaptive'"
+  >
+    <div class="flex min-w-0 flex-1 items-center gap-2.5">
+      <ng-content select="[headerPrefix]" />
+
+      <div class="min-w-0 flex-1">
+        @if (eyebrow()) {
+          <div
+            class="font-mono-num text-[10px] font-bold uppercase tracking-wider"
+            [class.text-[#8AB0AB]]="surfaceTheme() === 'dark'"
+            [class.text-[var(--mot-muted)]]="surfaceTheme() === 'adaptive'"
+          >
+            {{ eyebrow() }}
+          </div>
+        }
+        <h2
+          class="truncate font-display text-sm font-bold"
+          [class.text-white]="surfaceTheme() === 'dark'"
+          [class.text-[var(--mot-text)]]="surfaceTheme() === 'adaptive'"
+        >
+          {{ windowTitle() }}
+        </h2>
+        @if (subtitle() && !minimized()) {
+          <p
+            class="mt-0.5 text-[11px] leading-snug"
+            [class.text-[#8AB0AB]]="surfaceTheme() === 'dark'"
+            [class.text-[var(--mot-muted)]]="surfaceTheme() === 'adaptive'"
+          >
+            {{ subtitle() }}
+          </p>
+        }
+      </div>
+    </div>
+
+    <div class="flex shrink-0 items-center gap-1.5">
+      <ng-content select="[headerExtra]" />
+
+      @if (minimizable()) {
+        <button
+          type="button"
+          (click)="toggleMinimize()"
+          class="rounded-lg border px-2 py-1 text-[10px] font-semibold transition-colors"
+          [class.border-[#243B37]]="surfaceTheme() === 'dark'"
+          [class.bg-[#09100F]]="surfaceTheme() === 'dark'"
+          [class.text-[#8AB0AB]]="surfaceTheme() === 'dark'"
+          [class.hover:text-white]="surfaceTheme() === 'dark'"
+          [class.border-[var(--mot-border)]]="surfaceTheme() === 'adaptive'"
+          [class.bg-[var(--mot-surface)]]="surfaceTheme() === 'adaptive'"
+          [class.text-[var(--mot-muted)]]="surfaceTheme() === 'adaptive'"
+          [class.hover:text-[var(--mot-text)]]="surfaceTheme() === 'adaptive'"
+        >
+          {{ minimized() ? 'Expand' : 'Minimize' }}
+        </button>
+      }
+
+      <button
+        type="button"
+        (click)="closeWindow()"
+        [attr.title]="'Close ' + (ariaLabel() || windowTitle())"
+        [attr.aria-label]="'Close ' + (ariaLabel() || windowTitle())"
+        class="rounded-lg border px-2 py-1 text-xs font-bold transition-colors hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+        [class.border-[#243B37]]="surfaceTheme() === 'dark'"
+        [class.bg-[#09100F]]="surfaceTheme() === 'dark'"
+        [class.text-[#8AB0AB]]="surfaceTheme() === 'dark'"
+        [class.border-[var(--mot-border)]]="surfaceTheme() === 'adaptive'"
+        [class.bg-[var(--mot-surface)]]="surfaceTheme() === 'adaptive'"
+        [class.text-[var(--mot-muted)]]="surfaceTheme() === 'adaptive'"
+      >
+        &times;
+      </button>
+    </div>
+  </div>
+
+  @if (!minimized()) {
+    <div
+      class="flex min-h-0 flex-1 flex-col"
+      [class.overflow-hidden]="!allowOverflow()"
+      [class.overflow-visible]="allowOverflow()"
+    >
+      <ng-content />
+    </div>
+  }
+</section>
