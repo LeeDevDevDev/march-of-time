@@ -10309,4 +10309,481 @@ describe('App', () => {
     expect(reimportedNpc.notes).toBe('Upgraded in Collections Manager');
     expect(reimportedNpc.npc_stats.__inventory?.[0]?.name).toBe('War Horn');
   });
+
+  it('should display the Actions tab on VTT Player Character and NPC sheets with Equipped Weapons, Defensive Actions, and Move / Other Actions', async () => {
+    const vanguardBlade: WeaponModel = {
+      id: 'wep-vanguard-blade',
+      slug: 'vanguard-blade',
+      name: 'Vanguard Arming Sword',
+      category: 'Martial',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Technique',
+      gov_skill: 'Strike',
+      base_damage: 4,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      trait_name: 'Balanced Edge',
+      trait_description: 'Reliable steel blade.',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const backupCrossbow: WeaponModel = {
+      id: 'wep-backup-arbalest',
+      slug: 'backup-arbalest',
+      name: 'Ironwood Arbalest',
+      category: 'Ranged',
+      ap_cost: 2,
+      requires_aim: true,
+      gov_attribute: 'Agility',
+      gov_skill: 'Shoot',
+      base_damage: 6,
+      reach_tiles: 12,
+      thrown_range_tiles: null,
+      trait_name: 'Heavy Draw',
+      trait_description: 'High-impact bolt launcher.',
+      rule_hooks: { two_handed: true },
+      is_active: true,
+    };
+
+    const pcSource: CharacterModel = {
+      id: 'char-actions-pc-1',
+      owner_id: 'gm-actions-1',
+      name: 'Kaelen Thorne',
+      level: 3,
+      attributes: {
+        Brawn: 1,
+        Agility: 2,
+        Technique: 3,
+        Iron: 2,
+        Cunning: 0,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 1,
+        Parry: 2,
+        Dodge: 1,
+        Block: 2,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 1,
+        Perception: 2,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Medium',
+      equipped_shield: 'Heater',
+      weapon_slot_1_id: vanguardBlade.id,
+      weapon_slot_2_id: backupCrossbow.id,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 9,
+      current_sp: 5,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+    };
+
+    let rosterSeq = 1;
+    let logSeq = 1;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => ({ id: 'gm-actions-1', email: 'gm@actions.test' }),
+            isAdmin: () => true,
+            displayName: () => 'GM Actions',
+            handle: () => 'gmactions',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([vanguardBlade, backupCrossbow]),
+            weapons: signal([vanguardBlade, backupCrossbow]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([pcSource]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              id === pcSource.id ? pcSource : undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharacterById: async (id: string) => ({
+              data: id === pcSource.id ? pcSource : null,
+              error: id === pcSource.id ? null : 'Not found',
+            }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            createRosterActor: async (
+              input: Omit<
+                VttRosterActorModel,
+                'id' | 'created_at' | 'updated_at'
+              >
+            ) => ({
+              actor: {
+                ...input,
+                id: `roster-act-${rosterSeq++}`,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              } as VttRosterActorModel,
+              error: null,
+            }),
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `tok-act-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-act-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-actions-1',
+      gm_id: 'gm-actions-1',
+      name: 'Actions Tab Campaign',
+      cover_image_url: null,
+      invite_code: 'ACT101',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-actions-1',
+        campaign_id: 'camp-actions-1',
+        gm_id: 'gm-actions-1',
+        folder_id: null,
+        name: 'Rampart Walk',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#0D1615',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-actions-1');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const importedPc = await vttStore.importCharacterToRoster(pcSource);
+    const deployedPcTok = await vttStore.deployRosterActor(importedPc!.id);
+    vttStore.openTokenSheet(deployedPcTok!.id);
+    fixture.detectChanges();
+
+    const pcActionsPanel = rootEl.querySelector(
+      '[data-vtt-actions-panel="pc"]'
+    ) as HTMLElement | null;
+    expect(pcActionsPanel).toBeTruthy();
+    expect(pcActionsPanel!.textContent).toContain('Vanguard Arming Sword');
+    expect(pcActionsPanel!.textContent).toContain('Ironwood Arbalest');
+    expect(pcActionsPanel!.textContent).toContain('2d10 + 5');
+    expect(pcActionsPanel!.textContent).toContain('7 DMG');
+    expect(pcActionsPanel!.textContent).toContain('Defensive Actions');
+    expect(pcActionsPanel!.textContent).toContain('Parry');
+    expect(pcActionsPanel!.textContent).toContain('Dodge');
+    expect(pcActionsPanel!.textContent).toContain('Raise Shield');
+    expect(pcActionsPanel!.textContent).toContain('Other Actions');
+    expect(pcActionsPanel!.textContent).toContain('Move');
+    expect(pcActionsPanel!.textContent).toContain('Stance Recovery');
+    expect(pcActionsPanel!.textContent).toContain('Aim');
+
+    const moveBtn = pcActionsPanel!.querySelector(
+      'button[data-vtt-action="move"]'
+    ) as HTMLButtonElement | null;
+    expect(moveBtn).toBeTruthy();
+    moveBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens()[0].current_ap).toBe(3);
+    expect(vttStore.openSheetCharacter()!.current_ap).toBe(3);
+    expect(
+      vttStore.logs().some((l) => l.title.includes('Kaelen Thorne used Move'))
+    ).toBe(true);
+
+    const raiseGuardBtn = pcActionsPanel!.querySelector(
+      'button[data-vtt-action="raise-guard"]'
+    ) as HTMLButtonElement | null;
+    expect(raiseGuardBtn).toBeTruthy();
+    raiseGuardBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens()[0].current_ap).toBe(2);
+    expect(vttStore.tokens()[0].shield_raised).toBe(true);
+
+    vttStore.closeActorSheet();
+    const createdNpc = await vttStore.createVttActorQuick({
+      name: 'Sentinel Halberdier',
+      actor_kind: 'npc',
+    });
+    expect(createdNpc).toBeTruthy();
+    fixture.detectChanges();
+
+    const npcActionsPanel = rootEl.querySelector(
+      '[data-vtt-actions-panel="npc"]'
+    ) as HTMLElement | null;
+    expect(npcActionsPanel).toBeTruthy();
+    expect(npcActionsPanel!.textContent).toContain('Equipped Weapon & Attacks');
+    expect(npcActionsPanel!.textContent).toContain('Defensive Actions');
+    expect(npcActionsPanel!.textContent).toContain('Move');
+    expect(npcActionsPanel!.textContent).toContain('20 ft');
+  });
+
+  it('should display the Actions tab and Sheet Navigation tabs on the Character Sheet (/characters/:id)', async () => {
+    const greatsword: WeaponModel = {
+      id: 'wep-iron-greatsword',
+      slug: 'greatsword',
+      name: 'Iron Greatsword',
+      category: 'Heavy',
+      ap_cost: 2,
+      requires_aim: false,
+      gov_attribute: 'Brawn',
+      gov_skill: 'Strike',
+      base_damage: 6,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      trait_name: 'Cleaving Weight',
+      trait_description: 'Two-handed guard blade.',
+      rule_hooks: { two_handed: true, heavy_guard: true },
+      is_active: true,
+    };
+
+    let storedChar: CharacterModel = {
+      id: 'char-site-actions-1',
+      owner_id: 'owner-site-act-1',
+      name: 'Brynja Stone',
+      level: 2,
+      attributes: {
+        Brawn: 3,
+        Agility: 1,
+        Technique: 2,
+        Iron: 2,
+        Cunning: 0,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 2,
+      },
+      field_skills: {
+        Athletics: 2,
+        Menace: 1,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 2,
+        Perception: 0,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Medium',
+      equipped_shield: 'None',
+      weapon_slot_1_id: greatsword.id,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 9,
+      current_sp: 5,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+    };
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [CharacterDetailComponent],
+      providers: [
+        provideRouter([
+          { path: 'characters/:id', component: CharacterDetailComponent },
+        ]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => ({ id: 'owner-site-act-1', email: 'brynja@test.dev' }),
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumService,
+          useValue: {
+            fetchFullCompendium: async () => ({
+              weapons: [greatsword],
+              armors: DEFAULT_COMPENDIUM_ARMORS,
+              items: DEFAULT_COMPENDIUM_ITEMS,
+              skillTrees: [],
+              perkNodes: [],
+              keywords: [],
+            }),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({
+              data: [storedChar],
+              error: null,
+            }),
+            fetchCharacterById: async () => ({
+              data: storedChar,
+              error: null,
+            }),
+            updateCharacterRecord: async (
+              _id: string,
+              patch: Partial<CharacterModel>
+            ) => {
+              storedChar = { ...storedChar, ...patch };
+              return null;
+            },
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const harness = await RouterTestingHarness.create(
+      '/characters/char-site-actions-1'
+    );
+    const detailComp = harness.routeDebugElement!
+      .componentInstance as CharacterDetailComponent;
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+
+    const sheetEl = harness.routeNativeElement as HTMLElement;
+    expect(detailComp.sheetTab()).toBe('actions');
+
+    const actionsPanel = sheetEl.querySelector(
+      '[data-char-actions-panel="true"]'
+    ) as HTMLElement | null;
+    expect(actionsPanel).toBeTruthy();
+    expect(actionsPanel!.textContent).toContain('Iron Greatsword');
+    expect(actionsPanel!.textContent).toContain('2d10 + 5');
+    expect(actionsPanel!.textContent).toContain('9 DMG');
+    expect(actionsPanel!.textContent).toContain('Parry Reaction');
+    expect(actionsPanel!.textContent).toContain('Dodge Reaction');
+    expect(actionsPanel!.textContent).toContain('Raise Weapon Guard');
+    expect(actionsPanel!.textContent).toContain('Move');
+    expect(actionsPanel!.textContent).toContain('Stance Recovery');
+    expect(actionsPanel!.textContent).toContain('Aim');
+    expect(actionsPanel!.textContent).toContain('Interact / Use Item');
+
+    const siteMoveBtn = actionsPanel!.querySelector(
+      'button[data-char-action="move"]'
+    ) as HTMLButtonElement | null;
+    expect(siteMoveBtn).toBeTruthy();
+    siteMoveBtn!.click();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+    expect(detailComp.character()!.current_ap).toBe(3);
+
+    const charSkillsTabBtn = sheetEl.querySelector(
+      'button[data-char-sheet-tab="character"]'
+    ) as HTMLButtonElement | null;
+    expect(charSkillsTabBtn).toBeTruthy();
+    charSkillsTabBtn!.click();
+    harness.detectChanges();
+    expect(sheetEl.textContent).toContain('Core Attributes');
+    expect(sheetEl.textContent).toContain('10 Field Skills');
+  });
 });

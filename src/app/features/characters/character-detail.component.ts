@@ -1,4 +1,12 @@
-import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
+import {
+  Component,
+  HostListener,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
@@ -72,6 +80,13 @@ import {
 } from './models/character.model';
 import { CharacterStore } from './store/character.store';
 
+export type CharacterSheetViewTab =
+  | 'actions'
+  | 'character'
+  | 'loadout'
+  | 'perks'
+  | 'all';
+
 export interface SheetRollResult {
   label: string;
   d1: number;
@@ -118,6 +133,7 @@ export class CharacterDetailComponent {
   readonly tokenizerModalOpen = signal(false);
   readonly brokenPortraitUrl = signal<string | null>(null);
   readonly lastRoll = signal<SheetRollResult | null>(null);
+  readonly sheetTab = signal<CharacterSheetViewTab>('actions');
   readonly inventoryTab = signal<InventoryFilterTab>('all');
 
   readonly characterId = computed(() => this.route.snapshot.paramMap.get('id') ?? '');
@@ -169,6 +185,17 @@ export class CharacterDetailComponent {
       const id = this.characterId();
       if (id) {
         void this.characterStore.ensureCharacterLoaded(id);
+      }
+    });
+    effect(() => {
+      const invTab = this.inventoryTab();
+      if (invTab !== 'all') {
+        untracked(() => {
+          const currentTab = this.sheetTab();
+          if (currentTab !== 'loadout' && currentTab !== 'all') {
+            this.sheetTab.set('loadout');
+          }
+        });
       }
     });
   }
@@ -327,6 +354,58 @@ export class CharacterDetailComponent {
       mod,
       `${weapon.ap_cost} AP spent · ${dmg} Flat DMG`
     );
+  }
+
+  async useUnarmedAttack(
+    id: string,
+    stats: DerivedCharacterStats
+  ): Promise<void> {
+    const char = this.character();
+    if (!char || char.current_ap < 1) return;
+    await this.setAp(id, char.current_ap - 1);
+    this.roll2d10(
+      'Unarmed Strike',
+      stats.attackRollMod,
+      `1 AP spent · ${stats.flatWeaponDamage} Flat DMG`
+    );
+  }
+
+  async useTacticalAction(
+    id: string,
+    actionLabel: string,
+    detailText: string,
+    apCost = 1
+  ): Promise<void> {
+    const char = this.character();
+    if (!char || char.current_ap < apCost) return;
+    await this.setAp(id, char.current_ap - apCost);
+    this.notifications.info(
+      `${actionLabel} (${apCost} AP)`,
+      detailText
+    );
+  }
+
+  formatRollFormulaFromMod(mod: number): string {
+    return mod >= 0 ? `2d10 + ${mod}` : `2d10 − ${Math.abs(mod)}`;
+  }
+
+  getWeaponReachOrRangeLabel(w: WeaponModel | null | undefined): string {
+    if (!w) return 'Reach 5 ft';
+    const reachFt = Math.max(5, Math.round((w.reach_tiles ?? 1) * 5));
+    const thrownFt =
+      w.thrown_range_tiles && w.thrown_range_tiles > 0
+        ? Math.round(w.thrown_range_tiles * 5)
+        : 0;
+    if (
+      (w.category ?? '').toLowerCase() === 'ranged' ||
+      w.gov_skill === 'Shoot'
+    ) {
+      return `Range ${Math.max(reachFt, thrownFt)} ft`;
+    }
+    if (thrownFt > reachFt) {
+      return `Reach ${reachFt} ft · Thrown ${thrownFt} ft`;
+    }
+    return `Reach ${reachFt} ft`;
   }
 
   getPerkCooldown(

@@ -321,7 +321,845 @@
         </section>
       }
 
+      @let sTab = sheetTab();
+      <nav
+        aria-label="Character Sheet Sections"
+        data-char-sheet-tabs="true"
+        class="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1.5 text-xs font-bold sm:grid-cols-5"
+      >
+        <button
+          type="button"
+          data-char-sheet-tab="actions"
+          (click)="sheetTab.set('actions')"
+          class="rounded-lg px-3 py-2 transition-colors"
+          [class.btn-copper]="sTab === 'actions'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'actions'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'actions'"
+        >
+          Actions
+        </button>
+        <button
+          type="button"
+          data-char-sheet-tab="character"
+          (click)="sheetTab.set('character')"
+          class="rounded-lg px-3 py-2 transition-colors"
+          [class.btn-copper]="sTab === 'character'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'character'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'character'"
+        >
+          Character &amp; Skills
+        </button>
+        <button
+          type="button"
+          data-char-sheet-tab="loadout"
+          (click)="sheetTab.set('loadout')"
+          class="rounded-lg px-3 py-2 transition-colors"
+          [class.btn-copper]="sTab === 'loadout'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'loadout'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'loadout'"
+        >
+          Loadout &amp; Inventory ({{ getTotalCategorizedCount(char, stats) }})
+        </button>
+        <button
+          type="button"
+          data-char-sheet-tab="perks"
+          (click)="sheetTab.set('perks')"
+          class="rounded-lg px-3 py-2 transition-colors"
+          [class.btn-copper]="sTab === 'perks'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'perks'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'perks'"
+        >
+          Perks &amp; Arts ({{ stats.perkSpent }}/{{ stats.perkBudget }})
+        </button>
+        <button
+          type="button"
+          data-char-sheet-tab="all"
+          (click)="sheetTab.set('all')"
+          class="col-span-2 rounded-lg px-3 py-2 transition-colors sm:col-span-1"
+          [class.btn-copper]="sTab === 'all'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'all'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'all'"
+        >
+          Full Sheet
+        </button>
+      </nav>
+
+      @if (sTab === 'actions') {
+        <div data-char-actions-panel="true" class="space-y-6 tabular-nums">
+          <section
+            data-char-actions-section="weapons"
+            class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 space-y-4"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                  Equipped Weapons &amp; Attacks
+                </h2>
+                <p class="text-xs text-[var(--mot-muted)]">
+                  Spend AP to attack with your active slot or roll a check anytime. Switching weapon slots costs 1 AP.
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  (click)="switchWeapon(char.id)"
+                  [disabled]="char.current_ap < 1"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                >
+                  1 AP: Switch Active Slot
+                </button>
+                <button
+                  type="button"
+                  (click)="sheetTab.set('loadout')"
+                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3 py-1.5 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                >
+                  Edit Loadout
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+              <div
+                class="flex flex-col justify-between rounded-xl border p-4 transition-colors space-y-3"
+                [class.border-[#C4491A]]="char.active_weapon_slot === 1"
+                [class.bg-[var(--mot-well)]]="char.active_weapon_slot === 1"
+                [class.border-[var(--mot-border)]]="char.active_weapon_slot !== 1"
+              >
+                <div class="space-y-2.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-[var(--mot-muted)]">
+                      Primary Slot 1
+                    </span>
+                    @if (char.active_weapon_slot === 1) {
+                      <span class="rounded bg-[#C4491A] px-2 py-0.5 text-xs font-bold text-white">
+                        Active
+                      </span>
+                    } @else {
+                      <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-xs font-semibold text-[var(--mot-muted)]">
+                        Stowed
+                      </span>
+                    }
+                  </div>
+
+                  @if (stats.weaponSlot1; as aw1) {
+                    @let aw1f = getWeaponFormula(char, aw1, stats);
+                    <div class="flex items-center gap-3">
+                      <div
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                        [style.border-color]="getWeaponVisuals(aw1).color"
+                      >
+                        <app-compendium-icon
+                          [icon]="getWeaponVisuals(aw1).icon"
+                          [color]="getWeaponVisuals(aw1).color"
+                          [tintCustom]="getWeaponVisuals(aw1).tintCustom"
+                          sizeClass="h-5 w-5"
+                        />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <div class="font-display text-base font-bold text-[var(--mot-text)]">
+                          {{ aw1.name }}
+                        </div>
+                        <div class="font-mono-num text-xs font-semibold text-[var(--mot-accent-text)]">
+                          {{ aw1.ap_cost }} AP &middot; {{ getWeaponReachOrRangeLabel(aw1) }} &middot; {{ aw1.category }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 font-mono-num text-xs">
+                      <div class="rounded-lg border border-[#C4491A]/40 bg-[var(--mot-surface)] px-3 py-2">
+                        <div class="text-[10px] font-bold uppercase text-[var(--mot-accent-text)]">Roll</div>
+                        <div class="font-bold text-[var(--mot-text)]">{{ aw1f.rollFormula }}</div>
+                        <div class="truncate text-[10px] text-[var(--mot-muted)]">{{ aw1f.rollBreakdown }}</div>
+                      </div>
+                      <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                        <div class="text-[10px] font-bold uppercase text-[var(--mot-muted)]">Damage</div>
+                        <div class="font-bold text-[var(--mot-text)]">{{ aw1f.damageFormula }}</div>
+                        <div class="truncate text-[10px] text-[var(--mot-muted)]">{{ aw1f.damageBreakdown }}</div>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
+                      @if (isTwoHanded(aw1)) {
+                        <span class="badge-warn inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold">
+                          Two-Handed · No Shield
+                        </span>
+                      }
+                      @if (isHeavy(aw1)) {
+                        <span class="badge-jade inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold">
+                          Guard · Block {{ getHeavyBlockBase(aw1) + stats.blockMod }}
+                        </span>
+                      }
+                      @if (aw1.requires_aim) {
+                        <span class="inline-flex items-center rounded-full border border-[#38BDF8]/40 bg-[#38BDF8]/10 px-2.5 py-0.5 font-bold text-[#38BDF8]">
+                          Requires Aim
+                        </span>
+                      }
+                      @for (badge1 of getWeaponHookBadges(aw1); track badge1) {
+                        <span class="badge-piercing inline-flex items-center rounded-full border px-2.5 py-0.5 font-bold">
+                          {{ badge1 }}
+                        </span>
+                      }
+                    </div>
+                  } @else {
+                    @let uMod1 = (char.attributes.Brawn ?? 0) + (char.combat_skills.Strike ?? 0);
+                    @let uDmg1 = 2 + (char.attributes.Brawn ?? 0);
+                    <div class="space-y-2">
+                      <div class="font-display text-base font-bold text-[var(--mot-text)]">
+                        Unarmed Strike
+                      </div>
+                      <div class="font-mono-num text-xs text-[var(--mot-muted)]">
+                        1 AP &middot; Reach 5 ft &middot; Brawn + Strike
+                      </div>
+                      <div class="grid grid-cols-2 gap-2 font-mono-num text-xs">
+                        <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                          <div class="text-[10px] font-bold uppercase text-[var(--mot-accent-text)]">Roll</div>
+                          <div class="font-bold text-[var(--mot-text)]">
+                            {{ char.active_weapon_slot === 1 ? formatRollFormulaFromMod(stats.attackRollMod) : formatRollFormulaFromMod(uMod1) }}
+                          </div>
+                        </div>
+                        <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                          <div class="text-[10px] font-bold uppercase text-[var(--mot-muted)]">Damage</div>
+                          <div class="font-bold text-[var(--mot-text)]">
+                            {{ char.active_weapon_slot === 1 ? stats.flatWeaponDamage : uDmg1 }} DMG
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                </div>
+
+                <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2.5">
+                  @if (stats.weaponSlot1; as aw1Act) {
+                    <button
+                      type="button"
+                      (click)="roll2d10(aw1Act.name + ' Check', getWeaponAttackMod(char, aw1Act, stats), getWeaponFlatDamage(char, aw1Act, stats) + ' Flat DMG')"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Roll 2d10+{{ getWeaponAttackMod(char, aw1Act, stats) }}
+                    </button>
+                    @if (char.active_weapon_slot === 1) {
+                      <button
+                        type="button"
+                        (click)="useWeaponAttack(char.id, aw1Act, stats)"
+                        [disabled]="char.current_ap < aw1Act.ap_cost"
+                        class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                      >
+                        {{ aw1Act.ap_cost }} AP: Attack
+                      </button>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="switchWeapon(char.id)"
+                        [disabled]="char.current_ap < 1"
+                        class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                      >
+                        1 AP: Ready
+                      </button>
+                    }
+                  } @else if (char.active_weapon_slot === 1) {
+                    <button
+                      type="button"
+                      (click)="roll2d10('Unarmed Strike Check', stats.attackRollMod, stats.flatWeaponDamage + ' Flat DMG')"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Roll 2d10+{{ stats.attackRollMod }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="useUnarmedAttack(char.id, stats)"
+                      [disabled]="char.current_ap < 1"
+                      class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                    >
+                      1 AP: Attack
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <div
+                class="flex flex-col justify-between rounded-xl border p-4 transition-colors space-y-3"
+                [class.border-[#C4491A]]="char.active_weapon_slot === 2"
+                [class.bg-[var(--mot-well)]]="char.active_weapon_slot === 2"
+                [class.border-[var(--mot-border)]]="char.active_weapon_slot !== 2"
+              >
+                <div class="space-y-2.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-[var(--mot-muted)]">
+                      Secondary Slot 2
+                    </span>
+                    @if (char.active_weapon_slot === 2) {
+                      <span class="rounded bg-[#C4491A] px-2 py-0.5 text-xs font-bold text-white">
+                        Active
+                      </span>
+                    } @else {
+                      <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-xs font-semibold text-[var(--mot-muted)]">
+                        Stowed
+                      </span>
+                    }
+                  </div>
+
+                  @if (stats.weaponSlot2; as aw2) {
+                    @let aw2f = getWeaponFormula(char, aw2, stats);
+                    <div class="flex items-center gap-3">
+                      <div
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                        [style.border-color]="getWeaponVisuals(aw2).color"
+                      >
+                        <app-compendium-icon
+                          [icon]="getWeaponVisuals(aw2).icon"
+                          [color]="getWeaponVisuals(aw2).color"
+                          [tintCustom]="getWeaponVisuals(aw2).tintCustom"
+                          sizeClass="h-5 w-5"
+                        />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <div class="font-display text-base font-bold text-[var(--mot-text)]">
+                          {{ aw2.name }}
+                        </div>
+                        <div class="font-mono-num text-xs font-semibold text-[var(--mot-accent-text)]">
+                          {{ aw2.ap_cost }} AP &middot; {{ getWeaponReachOrRangeLabel(aw2) }} &middot; {{ aw2.category }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 font-mono-num text-xs">
+                      <div class="rounded-lg border border-[#C4491A]/40 bg-[var(--mot-surface)] px-3 py-2">
+                        <div class="text-[10px] font-bold uppercase text-[var(--mot-accent-text)]">Roll</div>
+                        <div class="font-bold text-[var(--mot-text)]">{{ aw2f.rollFormula }}</div>
+                        <div class="truncate text-[10px] text-[var(--mot-muted)]">{{ aw2f.rollBreakdown }}</div>
+                      </div>
+                      <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                        <div class="text-[10px] font-bold uppercase text-[var(--mot-muted)]">Damage</div>
+                        <div class="font-bold text-[var(--mot-text)]">{{ aw2f.damageFormula }}</div>
+                        <div class="truncate text-[10px] text-[var(--mot-muted)]">{{ aw2f.damageBreakdown }}</div>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-xs">
+                      @if (isTwoHanded(aw2)) {
+                        <span class="badge-warn inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold">
+                          Two-Handed · No Shield
+                        </span>
+                      }
+                      @if (isHeavy(aw2)) {
+                        <span class="badge-jade inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold">
+                          Guard · Block {{ getHeavyBlockBase(aw2) + stats.blockMod }}
+                        </span>
+                      }
+                      @if (aw2.requires_aim) {
+                        <span class="inline-flex items-center rounded-full border border-[#38BDF8]/40 bg-[#38BDF8]/10 px-2.5 py-0.5 font-bold text-[#38BDF8]">
+                          Requires Aim
+                        </span>
+                      }
+                      @for (badge2 of getWeaponHookBadges(aw2); track badge2) {
+                        <span class="badge-piercing inline-flex items-center rounded-full border px-2.5 py-0.5 font-bold">
+                          {{ badge2 }}
+                        </span>
+                      }
+                    </div>
+                  } @else {
+                    @let uMod2 = (char.attributes.Brawn ?? 0) + (char.combat_skills.Strike ?? 0);
+                    @let uDmg2 = 2 + (char.attributes.Brawn ?? 0);
+                    <div class="space-y-2">
+                      <div class="font-display text-base font-bold text-[var(--mot-text)]">
+                        Unarmed Strike
+                      </div>
+                      <div class="font-mono-num text-xs text-[var(--mot-muted)]">
+                        1 AP &middot; Reach 5 ft &middot; Brawn + Strike
+                      </div>
+                      <div class="grid grid-cols-2 gap-2 font-mono-num text-xs">
+                        <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                          <div class="text-[10px] font-bold uppercase text-[var(--mot-accent-text)]">Roll</div>
+                          <div class="font-bold text-[var(--mot-text)]">
+                            {{ char.active_weapon_slot === 2 ? formatRollFormulaFromMod(stats.attackRollMod) : formatRollFormulaFromMod(uMod2) }}
+                          </div>
+                        </div>
+                        <div class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-2">
+                          <div class="text-[10px] font-bold uppercase text-[var(--mot-muted)]">Damage</div>
+                          <div class="font-bold text-[var(--mot-text)]">
+                            {{ char.active_weapon_slot === 2 ? stats.flatWeaponDamage : uDmg2 }} DMG
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                </div>
+
+                <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2.5">
+                  @if (stats.weaponSlot2; as aw2Act) {
+                    <button
+                      type="button"
+                      (click)="roll2d10(aw2Act.name + ' Check', getWeaponAttackMod(char, aw2Act, stats), getWeaponFlatDamage(char, aw2Act, stats) + ' Flat DMG')"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Roll 2d10+{{ getWeaponAttackMod(char, aw2Act, stats) }}
+                    </button>
+                    @if (char.active_weapon_slot === 2) {
+                      <button
+                        type="button"
+                        (click)="useWeaponAttack(char.id, aw2Act, stats)"
+                        [disabled]="char.current_ap < aw2Act.ap_cost"
+                        class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                      >
+                        {{ aw2Act.ap_cost }} AP: Attack
+                      </button>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="switchWeapon(char.id)"
+                        [disabled]="char.current_ap < 1"
+                        class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                      >
+                        1 AP: Ready
+                      </button>
+                    }
+                  } @else if (char.active_weapon_slot === 2) {
+                    <button
+                      type="button"
+                      (click)="roll2d10('Unarmed Strike Check', stats.attackRollMod, stats.flatWeaponDamage + ' Flat DMG')"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      Roll 2d10+{{ stats.attackRollMod }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="useUnarmedAttack(char.id, stats)"
+                      [disabled]="char.current_ap < 1"
+                      class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                    >
+                      1 AP: Attack
+                    </button>
+                  }
+                </div>
+              </div>
+            </div>
+
+            @if (stats.resolvedCombatArts.length > 0) {
+              <div class="space-y-2.5 border-t border-[var(--mot-border)] pt-4">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                    Combat Arts ({{ stats.resolvedCombatArts.length }})
+                  </span>
+                  <button
+                    type="button"
+                    (click)="sheetTab.set('perks')"
+                    class="text-xs font-semibold text-[var(--mot-accent-text)] hover:underline"
+                  >
+                    Manage Perks &amp; Upgrades
+                  </button>
+                </div>
+                <div class="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                  @for (cArt of stats.resolvedCombatArts; track cArt.baseNode.id) {
+                    @let cArtCd = getPerkCooldown(char, cArt.baseNode.id);
+                    @let cArtMod = stats.attackRollMod + cArt.bonusAttackMod;
+                    @let cArtDmg = stats.flatWeaponDamage + cArt.bonusFlatDamage;
+                    <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+                      <div class="flex items-start gap-3">
+                        <div
+                          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
+                          [style.border-color]="getNodeVisuals(cArt.baseNode).color"
+                        >
+                          <app-compendium-icon
+                            [icon]="getNodeVisuals(cArt.baseNode).icon"
+                            [color]="getNodeVisuals(cArt.baseNode).color"
+                            [tintCustom]="getNodeVisuals(cArt.baseNode).tintCustom"
+                            sizeClass="h-4.5 w-4.5"
+                          />
+                        </div>
+                        <div class="min-w-0 flex-1 space-y-1">
+                          <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                              {{ cArt.baseNode.name }}
+                            </span>
+                            <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                              {{ cArt.apCost }} AP
+                            </span>
+                            @for (cTag of cArt.combatTags; track cTag) {
+                              <span [class]="'rounded border px-2 py-0.5 font-mono-num text-xs font-bold ' + getCombatTagBadgeClass(cTag)">
+                                {{ cTag }} · {{ getCombatTagCounterLabel(cTag) }}
+                              </span>
+                            }
+                          </div>
+                          <div class="font-mono-num text-xs text-[var(--mot-muted)]">
+                            Roll <strong class="text-[var(--mot-text)]">{{ formatRollFormulaFromMod(cArtMod) }}</strong> &middot; Damage <strong class="text-[var(--mot-text)]">{{ cArtDmg }} DMG</strong>
+                          </div>
+                          @if (!cArt.meetsWeaponRequirement && cArt.weaponRequirementUnmetReason) {
+                            <div class="font-mono-num text-xs font-semibold text-[#F59E0B]">
+                              {{ cArt.weaponRequirementUnmetReason }}
+                            </div>
+                          }
+                        </div>
+                      </div>
+
+                      <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2">
+                        @if (cArtCd > 0) {
+                          <span class="badge-warn rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold">
+                            CD: {{ cArtCd }} Rnd
+                          </span>
+                          <button
+                            type="button"
+                            (click)="clearPerkCooldown(char.id, cArt.baseNode.id)"
+                            class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                          >
+                            Ready
+                          </button>
+                        } @else {
+                          @if (!cArt.meetsWeaponRequirement && cArt.alternateSlotSatisfiesWeaponReq && cArt.alternateSlotWeaponName) {
+                            <button
+                              type="button"
+                              (click)="switchWeapon(char.id)"
+                              [disabled]="char.current_ap < 1"
+                              class="rounded-lg border border-[#C4491A] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-accent-text)] hover:bg-[#C4491A] hover:text-white disabled:opacity-40"
+                            >
+                              1 AP: Switch ({{ cArt.alternateSlotWeaponName }})
+                            </button>
+                          }
+                          <button
+                            type="button"
+                            (click)="useCombatArt(char.id, cArt, stats)"
+                            [disabled]="char.current_ap < cArt.apCost || !cArt.meetsWeaponRequirement"
+                            class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                          >
+                            {{ cArt.meetsWeaponRequirement ? 'Use (' + cArt.apCost + ' AP)' : 'Locked (' + cArt.apCost + ' AP)' }}
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          </section>
+
+          <section
+            data-char-actions-section="defenses"
+            class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 space-y-4"
+          >
+            <div>
+              <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                Defensive Actions &amp; Reactions
+              </h2>
+              <p class="text-xs text-[var(--mot-muted)]">
+                Declare 1 AP reactions before incoming attack rolls, or spend 1 AP on your turn to Raise Shield / Guard until your next turn.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Parry Reaction</span>
+                    <div class="flex items-center gap-1.5 font-mono-num">
+                      @if (stats.enablesMartialParry) {
+                        <span class="rounded border border-[#C4491A] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-accent-text)]">
+                          Buckler Martial Parry
+                        </span>
+                      }
+                      <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-text)]">
+                        1 AP Reaction
+                      </span>
+                    </div>
+                  </div>
+                  <div class="mt-1.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                    Roll {{ formatRollFormulaFromMod(stats.parryMod) }}
+                  </div>
+                  <p class="mt-1 text-[var(--mot-muted)]">
+                    Beats attack roll to negate all damage &middot; Flawless (&ge; +5) deals {{ stats.flawlessParryCounterSp }} SP counter. Cannot Parry Crushing.
+                  </p>
+                </div>
+                <div class="flex items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2.5">
+                  <button
+                    type="button"
+                    (click)="roll2d10('Parry Check', stats.parryMod, 'Flawless (+5) deals ' + stats.flawlessParryCounterSp + ' SP')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    2d10+{{ stats.parryMod }}
+                  </button>
+                  <button
+                    type="button"
+                    data-char-action="parry"
+                    (click)="useParryReaction(char.id, stats)"
+                    [disabled]="char.current_ap < 1"
+                    class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                  >
+                    1 AP: Parry
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs"
+                [class.opacity-60]="!stats.canDodge"
+              >
+                <div>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Dodge Reaction</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-text)]">
+                      1 AP Reaction
+                    </span>
+                  </div>
+                  <div class="mt-1.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                    @if (stats.canDodge) {
+                      Roll {{ formatRollFormulaFromMod(stats.dodgeMod) }}
+                    } @else {
+                      Disabled
+                    }
+                  </div>
+                  <p class="mt-1 text-[var(--mot-muted)]">
+                    @if (stats.canDodge) {
+                      Shifts 5 ft &middot; Flawless (&ge; +5) refunds 1 AP. Cannot Dodge Sweeping.
+                    } @else {
+                      Disabled (Heavy Armor / Tower Shield Trade-off).
+                    }
+                  </p>
+                </div>
+                <div class="flex items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2.5">
+                  @if (stats.canDodge) {
+                    <button
+                      type="button"
+                      (click)="roll2d10('Dodge Check', stats.dodgeMod, 'Shifts 5 ft · Flawless (+5) refunds 1 AP')"
+                      class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A]"
+                    >
+                      2d10+{{ stats.dodgeMod }}
+                    </button>
+                    <button
+                      type="button"
+                      data-char-action="dodge"
+                      (click)="useDodgeReaction(char.id, stats)"
+                      [disabled]="char.current_ap < 1"
+                      class="btn-copper rounded-lg px-3 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                    >
+                      1 AP: Dodge
+                    </button>
+                  } @else {
+                    <span class="font-mono-num text-xs font-bold text-[var(--mot-muted)]">Disabled</span>
+                  }
+                </div>
+              </div>
+
+              <div
+                class="flex flex-col justify-between rounded-xl border p-4 space-y-3 text-xs transition-colors"
+                [class.border-[#C4491A]]="isShieldRaised(char)"
+                [class.bg-[#122220]]="isShieldRaised(char)"
+                [class.text-[#EBF5F3]]="isShieldRaised(char)"
+                [class.border-[var(--mot-border)]]="!isShieldRaised(char)"
+                [class.bg-[var(--mot-well)]]="!isShieldRaised(char)"
+              >
+                <div>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      class="font-display text-sm font-bold"
+                      [class.text-white]="isShieldRaised(char)"
+                      [class.text-[var(--mot-text)]]="!isShieldRaised(char)"
+                    >
+                      {{ stats.blockSourceType === 'heavy_weapon' ? 'Raise Weapon Guard' : 'Raise Shield' }}
+                    </span>
+                    <div class="flex items-center gap-1.5 font-mono-num">
+                      @if (isShieldRaised(char)) {
+                        <span class="rounded bg-[#C4491A] px-2 py-0.5 font-bold text-white">
+                          Active Until Next Turn
+                        </span>
+                      }
+                      <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-text)]">
+                        1 AP Action
+                      </span>
+                    </div>
+                  </div>
+                  <div class="mt-1.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                    @if (stats.usesRaiseShield) {
+                      Block &minus;{{ stats.shieldBlockTotal }} DMG (Base {{ stats.blockBaseValue }} + Block +{{ stats.blockMod }})
+                    } @else {
+                      Unavailable with Current Loadout
+                    }
+                  </div>
+                  <p
+                    class="mt-1"
+                    [class.text-[#8AB0AB]]="isShieldRaised(char)"
+                    [class.text-[var(--mot-muted)]]="!isShieldRaised(char)"
+                  >
+                    @if (stats.usesRaiseShield) {
+                      {{ stats.blockSourceLabel }} automatically mitigates non-Piercing attacks until your next turn.
+                    } @else if (stats.enablesMartialParry) {
+                      Buckler uses Martial Parry reaction instead of Raise Shield.
+                    } @else if (stats.shieldDisabledByTwoHanded) {
+                      Off-hand shield is stowed while wielding a Two-Handed weapon.
+                    } @else {
+                      Requires Medium/Standard Shield, Heavy/Tower Shield, or a Guard Weapon.
+                    }
+                  </p>
+                </div>
+                <div class="flex items-center justify-end border-t border-[var(--mot-border)] pt-2.5">
+                  @if (stats.usesRaiseShield) {
+                    <button
+                      type="button"
+                      data-char-action="raise-guard"
+                      (click)="toggleRaiseShield(char.id)"
+                      [disabled]="!isShieldRaised(char) && char.current_ap < 1"
+                      class="rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold transition-colors disabled:opacity-40"
+                      [class.btn-copper]="!isShieldRaised(char)"
+                      [class.border]="isShieldRaised(char)"
+                      [class.border-[#243B37]]="isShieldRaised(char)"
+                      [class.bg-[#0D1615]]="isShieldRaised(char)"
+                      [class.text-[#FF8C5A]]="isShieldRaised(char)"
+                    >
+                      {{ isShieldRaised(char) ? 'Lower Guard' : '1 AP: Block (−' + stats.shieldBlockTotal + ' DMG)' }}
+                    </button>
+                  } @else {
+                    <span class="font-mono-num text-xs font-bold text-[var(--mot-muted)]">N/A</span>
+                  }
+                </div>
+              </div>
+
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Passive Poise &amp; Armor</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-muted)]">
+                      0 AP Passive
+                    </span>
+                  </div>
+                  <div class="mt-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                    SP {{ char.current_sp }}/{{ stats.maxSp }} &middot; Armor DR {{ stats.armorDr }}
+                  </div>
+                  <p class="mt-1 text-[var(--mot-muted)]">
+                    {{ stats.equippedArmorLabel }}: incoming hits deplete SP first; overflow strikes HP reduced by {{ stats.armorDr }} DR.
+                  </p>
+                </div>
+                <div class="flex items-center justify-end border-t border-[var(--mot-border)] pt-2.5 font-mono-num text-xs font-bold text-[var(--mot-accent-text)]">
+                  Always Active
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            data-char-actions-section="other"
+            class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 space-y-4"
+          >
+            <div>
+              <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                Other Actions (Movement &amp; Turn Utility)
+              </h2>
+              <p class="text-xs text-[var(--mot-muted)]">
+                Spend AP on movement, posture recovery, aiming ranged shots, or interacting with items and terrain.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Move</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-accent-text)]">
+                      1 AP · {{ stats.moveFeet }} ft
+                    </span>
+                  </div>
+                  <p class="mt-1.5 text-[var(--mot-muted)]">
+                    Stride up to <strong class="text-[var(--mot-text)]">{{ stats.moveFeet }} ft ({{ stats.moveTiles }} tiles)</strong> per 1 AP spent.
+                  </p>
+                </div>
+                <div class="flex items-center justify-end border-t border-[var(--mot-border)] pt-2.5">
+                  <button
+                    type="button"
+                    data-char-action="move"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Move', 'Moved up to ' + stats.moveFeet + ' ft (' + stats.moveTiles + ' tiles)')"
+                    class="btn-copper rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold disabled:opacity-40"
+                  >
+                    1 AP: Move ({{ stats.moveFeet }} ft)
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Stance Recovery</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-sp-text)]">
+                      1 AP · +{{ stats.stanceRecoverySp }} SP
+                    </span>
+                  </div>
+                  <p class="mt-1.5 text-[var(--mot-muted)]">
+                    Steady breathing and posture to restore <strong class="text-[var(--mot-text)]">+{{ stats.stanceRecoverySp }} SP</strong> (2 + Iron).
+                  </p>
+                </div>
+                <div class="flex items-center justify-end border-t border-[var(--mot-border)] pt-2.5">
+                  <button
+                    type="button"
+                    data-char-action="stance-recovery"
+                    [disabled]="char.current_ap < 1 || char.current_sp >= stats.maxSp"
+                    (click)="useStanceRecovery(char.id, stats.stanceRecoverySp, stats.maxSp)"
+                    class="btn-copper rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold disabled:opacity-40"
+                  >
+                    1 AP: +{{ stats.stanceRecoverySp }} SP
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Aim</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-text)]">
+                      1 AP Action
+                    </span>
+                  </div>
+                  <p class="mt-1.5 text-[var(--mot-muted)]">
+                    Steady sights on a target so Requires Aim ranged weapons fire without Disadvantage.
+                  </p>
+                </div>
+                <div class="flex items-center justify-end border-t border-[var(--mot-border)] pt-2.5">
+                  <button
+                    type="button"
+                    data-char-action="aim"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Aim', 'Steadied sights on target for ranged attack')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                  >
+                    1 AP: Aim
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-col justify-between rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-4 space-y-3 text-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span class="font-display text-sm font-bold text-[var(--mot-text)]">Interact / Use Item</span>
+                    <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num font-bold text-[var(--mot-text)]">
+                      1 AP Action
+                    </span>
+                  </div>
+                  <p class="mt-1.5 text-[var(--mot-muted)]">
+                    Use a carried consumable/item, open doors/mechanisms, or assist an adjacent ally.
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[var(--mot-border)] pt-2.5">
+                  <button
+                    type="button"
+                    (click)="sheetTab.set('loadout'); inventoryTab.set('item')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                  >
+                    Items ({{ getItemsCategoryCount(char) }})
+                  </button>
+                  <button
+                    type="button"
+                    data-char-action="interact"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Interact', 'Used item or interacted with environment')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-3 py-1.5 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                  >
+                    1 AP: Interact
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      }
+
+      @if (sTab !== 'actions') {
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        @if (sTab === 'character' || sTab === 'all') {
         <div class="space-y-6 lg:col-span-5">
           <section
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
@@ -529,9 +1367,83 @@
               </div>
             </div>
           </section>
-        </div>
 
-        <div class="space-y-6 lg:col-span-7">
+          @if (sTab === 'all') {
+            <section
+              class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 space-y-3 tabular-nums"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
+                  Other Actions (Move &amp; Utility)
+                </h2>
+                <span class="font-mono-num text-xs text-[var(--mot-muted)]">
+                  {{ stats.moveFeet }} ft / 1 AP
+                </span>
+              </div>
+
+              <div class="space-y-2 text-xs">
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5">
+                  <div>
+                    <span class="font-bold text-[var(--mot-text)]">Move (1 AP)</span>
+                    <span class="block text-[var(--mot-muted)]">
+                      Stride up to {{ stats.moveFeet }} ft ({{ stats.moveTiles }} tiles) per 1 AP
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Move', 'Moved up to ' + stats.moveFeet + ' ft (' + stats.moveTiles + ' tiles)')"
+                    class="btn-copper rounded-lg px-2.5 py-1 font-mono-num text-xs font-bold disabled:opacity-40"
+                  >
+                    1 AP: Move ({{ stats.moveFeet }} ft)
+                  </button>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5">
+                  <div>
+                    <span class="font-bold text-[var(--mot-text)]">Aim (1 AP)</span>
+                    <span class="block text-[var(--mot-muted)]">
+                      Steady sights so Requires Aim ranged shots roll normally
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Aim', 'Steadied sights on target for ranged attack')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                  >
+                    1 AP: Aim
+                  </button>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-3.5 py-2.5">
+                  <div>
+                    <span class="font-bold text-[var(--mot-text)]">Interact / Use Item (1 AP)</span>
+                    <span class="block text-[var(--mot-muted)]">
+                      Use carried gear, open mechanisms, or aid an ally
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    [disabled]="char.current_ap < 1"
+                    (click)="useTacticalAction(char.id, 'Interact', 'Used item or interacted with environment')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-text)] hover:border-[#C4491A] disabled:opacity-40"
+                  >
+                    1 AP: Interact
+                  </button>
+                </div>
+              </div>
+            </section>
+          }
+        </div>
+        }
+
+        <div
+          class="space-y-6"
+          [class.lg:col-span-7]="sTab === 'character' || sTab === 'all'"
+          [class.lg:col-span-12]="sTab === 'loadout' || sTab === 'perks'"
+        >
+          @if (sTab === 'loadout' || sTab === 'all') {
           <section
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
           >
@@ -840,7 +1752,9 @@
               </div>
             </div>
           </section>
+          }
 
+          @if (sTab === 'perks' || sTab === 'all') {
           <section
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
           >
@@ -1173,7 +2087,9 @@
               </div>
             }
           </section>
+          }
 
+          @if (sTab === 'character' || sTab === 'all') {
           <section
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
           >
@@ -1210,7 +2126,9 @@
               }
             </div>
           </section>
+          }
 
+          @if (sTab === 'loadout' || sTab === 'all') {
           <section
             data-sheet-inventory="true"
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums space-y-4"
@@ -1221,7 +2139,7 @@
                   Equipment, Inventory &amp; Notes
                 </h2>
                 <p class="text-xs text-[var(--mot-muted)]">
-                  Organized by Weapons, Armors, and Items — synced live with VTT campaigns.
+                  Organized by Weapons, Armors, and Items — ready to import into VTT campaigns.
                 </p>
               </div>
 
@@ -1994,8 +2912,10 @@
               }
             </div>
           </section>
+          }
         </div>
       </div>
+      }
 
       @if (perkPickerOpen()) {
         <div
@@ -2247,7 +3167,7 @@
                   Portrait &amp; Token Studio · {{ char.name }}
                 </h2>
                 <p class="mt-0.5 text-xs text-[#8AB0AB]">
-                  Keep a separate full-body Sheet Portrait and cropped circular Battlemap Token. Changes sync automatically with VTT campaigns.
+                  Keep a separate full-body Sheet Portrait and cropped circular Battlemap Token. Ready to import or re-import into VTT campaigns.
                 </p>
               </div>
               <button

@@ -6879,17 +6879,19 @@ export class VttStore {
     stats?: DerivedCharacterStats | null
   ): void {
     const ch = this.resolveCharacterForToken(token);
-    if (weapon && stats && ch) {
-      const reachFeet = Math.max(
-        (weapon.reach_tiles ?? 1) * 5,
-        (weapon.thrown_range_tiles ?? 0) * 5
-      );
-      const hooks = weapon.rule_hooks ?? {};
+    if (stats && ch) {
+      const reachFeet = weapon
+        ? Math.max(
+            (weapon.reach_tiles ?? 1) * 5,
+            (weapon.thrown_range_tiles ?? 0) * 5
+          )
+        : 5;
+      const hooks = weapon?.rule_hooks ?? {};
       this.pendingTargetAction.set({
         attackerTokenId: token.id,
         kind: 'weapon',
-        actionName: `${weapon.name} Strike`,
-        apCost: weapon.ap_cost,
+        actionName: weapon ? `${weapon.name} Strike` : 'Unarmed Strike',
+        apCost: weapon?.ap_cost ?? 1,
         cooldownRounds: 0,
         perkId: null,
         reachFeet,

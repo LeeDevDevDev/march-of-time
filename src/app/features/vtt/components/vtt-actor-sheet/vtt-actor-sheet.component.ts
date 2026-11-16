@@ -79,10 +79,12 @@ import {
   computeDerivedStats,
   formatRuleHookBadges,
   formatWeaponRequirementLabel,
+  getHeavyWeaponBlockBase,
   getInventoryItemCategory,
   getUpgradeSlotKey,
   isCombatArtUpgradeNode,
   isStandalonePerkNode,
+  isWeaponHeavy,
   isWeaponTwoHanded,
   mergeInventoryEntry,
   normalizeInventoryItems,
@@ -108,8 +110,8 @@ import {
 } from '../../models/vtt.model';
 import { VttOpenSheetTarget, VttStore } from '../../store/vtt.store';
 
-export type VttPcSheetTab = 'character' | 'loadout' | 'perks' | 'token';
-export type VttNpcSheetTab = 'statblock' | 'inventory' | 'token';
+export type VttPcSheetTab = 'actions' | 'character' | 'loadout' | 'perks' | 'token';
+export type VttNpcSheetTab = 'actions' | 'statblock' | 'inventory' | 'token';
 export type VttSheetDropZone = 'sheet' | 'slot-1' | 'slot-2' | 'inventory';
 
 function generateInventoryItemId(): string {
@@ -181,8 +183,8 @@ export class VttActorSheetComponent {
   readonly windowIndexInput = input<number>(0, { alias: 'windowIndex' });
   readonly windowIdInput = input<number | null>(null, { alias: 'windowId' });
 
-  readonly pcTab = signal<VttPcSheetTab>('character');
-  readonly npcTab = signal<VttNpcSheetTab>('statblock');
+  readonly pcTab = signal<VttPcSheetTab>('actions');
+  readonly npcTab = signal<VttNpcSheetTab>('actions');
   readonly pcInventoryTab = signal<InventoryFilterTab>('all');
   readonly npcInventoryTab = signal<InventoryFilterTab>('all');
   readonly perkPickerOpen = signal(false);
@@ -999,6 +1001,37 @@ export class VttActorSheetComponent {
     return isWeaponTwoHanded(w);
   }
 
+  isHeavy(w: WeaponModel | null | undefined): boolean {
+    return isWeaponHeavy(w);
+  }
+
+  getHeavyBlockBase(w: WeaponModel | null | undefined): number {
+    return getHeavyWeaponBlockBase(w);
+  }
+
+  getWeaponReachOrRangeLabel(w: WeaponModel | null | undefined): string {
+    if (!w) return 'Reach 5 ft';
+    const reachFt = Math.max(5, Math.round((w.reach_tiles ?? 1) * 5));
+    const thrownFt =
+      w.thrown_range_tiles && w.thrown_range_tiles > 0
+        ? Math.round(w.thrown_range_tiles * 5)
+        : 0;
+    if (
+      (w.category ?? '').toLowerCase() === 'ranged' ||
+      w.gov_skill === 'Shoot'
+    ) {
+      return `Range ${Math.max(reachFt, thrownFt)} ft`;
+    }
+    if (thrownFt > reachFt) {
+      return `Reach ${reachFt} ft · Thrown ${thrownFt} ft`;
+    }
+    return `Reach ${reachFt} ft`;
+  }
+
+  formatRollFormulaFromMod(mod: number): string {
+    return mod >= 0 ? `2d10 + ${mod}` : `2d10 − ${Math.abs(mod)}`;
+  }
+
   getWeaponHookBadges(weapon: WeaponModel | null | undefined): string[] {
     return formatWeaponHookBadges(weapon);
   }
@@ -1444,6 +1477,334 @@ export class VttActorSheetComponent {
       formatWeaponRequirementLabel(req, this.compendiumStore.allWeapons()) ??
       'matching weapon'
     );
+  }
+
+  getCharacterCurrentAp(char: CharacterModel): number {
+    return this.sheetToken()?.current_ap ?? char.current_ap ?? 4;
+  }
+
+  getCharacterCurrentSp(char: CharacterModel): number {
+    return this.sheetToken()?.current_sp ?? char.current_sp ?? 0;
+  }
+
+  isCharacterGuardRaised(char: CharacterModel): boolean {
+    const tok = this.sheetToken();
+    return tok
+      ? Boolean(tok.shield_raised)
+      : Boolean(char.active_cooldowns?.['__shield_raised']);
+  }
+
+  getCharacterArtCooldown(char: CharacterModel, perkId: string): number {
+    return Math.max(0, Number(char.active_cooldowns?.[perkId] ?? 0));
+  }
+
+  async clearCharacterArtCooldown(
+    char: CharacterModel,
+    perkId: string
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => {
+      const nextCd = { ...(c.active_cooldowns ?? {}) };
+      delete nextCd[perkId];
+      return {
+        ...c,
+        active_cooldowns: nextCd,
+      };
+    });
+  }
+
+  async switchCharacterWeaponFromActions(char: CharacterModel): Promise<void> {
+    if (!this.canEdit()) return;
+    const tok = this.sheetToken();
+    if (tok && typeof this.vttStore.switchCharacterWeaponSlotInVtt === 'function') {
+      if (tok.current_ap < 1) return;
+      await this.vttStore.switchCharacterWeaponSlotInVtt(tok);
+      return;
+    }
+    const currAp = this.getCharacterCurrentAp(char);
+    if (currAp < 1) return;
+    const nextSlot: 1 | 2 = char.active_weapon_slot === 1 ? 2 : 1;
+    let nextWeaponName = 'Unarmed';
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => {
+      const draft: CharacterModel = {
+        ...c,
+        active_weapon_slot: nextSlot,
+        current_ap: Math.max(0, currAp - 1),
+      };
+      const nextStats = computeDerivedStats(
+        draft,
+        this.getAllCompendiumWeapons(),
+        this.getAllCompendiumPerkNodes(),
+        this.getAllCompendiumArmors()
+      );
+      nextWeaponName = nextStats.activeWeapon?.name ?? 'Unarmed';
+      const nextCd = { ...(c.active_cooldowns ?? {}) };
+      if (!nextStats.usesRaiseShield) {
+        delete nextCd['__shield_raised'];
+      }
+      return {
+        ...draft,
+        active_cooldowns: nextCd,
+      };
+    });
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'system',
+        title: `${char.name} switched to ${nextWeaponName} (1 AP)`,
+        detail: `Active Slot ${nextSlot}`,
+        senderNameOverride: char.name,
+      });
+    }
+  }
+
+  async triggerCharacterReaction(
+    char: CharacterModel,
+    stats: DerivedCharacterStats,
+    kind: 'parry' | 'dodge'
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    if (kind === 'dodge' && !stats.canDodge) return;
+    const currAp = this.getCharacterCurrentAp(char);
+    if (currAp < 1) return;
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
+      ...c,
+      current_ap: Math.max(0, currAp - 1),
+    }));
+    if (kind === 'parry') {
+      await this.rollSheetCheck(
+        char.name,
+        'Parry Reaction',
+        stats.parryMod,
+        `1 AP spent · Flawless (+5) deals ${stats.flawlessParryCounterSp} SP`
+      );
+    } else {
+      await this.rollSheetCheck(
+        char.name,
+        'Dodge Reaction',
+        stats.dodgeMod,
+        '1 AP spent · Shifts 5 ft · Flawless (+5) refunds 1 AP'
+      );
+    }
+  }
+
+  async toggleCharacterRaiseGuard(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): Promise<void> {
+    if (!this.canEdit() || !stats.usesRaiseShield) return;
+    const currentlyRaised = this.isCharacterGuardRaised(char);
+    if (currentlyRaised) {
+      await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => {
+        const nextCd = { ...(c.active_cooldowns ?? {}) };
+        delete nextCd['__shield_raised'];
+        return {
+          ...c,
+          active_cooldowns: nextCd,
+        };
+      });
+      if (typeof this.vttStore.postLog === 'function') {
+        await this.vttStore.postLog({
+          kind: 'system',
+          title: `${char.name} lowered Guard / Shield`,
+          detail: 'Guard stance ended.',
+          senderNameOverride: char.name,
+        });
+      }
+      return;
+    }
+
+    const currAp = this.getCharacterCurrentAp(char);
+    if (currAp < 1) return;
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
+      ...c,
+      current_ap: Math.max(0, currAp - 1),
+      active_cooldowns: {
+        ...(c.active_cooldowns ?? {}),
+        __shield_raised: 1,
+      },
+    }));
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'roll',
+        title: `${char.name} raised Guard / Shield (1 AP)`,
+        detail: `Mitigates ${stats.shieldBlockTotal} DMG vs non-Piercing attacks until next turn.`,
+        senderNameOverride: char.name,
+      });
+    }
+  }
+
+  async useCharacterStanceRecovery(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    const currAp = this.getCharacterCurrentAp(char);
+    const currSp = this.getCharacterCurrentSp(char);
+    if (currAp < 1 || currSp >= stats.maxSp) return;
+    const nextSp = Math.min(stats.maxSp, currSp + stats.stanceRecoverySp);
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
+      ...c,
+      current_ap: Math.max(0, currAp - 1),
+      current_sp: nextSp,
+    }));
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'roll',
+        title: `${char.name} used Stance Recovery (1 AP)`,
+        detail: `Recovered +${nextSp - currSp} SP (now ${nextSp}/${stats.maxSp} SP)`,
+        senderNameOverride: char.name,
+      });
+    }
+  }
+
+  async spendCharacterTacticalAction(
+    char: CharacterModel,
+    actionLabel: string,
+    detailText: string,
+    apCost = 1
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    const currAp = this.getCharacterCurrentAp(char);
+    if (currAp < apCost) return;
+    await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
+      ...c,
+      current_ap: Math.max(0, currAp - apCost),
+    }));
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'system',
+        title: `${char.name} used ${actionLabel} (${apCost} AP)`,
+        detail: detailText,
+        senderNameOverride: char.name,
+      });
+    }
+  }
+
+  getNpcCurrentAp(): number {
+    return this.sheetToken()?.current_ap ?? this.getNpcMaxVital('max_ap');
+  }
+
+  getNpcCurrentSp(): number {
+    return this.sheetToken()?.current_sp ?? this.getNpcMaxVital('max_sp');
+  }
+
+  getNpcMoveTiles(): number {
+    return Math.max(1, Math.round(this.getNpcArmorOrMove('move_feet') / 5));
+  }
+
+  isNpcGuardRaised(): boolean {
+    const tok = this.sheetToken();
+    if (tok) return Boolean(tok.shield_raised);
+    const stats = this.getNpcStats() as Record<string, unknown>;
+    return Boolean(stats['__shield_raised']);
+  }
+
+  getNpcStandaloneCombatArts(): PerkNodeModel[] {
+    return this.getNpcStandaloneNodes().filter(
+      (n) => n.node_type === 'combat_art'
+    );
+  }
+
+  async triggerNpcReaction(kind: 'parry' | 'dodge'): Promise<void> {
+    if (!this.canEdit()) return;
+    const npcStats = this.getNpcStats();
+    if (kind === 'dodge' && npcStats.can_dodge === false) return;
+    const tok = this.sheetToken();
+    if (tok) {
+      if (tok.current_ap < 1) return;
+      await this.vttStore.patchToken(tok.id, {
+        current_ap: Math.max(0, tok.current_ap - 1),
+      });
+    }
+    const name = this.getNpcName();
+    if (kind === 'parry') {
+      const mod = npcStats.parry_mod ?? 1;
+      await this.rollSheetCheck(
+        name,
+        'Parry Reaction',
+        mod,
+        tok ? '1 AP spent' : undefined
+      );
+    } else {
+      const mod = npcStats.dodge_mod ?? 1;
+      await this.rollSheetCheck(
+        name,
+        'Dodge Reaction',
+        mod,
+        tok ? '1 AP spent · Shifts 5 ft' : 'Shifts 5 ft'
+      );
+    }
+  }
+
+  async toggleNpcRaiseGuard(): Promise<void> {
+    if (!this.canEdit() || this.getNpcArmorOrMove('shield_block') <= 0) return;
+    const tok = this.sheetToken();
+    if (tok && typeof this.vttStore.toggleTokenRaiseShield === 'function') {
+      await this.vttStore.toggleTokenRaiseShield(tok);
+      return;
+    }
+    const raised = this.isNpcGuardRaised();
+    const currStats = this.getNpcStats() as Record<string, unknown>;
+    await this.patchSheetActorOrToken({
+      npc_stats: {
+        ...this.getNpcStats(),
+        __shield_raised: !raised,
+      } as VttNpcStats,
+    });
+    if (typeof this.vttStore.postLog === 'function') {
+      const blockVal = this.getNpcArmorOrMove('shield_block');
+      await this.vttStore.postLog({
+        kind: raised ? 'system' : 'roll',
+        title: raised
+          ? `${this.getNpcName()} lowered Guard / Shield`
+          : `${this.getNpcName()} raised Guard / Shield (1 AP)`,
+        detail: raised
+          ? 'Guard stance ended.'
+          : `Mitigates ${blockVal} DMG vs non-Piercing attacks until next turn.`,
+        senderNameOverride: this.getNpcName(),
+      });
+    }
+    void currStats;
+  }
+
+  async useNpcStanceRecovery(): Promise<void> {
+    if (!this.canEdit()) return;
+    const tok = this.sheetToken();
+    if (tok && typeof this.vttStore.performStanceRecovery === 'function') {
+      await this.vttStore.performStanceRecovery(tok);
+      return;
+    }
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'roll',
+        title: `${this.getNpcName()} used Stance Recovery (1 AP)`,
+        detail: 'Recovered +3 SP',
+        senderNameOverride: this.getNpcName(),
+      });
+    }
+  }
+
+  async spendNpcTacticalAction(
+    actionLabel: string,
+    detailText: string,
+    apCost = 1
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    const tok = this.sheetToken();
+    if (tok) {
+      if (tok.current_ap < apCost) return;
+      await this.vttStore.patchToken(tok.id, {
+        current_ap: Math.max(0, tok.current_ap - apCost),
+      });
+    }
+    if (typeof this.vttStore.postLog === 'function') {
+      await this.vttStore.postLog({
+        kind: 'system',
+        title: `${this.getNpcName()} used ${actionLabel} (${apCost} AP)`,
+        detail: detailText,
+        senderNameOverride: this.getNpcName(),
+      });
+    }
   }
 
   getNpcName(): string {
