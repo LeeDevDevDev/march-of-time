@@ -1,6 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
+  ArmorModel,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
   DEFAULT_KEYWORDS,
   KeywordDefinition,
   PerkNodeModel,
@@ -11,6 +15,8 @@ import {
 
 export interface CompendiumBundle {
   weapons: WeaponModel[];
+  armors: ArmorModel[];
+  items: CompendiumItemModel[];
   skillTrees: SkillTreeModel[];
   perkNodes: PerkNodeModel[];
   keywords: KeywordDefinition[];
@@ -25,6 +31,19 @@ export function slugifyText(value: string): string {
     .slice(0, 48);
 }
 
+function isMissingCompendiumTableError(
+  code?: string,
+  message?: string
+): boolean {
+  if (code === '42P01' || code === 'PGRST205') return true;
+  const msg = (message ?? '').toLowerCase();
+  return (
+    msg.includes('does not exist') ||
+    msg.includes('schema cache') ||
+    msg.includes('could not find the table')
+  );
+}
+
 @Injectable({ providedIn: 'root' })
 export class CompendiumService {
   private readonly supabase = inject(SupabaseService).client;
@@ -36,6 +55,14 @@ export class CompendiumService {
       const bundle = data as Partial<CompendiumBundle>;
       return {
         weapons: bundle.weapons ?? [],
+        armors:
+          bundle.armors && bundle.armors.length > 0
+            ? bundle.armors
+            : DEFAULT_COMPENDIUM_ARMORS,
+        items:
+          bundle.items && bundle.items.length > 0
+            ? bundle.items
+            : DEFAULT_COMPENDIUM_ITEMS,
         skillTrees: bundle.skillTrees ?? [],
         perkNodes: normalizePerkNodesTiers(bundle.perkNodes ?? []),
         keywords:
@@ -46,8 +73,10 @@ export class CompendiumService {
     }
 
     if (!includeInactive) {
-      const [vWeps, vTrees, vPerks, vKw] = await Promise.all([
+      const [vWeps, vArmors, vItems, vTrees, vPerks, vKw] = await Promise.all([
         this.supabase.from('v_active_weapons').select('*').order('name'),
+        this.supabase.from('v_active_armors').select('*').order('name'),
+        this.supabase.from('v_active_items').select('*').order('name'),
         this.supabase.from('v_active_skill_trees').select('*').order('name'),
         this.supabase
           .from('v_active_perk_nodes')
@@ -60,6 +89,14 @@ export class CompendiumService {
       if (!vWeps.error && !vTrees.error && !vPerks.error && !vKw.error) {
         return {
           weapons: (vWeps.data as WeaponModel[]) ?? [],
+          armors:
+            !vArmors.error && vArmors.data && vArmors.data.length > 0
+              ? (vArmors.data as ArmorModel[])
+              : DEFAULT_COMPENDIUM_ARMORS,
+          items:
+            !vItems.error && vItems.data && vItems.data.length > 0
+              ? (vItems.data as CompendiumItemModel[])
+              : DEFAULT_COMPENDIUM_ITEMS,
           skillTrees: (vTrees.data as SkillTreeModel[]) ?? [],
           perkNodes: normalizePerkNodesTiers(
             (vPerks.data as PerkNodeModel[]) ?? []
@@ -72,19 +109,30 @@ export class CompendiumService {
       }
     }
 
-    const [wepsRes, treesRes, perksRes, kwRes] = await Promise.all([
-      this.supabase.from('weapons').select('*').order('name'),
-      this.supabase.from('skill_trees').select('*').order('name'),
-      this.supabase
-        .from('perk_nodes')
-        .select('*')
-        .order('tier', { ascending: true })
-        .order('name', { ascending: true }),
-      this.supabase.from('compendium_keywords').select('*').order('term'),
-    ]);
+    const [wepsRes, armorsRes, itemsRes, treesRes, perksRes, kwRes] =
+      await Promise.all([
+        this.supabase.from('weapons').select('*').order('name'),
+        this.supabase.from('compendium_armors').select('*').order('name'),
+        this.supabase.from('compendium_items').select('*').order('name'),
+        this.supabase.from('skill_trees').select('*').order('name'),
+        this.supabase
+          .from('perk_nodes')
+          .select('*')
+          .order('tier', { ascending: true })
+          .order('name', { ascending: true }),
+        this.supabase.from('compendium_keywords').select('*').order('term'),
+      ]);
 
     return {
       weapons: (wepsRes.data as WeaponModel[]) ?? [],
+      armors:
+        !armorsRes.error && armorsRes.data && armorsRes.data.length > 0
+          ? (armorsRes.data as ArmorModel[])
+          : DEFAULT_COMPENDIUM_ARMORS,
+      items:
+        !itemsRes.error && itemsRes.data && itemsRes.data.length > 0
+          ? (itemsRes.data as CompendiumItemModel[])
+          : DEFAULT_COMPENDIUM_ITEMS,
       skillTrees: (treesRes.data as SkillTreeModel[]) ?? [],
       perkNodes: normalizePerkNodesTiers(
         (perksRes.data as PerkNodeModel[]) ?? []
@@ -577,5 +625,182 @@ export class CompendiumService {
       .from('weapons')
       .update({ rule_hooks: nextHooks })
       .eq('id', weaponId);
+  }
+
+  async insertArmor(
+    payload: Record<string, unknown>
+  ): Promise<{ data: ArmorModel | null; error: string | null }> {
+    const { data, error } = await this.supabase
+      .from('compendium_armors')
+      .insert({
+        ...payload,
+        is_active: true,
+      })
+      .select('*')
+      .single();
+
+    if (!error && data) {
+      return { data: data as ArmorModel, error: null };
+    }
+
+    if (error && isMissingCompendiumTableError(error.code, error.message)) {
+      return {
+        data: {
+          id: `armor-${String(payload['slug'] || 'custom')}-${Date.now()}`,
+          slug: String(payload['slug'] || 'armor'),
+          name: String(payload['name'] || 'Armor'),
+          weight_class:
+            payload['weight_class'] === 'Medium' ||
+            payload['weight_class'] === 'Heavy'
+              ? payload['weight_class']
+              : 'Light',
+          armor_sp: Number(payload['armor_sp']) || 0,
+          armor_dr: Number(payload['armor_dr']) || 0,
+          allows_dodge: Boolean(payload['allows_dodge']),
+          speed_penalty_tiles: Number(payload['speed_penalty_tiles']) || 0,
+          description: String(payload['description'] || ''),
+          rule_hooks: (payload['rule_hooks'] as Record<string, unknown>) ?? {},
+          is_active: true,
+        },
+        error: null,
+      };
+    }
+
+    return {
+      data: null,
+      error: error?.message ?? 'Unable to forge armor.',
+    };
+  }
+
+  async updateArmorRecord(
+    armorId: string,
+    patch: Omit<ArmorModel, 'id' | 'slug'>
+  ): Promise<void> {
+    if (armorId.startsWith('armor-')) return;
+    await this.supabase
+      .from('compendium_armors')
+      .update(patch)
+      .eq('id', armorId);
+  }
+
+  async updateArmorActiveStatus(
+    armorId: string,
+    nextHooks: Record<string, unknown>,
+    isActive: boolean
+  ): Promise<void> {
+    if (armorId.startsWith('armor-')) return;
+    await this.supabase
+      .from('compendium_armors')
+      .update({ is_active: isActive, rule_hooks: nextHooks })
+      .eq('id', armorId);
+  }
+
+  async deleteArmorRecord(
+    armorId: string,
+    currentSlug?: string,
+    nextHooks?: Record<string, unknown>
+  ): Promise<void> {
+    if (armorId.startsWith('armor-')) return;
+    const { error: rpcError } = await this.supabase.rpc('soft_delete_armor', {
+      p_armor_id: armorId,
+    });
+    if (!rpcError) return;
+
+    const archivedSlug = `${(currentSlug || 'armor').replace(/-archived-[a-z0-9]+$/i, '')}-archived-${Date.now().toString(36)}`;
+    await this.supabase
+      .from('compendium_armors')
+      .update({
+        is_active: false,
+        slug: archivedSlug,
+        rule_hooks: { ...(nextHooks ?? {}), __is_active: false },
+      })
+      .eq('id', armorId);
+  }
+
+  async insertCompendiumItem(
+    payload: Record<string, unknown>
+  ): Promise<{ data: CompendiumItemModel | null; error: string | null }> {
+    const { data, error } = await this.supabase
+      .from('compendium_items')
+      .insert({
+        ...payload,
+        is_active: true,
+      })
+      .select('*')
+      .single();
+
+    if (!error && data) {
+      return { data: data as CompendiumItemModel, error: null };
+    }
+
+    if (error && isMissingCompendiumTableError(error.code, error.message)) {
+      return {
+        data: {
+          id: `item-${String(payload['slug'] || 'custom')}-${Date.now()}`,
+          slug: String(payload['slug'] || 'item'),
+          name: String(payload['name'] || 'Item'),
+          subcategory: String(payload['subcategory'] || 'Adventuring Gear'),
+          default_quantity: Math.max(
+            1,
+            Number(payload['default_quantity']) || 1
+          ),
+          stackable: payload['stackable'] !== false,
+          description: String(payload['description'] || ''),
+          rule_hooks: (payload['rule_hooks'] as Record<string, unknown>) ?? {},
+          is_active: true,
+        },
+        error: null,
+      };
+    }
+
+    return {
+      data: null,
+      error: error?.message ?? 'Unable to create item.',
+    };
+  }
+
+  async updateCompendiumItemRecord(
+    itemId: string,
+    patch: Omit<CompendiumItemModel, 'id' | 'slug'>
+  ): Promise<void> {
+    if (itemId.startsWith('item-')) return;
+    await this.supabase
+      .from('compendium_items')
+      .update(patch)
+      .eq('id', itemId);
+  }
+
+  async updateCompendiumItemActiveStatus(
+    itemId: string,
+    nextHooks: Record<string, unknown>,
+    isActive: boolean
+  ): Promise<void> {
+    if (itemId.startsWith('item-')) return;
+    await this.supabase
+      .from('compendium_items')
+      .update({ is_active: isActive, rule_hooks: nextHooks })
+      .eq('id', itemId);
+  }
+
+  async deleteCompendiumItemRecord(
+    itemId: string,
+    currentSlug?: string,
+    nextHooks?: Record<string, unknown>
+  ): Promise<void> {
+    if (itemId.startsWith('item-')) return;
+    const { error: rpcError } = await this.supabase.rpc('soft_delete_item', {
+      p_item_id: itemId,
+    });
+    if (!rpcError) return;
+
+    const archivedSlug = `${(currentSlug || 'item').replace(/-archived-[a-z0-9]+$/i, '')}-archived-${Date.now().toString(36)}`;
+    await this.supabase
+      .from('compendium_items')
+      .update({
+        is_active: false,
+        slug: archivedSlug,
+        rule_hooks: { ...(nextHooks ?? {}), __is_active: false },
+      })
+      .eq('id', itemId);
   }
 }

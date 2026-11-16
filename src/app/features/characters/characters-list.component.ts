@@ -41,10 +41,15 @@ export class CharactersListComponent {
   }
 
   getStats(char: CharacterModel): DerivedCharacterStats {
+    const armors =
+      typeof this.characterStore.allArmors === 'function'
+        ? this.characterStore.allArmors()
+        : undefined;
     return computeDerivedStats(
       char,
       this.characterStore.allWeapons(),
-      this.characterStore.allPerkNodes()
+      this.characterStore.allPerkNodes(),
+      armors
     );
   }
 

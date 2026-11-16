@@ -18,15 +18,24 @@ import { CompendiumStore } from '../../../core/compendium/compendium.store';
 import { NotificationStore } from '../../../core/notifications/notification.store';
 import { VttSettingsStore } from '../../../core/settings/vtt-settings.store';
 import {
+  allocateFloatingWindowId,
+  focusFloatingWindow,
+  releaseFloatingWindow,
+} from '../../../shared/floating-window-stack';
+import {
   ActorInventoryItem,
   CharacterModel,
   DerivedCharacterStats,
+  PerkNodeModel,
   ResolvedCombatArt,
   UPGRADE_SLOT_PREFIX,
   computeDerivedStats,
   normalizeInventoryItems,
 } from '../../characters/models/character.model';
-import { CharacterService } from '../../characters/services/character.service';
+import {
+  CharacterService,
+  normalizeCharacterRecord,
+} from '../../characters/services/character.service';
 import { CharacterStore } from '../../characters/store/character.store';
 import {
   ActorTemplateDraft,
@@ -108,6 +117,7 @@ import {
   VttParticipant,
   VttPendingClash,
   VttPoint,
+  VttCompendiumDragPayload,
   VttRosterActorModel,
   VttRosterDragPayload,
   VttSceneModel,
@@ -116,13 +126,20 @@ import {
   VttWallKind,
   VttWallSegment,
   TokenAppearanceConfig,
+  VTT_NPC_PRESETS,
+  cloneDetachedNpcStats,
+  cloneDetachedVttCharacterSheet,
   enrichNpcStatsWithVisuals,
+  makeDetachedVttCharacterId,
   normalizeTokenAppearance,
   normalizeTokenRotation,
+  parseCharacterIdFromUrlOrInput,
+  parseCollectionActorIdFromUrlOrInput,
   resolveActorDarkvisionFeet,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
+  resolveRosterActorSourceCharacterId,
   sanitizeOptionalImageUrl,
 } from '../models/vtt.model';
 import { VttPingBroadcast, VttService } from '../services/vtt.service';
@@ -141,6 +158,13 @@ export interface VttOpenSheetTarget {
   rosterActorId: string | null;
   characterId: string | null;
   tokenId: string | null;
+}
+
+export interface VttOpenSheetWindowEntry {
+  key: string;
+  target: VttOpenSheetTarget;
+  focusTick: number;
+  windowId: number;
 }
 
 export interface VttResolvedChatSpeaker {
@@ -286,6 +310,9 @@ export class VttStore {
   readonly folders = signal<VttFolderModel[]>([]);
   readonly rosterActors = signal<VttRosterActorModel[]>([]);
   readonly draggingRosterPayload = signal<VttRosterDragPayload | null>(null);
+  readonly draggingCompendiumPayload = signal<VttCompendiumDragPayload | null>(
+    null
+  );
   readonly scenes = signal<VttSceneModel[]>([]);
   readonly activeSceneId = signal<string | null>(null);
   readonly tokens = signal<VttTokenModel[]>([]);
@@ -384,7 +411,11 @@ export class VttStore {
   readonly selectedTokenId = this.primaryTokenSync.primarySig;
   readonly selectedRosterActorId = signal<string | null>(null);
   readonly selectedCharacterId = signal<string | null>(null);
+  readonly openSheetWindows = signal<VttOpenSheetWindowEntry[]>([]);
   readonly openSheetTarget = signal<VttOpenSheetTarget | null>(null);
+  readonly openTokenizerTarget = signal<VttOpenSheetTarget | null>(null);
+  readonly openTokenizerFocusTick = signal<number>(0);
+  private nextSheetFocusTick = 1;
   readonly gmSpeakerMode = signal<VttSpeakerMode>('user');
   readonly selectedLightId = signal<string | null>(null);
   readonly pendingTargetAction = signal<PendingTargetAction | null>(null);
@@ -533,22 +564,118 @@ export class VttStore {
     }
   }
 
+  resolveRosterActorCharacterSheet(
+    actor: VttRosterActorModel | null | undefined
+  ): CharacterModel | null {
+    if (!actor || actor.actor_kind === 'npc') return null;
+    const rawEmbedded = actor.npc_stats?.__character_sheet;
+    if (
+      rawEmbedded &&
+      typeof rawEmbedded === 'object' &&
+      !Array.isArray(rawEmbedded)
+    ) {
+      const normalized = normalizeCharacterRecord(
+        rawEmbedded as CharacterModel
+      );
+      const sheetId =
+        typeof normalized.id === 'string' && normalized.id.trim().length > 0
+          ? normalized.id.trim()
+          : `vtt-actor-char:${actor.id}`;
+      return cloneDetachedVttCharacterSheet(normalized, sheetId);
+    }
+    if (actor.character_id) {
+      const found =
+        this.allCharacters().find((c) => c.id === actor.character_id) ??
+        this.characterStore
+          .characters()
+          .find((c) => c.id === actor.character_id) ??
+        this.characterStore.getCharacterById(actor.character_id) ??
+        null;
+      if (found) {
+        return cloneDetachedVttCharacterSheet(
+          found,
+          `vtt-actor-char:${actor.id}`
+        );
+      }
+    }
+    return null;
+  }
+
+  resolveCharacterForToken(
+    tok: VttTokenModel | null | undefined
+  ): CharacterModel | null {
+    if (!tok) return null;
+    const linkedActor = this.resolveRosterActorForToken(tok);
+    if (linkedActor) {
+      const actorSheet = this.resolveRosterActorCharacterSheet(linkedActor);
+      if (actorSheet) return actorSheet;
+    }
+    const rawTokEmbedded = tok.npc_stats?.__character_sheet;
+    if (
+      rawTokEmbedded &&
+      typeof rawTokEmbedded === 'object' &&
+      !Array.isArray(rawTokEmbedded)
+    ) {
+      const normalized = normalizeCharacterRecord(
+        rawTokEmbedded as CharacterModel
+      );
+      const sheetId =
+        typeof normalized.id === 'string' && normalized.id.trim().length > 0
+          ? normalized.id.trim()
+          : `vtt-token-char:${tok.id}`;
+      return cloneDetachedVttCharacterSheet(normalized, sheetId);
+    }
+    if (tok.character_id) {
+      return this.characterByIdMap().get(tok.character_id) ?? null;
+    }
+    return null;
+  }
+
+  private findRosterActorsForCharacterId(
+    characterId: string | null | undefined
+  ): VttRosterActorModel[] {
+    if (!characterId) return [];
+    const roster = this.rosterActors();
+    const direct = roster.filter(
+      (a) =>
+        a.actor_kind !== 'npc' &&
+        (a.character_id === characterId ||
+          this.resolveRosterActorCharacterSheet(a)?.id === characterId)
+    );
+    if (direct.length > 0) return direct;
+    return roster.filter(
+      (a) =>
+        a.actor_kind !== 'npc' &&
+        resolveRosterActorSourceCharacterId(a) === characterId
+    );
+  }
+
   readonly characterByIdMap = computed(() => {
     const map = new Map<string, CharacterModel>();
     for (const c of this.characterStore.characters()) {
-      map.set(c.id, c);
+      map.set(c.id, cloneDetachedVttCharacterSheet(c, c.id));
     }
     for (const c of this.allCharacters()) {
-      map.set(c.id, c);
+      map.set(c.id, cloneDetachedVttCharacterSheet(c, c.id));
+    }
+    for (const actor of this.rosterActors()) {
+      const sheet = this.resolveRosterActorCharacterSheet(actor);
+      if (sheet) {
+        map.set(sheet.id, sheet);
+      }
     }
     return map;
   });
 
   readonly selectedTokenCharacter = computed<CharacterModel | null>(() => {
-    const tok = this.selectedToken();
-    if (!tok?.character_id) return null;
-    return this.characterByIdMap().get(tok.character_id) ?? null;
+    return this.resolveCharacterForToken(this.selectedToken());
   });
+
+  private getArmorsForStats() {
+    return typeof this.compendiumStore.allArmors === 'function'
+      ? this.compendiumStore.allArmors()
+      : undefined;
+  }
 
   readonly selectedTokenDerived = computed<DerivedCharacterStats | null>(() => {
     const char = this.selectedTokenCharacter();
@@ -556,12 +683,14 @@ export class VttStore {
     return computeDerivedStats(
       char,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
     );
   });
 
-  readonly openSheetRosterActor = computed<VttRosterActorModel | null>(() => {
-    const target = this.openSheetTarget();
+  resolveTargetRosterActor(
+    target: VttOpenSheetTarget | null
+  ): VttRosterActorModel | null {
     if (!target) return null;
     const roster = this.rosterActors();
     if (target.rosterActorId) {
@@ -569,80 +698,246 @@ export class VttStore {
       if (direct) return direct;
     }
     if (target.characterId) {
-      const byChar = roster.find((a) => a.character_id === target.characterId);
-      if (byChar) return byChar;
+      const matched = this.findRosterActorsForCharacterId(target.characterId);
+      if (matched.length > 0) return matched[0];
     }
     if (target.tokenId) {
       const tok = this.tokens().find((t) => t.id === target.tokenId);
-      if (tok?.npc_stats?.__roster_actor_id) {
-        const byTokActor = roster.find(
-          (a) => a.id === tok.npc_stats.__roster_actor_id
-        );
-        if (byTokActor) return byTokActor;
-      }
-      if (tok?.character_id) {
-        const byTokChar = roster.find(
-          (a) => a.character_id === tok.character_id
-        );
-        if (byTokChar) return byTokChar;
+      if (tok) {
+        const byTok = this.resolveRosterActorForToken(tok);
+        if (byTok) return byTok;
       }
     }
     return null;
-  });
+  }
 
-  readonly openSheetToken = computed<VttTokenModel | null>(() => {
-    const target = this.openSheetTarget();
+  resolveTargetToken(target: VttOpenSheetTarget | null): VttTokenModel | null {
     if (!target) return null;
     if (target.tokenId) {
       const direct = this.tokens().find((t) => t.id === target.tokenId);
       if (direct) return direct;
     }
-    const actor = this.openSheetRosterActor();
-    const charId = target.characterId ?? actor?.character_id ?? null;
+    const actor = this.resolveTargetRosterActor(target);
+    const actorSheetId = this.resolveRosterActorCharacterSheet(actor)?.id ?? null;
+    const charId =
+      target.characterId ?? actorSheetId ?? actor?.character_id ?? null;
     const sel = this.selectedToken();
     if (
       sel &&
-      ((charId && sel.character_id === charId) ||
-        (actor && sel.npc_stats?.__roster_actor_id === actor.id))
+      ((actor && sel.npc_stats?.__roster_actor_id === actor.id) ||
+        (charId &&
+          (sel.character_id === charId ||
+            this.resolveCharacterForToken(sel)?.id === charId)))
     ) {
       return sel;
     }
     const onScene = this.sceneTokens();
-    if (charId) {
-      const byChar = onScene.find((t) => t.character_id === charId);
-      if (byChar) return byChar;
-    }
     if (actor) {
       const byActor = onScene.find(
         (t) => t.npc_stats?.__roster_actor_id === actor.id
       );
       if (byActor) return byActor;
     }
+    if (charId) {
+      const byChar = onScene.find(
+        (t) =>
+          t.character_id === charId ||
+          this.resolveCharacterForToken(t)?.id === charId
+      );
+      if (byChar) return byChar;
+    }
     return null;
-  });
+  }
 
-  readonly openSheetCharacter = computed<CharacterModel | null>(() => {
-    const target = this.openSheetTarget();
+  resolveTargetCharacter(
+    target: VttOpenSheetTarget | null
+  ): CharacterModel | null {
     if (!target) return null;
-    const actor = this.openSheetRosterActor();
-    const tok = this.openSheetToken();
+    const actor = this.resolveTargetRosterActor(target);
+    const actorSheet = this.resolveRosterActorCharacterSheet(actor);
+    if (actorSheet) return actorSheet;
+    const tok = this.resolveTargetToken(target);
+    const tokSheet = this.resolveCharacterForToken(tok);
+    if (tokSheet) return tokSheet;
     const charId =
       target.characterId ?? actor?.character_id ?? tok?.character_id ?? null;
     if (!charId) return null;
-    return (
-      this.characterByIdMap().get(charId) ??
-      this.characterStore.getCharacterById(charId) ??
-      null
-    );
-  });
+    const fromMap = this.characterByIdMap().get(charId);
+    if (fromMap) return fromMap;
+    const fromStore = this.characterStore.getCharacterById(charId);
+    return fromStore ? cloneDetachedVttCharacterSheet(fromStore, charId) : null;
+  }
 
-  readonly openSheetDerived = computed<DerivedCharacterStats | null>(() => {
-    const char = this.openSheetCharacter();
+  readonly openSheetRosterActor = computed<VttRosterActorModel | null>(() =>
+    this.resolveTargetRosterActor(this.openSheetTarget())
+  );
+
+  readonly openSheetToken = computed<VttTokenModel | null>(() =>
+    this.resolveTargetToken(this.openSheetTarget())
+  );
+
+  readonly openSheetCharacter = computed<CharacterModel | null>(() =>
+    this.resolveTargetCharacter(this.openSheetTarget())
+  );
+
+  computeDerivedForCharacter(
+    char: CharacterModel | null
+  ): DerivedCharacterStats | null {
     if (!char) return null;
     return computeDerivedStats(
       char,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
+    );
+  }
+
+  readonly openSheetDerived = computed<DerivedCharacterStats | null>(() =>
+    this.computeDerivedForCharacter(this.openSheetCharacter())
+  );
+
+  resolveSheetWindowKey(target: VttOpenSheetTarget): string {
+    const actor = this.resolveTargetRosterActor(target);
+    if (
+      actor &&
+      (actor.actor_kind === 'character' || actor.is_unique || !target.tokenId)
+    ) {
+      return `actor:${actor.id}`;
+    }
+    const charId = target.characterId ?? actor?.character_id ?? null;
+    if (charId) {
+      return `char:${charId}`;
+    }
+    if (target.tokenId) {
+      return `token:${target.tokenId}`;
+    }
+    return `${target.rosterActorId ?? ''}|${target.characterId ?? ''}|${target.tokenId ?? ''}`;
+  }
+
+  private syncPrimaryOpenSheetTarget(
+    entries: readonly VttOpenSheetWindowEntry[]
+  ): void {
+    if (entries.length === 0) {
+      this.openSheetTarget.set(null);
+      return;
+    }
+    let top = entries[0];
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].focusTick >= top.focusTick) {
+        top = entries[i];
+      }
+    }
+    this.openSheetTarget.set(top.target);
+  }
+
+  private upsertOpenSheetWindow(target: VttOpenSheetTarget): void {
+    const key = this.resolveSheetWindowKey(target);
+    const tick = ++this.nextSheetFocusTick;
+    let focusedId: number | null = null;
+    this.openSheetWindows.update((curr) => {
+      const idx = curr.findIndex((e) => e.key === key);
+      if (idx >= 0) {
+        focusedId = curr[idx].windowId;
+        return curr.map((e, i) =>
+          i === idx
+            ? {
+                key,
+                target: {
+                  rosterActorId:
+                    target.rosterActorId ?? e.target.rosterActorId,
+                  characterId: target.characterId ?? e.target.characterId,
+                  tokenId: target.tokenId ?? e.target.tokenId,
+                },
+                focusTick: tick,
+                windowId: e.windowId,
+              }
+            : e
+        );
+      }
+      const newWinId = allocateFloatingWindowId();
+      focusedId = newWinId;
+      return [...curr, { key, target, focusTick: tick, windowId: newWinId }];
+    });
+    if (focusedId !== null) {
+      focusFloatingWindow(focusedId);
+    }
+    this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+  }
+
+  focusOpenSheetWindow(key: string): void {
+    if (!key) return;
+    const tick = ++this.nextSheetFocusTick;
+    let focusedId: number | null = null;
+    this.openSheetWindows.update((curr) =>
+      curr.map((entry) => {
+        if (entry.key !== key) return entry;
+        focusedId = entry.windowId;
+        return { ...entry, focusTick: tick };
+      })
+    );
+    if (focusedId !== null) {
+      focusFloatingWindow(focusedId);
+      this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+    }
+  }
+
+  closeSheetWindow(key: string): void {
+    if (!key) return;
+    let releasedId: number | null = null;
+    this.openSheetWindows.update((curr) =>
+      curr.filter((entry) => {
+        if (entry.key === key) {
+          releasedId = entry.windowId;
+          return false;
+        }
+        return true;
+      })
+    );
+    if (releasedId !== null) {
+      releaseFloatingWindow(releasedId);
+    }
+    this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+  }
+
+  closeTopmostActorSheet(): boolean {
+    const entries = this.openSheetWindows();
+    if (entries.length === 0) {
+      if (this.openSheetTarget()) {
+        this.openSheetTarget.set(null);
+        return true;
+      }
+      return false;
+    }
+    let top = entries[0];
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].focusTick >= top.focusTick) {
+        top = entries[i];
+      }
+    }
+    this.closeSheetWindow(top.key);
+    return true;
+  }
+
+  readonly openTokenizerRosterActor = computed<VttRosterActorModel | null>(() =>
+    this.resolveTargetRosterActor(this.openTokenizerTarget())
+  );
+
+  readonly openTokenizerToken = computed<VttTokenModel | null>(() =>
+    this.resolveTargetToken(this.openTokenizerTarget())
+  );
+
+  readonly openTokenizerCharacter = computed<CharacterModel | null>(() =>
+    this.resolveTargetCharacter(this.openTokenizerTarget())
+  );
+
+  readonly openTokenizerDerived = computed<DerivedCharacterStats | null>(() => {
+    const char = this.openTokenizerCharacter();
+    if (!char) return null;
+    return computeDerivedStats(
+      char,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
     );
   });
 
@@ -668,8 +963,7 @@ export class VttStore {
     tokenAppearance: TokenAppearanceConfig;
   } {
     const linkedActor = this.resolveRosterActorForToken(tok);
-    const charId = tok.character_id ?? linkedActor?.character_id ?? null;
-    const linkedChar = charId ? (this.characterByIdMap().get(charId) ?? null) : null;
+    const linkedChar = this.resolveCharacterForToken(tok);
     return {
       portraitUrl: resolveEntityPortraitUrl(tok, linkedActor, linkedChar),
       tokenImageUrl: resolveEntityTokenImageUrl(tok, linkedActor, linkedChar),
@@ -686,9 +980,7 @@ export class VttStore {
     tokenImageUrl: string | null;
     tokenAppearance: TokenAppearanceConfig;
   } {
-    const linkedChar = actor.character_id
-      ? (this.characterByIdMap().get(actor.character_id) ?? null)
-      : null;
+    const linkedChar = this.resolveRosterActorCharacterSheet(actor);
     return {
       portraitUrl: resolveEntityPortraitUrl(actor, linkedChar),
       tokenImageUrl: resolveEntityTokenImageUrl(actor, linkedChar),
@@ -1202,18 +1494,15 @@ export class VttStore {
     if (this.isGm()) return true;
     const uid = this.authStore.user()?.id;
     if (!uid) return false;
-    if (
-      this.rosterActors().some(
-        (a) =>
-          a.character_id === characterId &&
-          this.getActorAssignedUserId(a) === uid
-      )
-    ) {
+    const matchedActors = this.findRosterActorsForCharacterId(characterId);
+    if (matchedActors.some((a) => this.getActorAssignedUserId(a) === uid)) {
       return true;
     }
     return this.tokens().some(
       (t) =>
-        t.character_id === characterId && this.getTokenAssignedUserId(t) === uid
+        (t.character_id === characterId ||
+          this.resolveCharacterForToken(t)?.id === characterId) &&
+        this.getTokenAssignedUserId(t) === uid
     );
   }
 
@@ -1226,28 +1515,27 @@ export class VttStore {
   }
 
   getDefenderCapabilities(token: VttTokenModel): DefenderClashCapabilities {
-    if (token.character_id) {
-      const ch = this.characterByIdMap().get(token.character_id);
-      if (ch) {
-        const stats = computeDerivedStats(
-          ch,
-          this.compendiumStore.allWeapons(),
-          this.compendiumStore.allPerkNodes()
-        );
-        return {
-          currentSp: token.current_sp,
-          currentHp: token.current_hp,
-          currentAp: token.current_ap,
-          armorDr: stats.armorDr,
-          shieldBlock: stats.shieldBlockTotal,
-          shieldRaised: token.shield_raised,
-          parryMod: stats.parryMod,
-          dodgeMod: stats.dodgeMod,
-          canDodge: stats.canDodge,
-          enablesMartialParry: stats.enablesMartialParry,
-          flawlessCounterSp: stats.flawlessParryCounterSp,
-        };
-      }
+    const ch = this.resolveCharacterForToken(token);
+    if (ch) {
+      const stats = computeDerivedStats(
+        ch,
+        this.compendiumStore.allWeapons(),
+        this.compendiumStore.allPerkNodes(),
+        this.getArmorsForStats()
+      );
+      return {
+        currentSp: token.current_sp,
+        currentHp: token.current_hp,
+        currentAp: token.current_ap,
+        armorDr: stats.armorDr,
+        shieldBlock: stats.shieldBlockTotal,
+        shieldRaised: token.shield_raised,
+        parryMod: stats.parryMod,
+        dodgeMod: stats.dodgeMod,
+        canDodge: stats.canDodge,
+        enablesMartialParry: stats.enablesMartialParry,
+        flawlessCounterSp: stats.flawlessParryCounterSp,
+      };
     }
 
     const npc = token.npc_stats ?? {};
@@ -1486,21 +1774,39 @@ export class VttStore {
                 ? curr.map((a) => (a.id === mergedActor.id ? mergedActor : a))
                 : [...curr, mergedActor];
             });
+            if (!this.isGm()) {
+              this.openSheetWindows.update((curr) =>
+                curr.filter((e) => this.canEditTarget(e.target))
+              );
+              this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+            }
             if (
               !this.isGm() &&
-              this.openSheetTarget() &&
-              !this.canEditOpenSheet()
+              this.openTokenizerTarget() &&
+              !this.canEditOpenTokenizer()
             ) {
-              this.openSheetTarget.set(null);
+              this.openTokenizerTarget.set(null);
             }
           },
           onRosterActorDelete: (actorId) => {
             this.rosterActors.update((curr) =>
               curr.filter((a) => a.id !== actorId)
             );
-            const target = this.openSheetTarget();
-            if (target?.rosterActorId === actorId && !target.characterId) {
-              this.openSheetTarget.set(null);
+            this.openSheetWindows.update((curr) =>
+              curr.filter(
+                (e) =>
+                  !(
+                    e.target.rosterActorId === actorId && !e.target.characterId
+                  )
+              )
+            );
+            this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+            const tokTarget = this.openTokenizerTarget();
+            if (
+              tokTarget?.rosterActorId === actorId &&
+              !tokTarget.characterId
+            ) {
+              this.openTokenizerTarget.set(null);
             }
           },
           onTokenUpsert: (incomingToken) => {
@@ -1529,13 +1835,24 @@ export class VttStore {
               curr.filter((t) => t.id !== tokenId)
             );
             this.pruneRemovedTokenFromSelection(tokenId);
-            const target = this.openSheetTarget();
+            this.openSheetWindows.update((curr) =>
+              curr.filter(
+                (e) =>
+                  !(
+                    e.target.tokenId === tokenId &&
+                    !e.target.rosterActorId &&
+                    !e.target.characterId
+                  )
+              )
+            );
+            this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+            const tokTarget = this.openTokenizerTarget();
             if (
-              target?.tokenId === tokenId &&
-              !target.rosterActorId &&
-              !target.characterId
+              tokTarget?.tokenId === tokenId &&
+              !tokTarget.rosterActorId &&
+              !tokTarget.characterId
             ) {
-              this.openSheetTarget.set(null);
+              this.openTokenizerTarget.set(null);
             }
           },
           onCharacterUpsert: (incomingChar) => {
@@ -1601,10 +1918,13 @@ export class VttStore {
     this.participants.set([]);
     this.pendingTargetAction.set(null);
     this.draggingRosterPayload.set(null);
+    this.draggingCompendiumPayload.set(null);
     this.selectedTokenId.set(null);
     this.selectedRosterActorId.set(null);
     this.selectedCharacterId.set(null);
+    this.openSheetWindows.set([]);
     this.openSheetTarget.set(null);
+    this.openTokenizerTarget.set(null);
     this.gmSpeakerMode.set('user');
     this.selectedLightId.set(null);
     this.activePings.set([]);
@@ -2924,16 +3244,30 @@ export class VttStore {
       return;
     }
 
-    const linkedActor =
-      this.rosterActors().find((a) => a.character_id === character.id) ?? null;
-    const assignedUserId = linkedActor
-      ? this.getActorAssignedUserId(linkedActor)
-      : null;
+    let linkedActor: VttRosterActorModel | null =
+      this.findRosterActorsForCharacterId(character.id)[0] ?? null;
+    if (
+      !linkedActor &&
+      this.isGm() &&
+      typeof this.vttService.createRosterActor === 'function'
+    ) {
+      linkedActor = await this.importCharacterToRoster(character, null, {
+        silent: true,
+      });
+    }
+    if (linkedActor) {
+      await this.deployRosterActor(linkedActor.id, placement);
+      return;
+    }
+
+    const assignedUserId = null;
+    const detachedSheet = cloneDetachedVttCharacterSheet(character);
 
     const stats = computeDerivedStats(
-      character,
+      detachedSheet,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
     );
     const wepVis = stats.activeWeapon
       ? resolveWeaponVisuals(stats.activeWeapon)
@@ -2941,18 +3275,15 @@ export class VttStore {
     const spawn = this.resolveDropPlacement('ally', placement);
     const axial = offsetToAxial(spawn.col, spawn.row);
     const topZ = this.getNextTopTokenZIndex();
-    const portraitUrl = resolveEntityPortraitUrl(linkedActor, character);
-    const tokenImageUrl = resolveEntityTokenImageUrl(linkedActor, character);
-    const tokenAppearance = resolveEntityTokenAppearance(
-      linkedActor,
-      character
-    );
+    const portraitUrl = resolveEntityPortraitUrl(detachedSheet);
+    const tokenImageUrl = resolveEntityTokenImageUrl(detachedSheet);
+    const tokenAppearance = resolveEntityTokenAppearance(detachedSheet);
 
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
-      character_id: character.id,
+      character_id: null,
       owner_id: assignedUserId,
-      name: character.name,
+      name: detachedSheet.name,
       faction: 'ally',
       x: spawn.col,
       y: spawn.row,
@@ -2963,11 +3294,11 @@ export class VttStore {
       size: 1,
       icon: wepVis.icon,
       color: '#38B29A',
-      current_hp: Math.min(character.current_hp, stats.maxHp),
+      current_hp: Math.min(detachedSheet.current_hp, stats.maxHp),
       max_hp: stats.maxHp,
-      current_sp: Math.min(character.current_sp, stats.maxSp),
+      current_sp: Math.min(detachedSheet.current_sp, stats.maxSp),
       max_sp: stats.maxSp,
-      current_ap: character.current_ap ?? 4,
+      current_ap: detachedSheet.current_ap ?? 4,
       max_ap: 4,
       armor_dr: stats.armorDr,
       shield_block: stats.shieldBlockTotal,
@@ -2977,7 +3308,9 @@ export class VttStore {
       light_bright_feet: 0,
       light_dim_feet: 0,
       light_color: '#FF9B42',
-      shield_raised: Boolean(character.active_cooldowns?.['__shield_raised']),
+      shield_raised: Boolean(
+        detachedSheet.active_cooldowns?.['__shield_raised']
+      ),
       is_hidden: false,
       statuses: [],
       portrait_url: portraitUrl,
@@ -2987,7 +3320,8 @@ export class VttStore {
         {
           __assigned_user_id: assignedUserId,
           __z_index: topZ,
-          ...(linkedActor ? { __roster_actor_id: linkedActor.id } : {}),
+          __source_character_id: character.id,
+          __character_sheet: detachedSheet,
           ...(spawn.unsnappedOnGrid ? { __unsnapped: true } : {}),
         },
         portraitUrl,
@@ -3166,11 +3500,45 @@ export class VttStore {
     const portraitUrl = resolveEntityPortraitUrl(draft);
     const tokenImageUrl = resolveEntityTokenImageUrl(draft);
     const tokenAppearance = resolveEntityTokenAppearance(draft);
+    const sourceCharId =
+      draft.source_character_id ??
+      draft.npc_stats?.__source_character_id ??
+      null;
+
+    let embeddedSheet: CharacterModel | null | undefined =
+      draft.npc_stats?.__character_sheet;
+    if (
+      draft.actor_kind === 'character' &&
+      !embeddedSheet &&
+      sourceCharId
+    ) {
+      const found =
+        this.allCharacters().find((c) => c.id === sourceCharId) ??
+        this.characterStore.characters().find((c) => c.id === sourceCharId) ??
+        this.characterStore.getCharacterById(sourceCharId) ??
+        null;
+      if (found) {
+        embeddedSheet = cloneDetachedVttCharacterSheet(found);
+      }
+    } else if (
+      draft.actor_kind === 'character' &&
+      embeddedSheet &&
+      typeof embeddedSheet === 'object'
+    ) {
+      const normalized = normalizeCharacterRecord(embeddedSheet);
+      const nextSheetId =
+        normalized.id &&
+        normalized.id !== sourceCharId &&
+        normalized.id.trim().length > 0
+          ? normalized.id
+          : makeDetachedVttCharacterId();
+      embeddedSheet = cloneDetachedVttCharacterSheet(normalized, nextSheetId);
+    }
 
     const res = await this.vttService.createRosterActor({
       campaign_id: camp.id,
       folder_id: draft.folder_id || null,
-      character_id: draft.source_character_id || null,
+      character_id: null,
       collection_actor_id: linkedCollectionId,
       owner_id: assignedUserId,
       actor_kind: draft.actor_kind,
@@ -3208,6 +3576,12 @@ export class VttStore {
             draft.npc_stats
           ),
           __assigned_user_id: assignedUserId,
+          ...(draft.actor_kind === 'character'
+            ? {
+                __source_character_id: sourceCharId,
+                ...(embeddedSheet ? { __character_sheet: embeddedSheet } : {}),
+              }
+            : {}),
         },
         portraitUrl,
         tokenImageUrl,
@@ -3239,28 +3613,62 @@ export class VttStore {
     return res.actor;
   }
 
+  private async fetchSourceCharacterFresh(
+    characterId: string
+  ): Promise<CharacterModel | null> {
+    if (!characterId) return null;
+    if (typeof this.characterService.fetchCharacterById === 'function') {
+      try {
+        const res = await this.characterService.fetchCharacterById(characterId);
+        if (res?.data) {
+          const fresh = normalizeCharacterRecord(res.data);
+          this.allCharacters.update((curr) =>
+            curr.some((c) => c.id === fresh.id)
+              ? curr.map((c) => (c.id === fresh.id ? fresh : c))
+              : [...curr, fresh]
+          );
+          return fresh;
+        }
+      } catch {
+        return (
+          this.characterStore.getCharacterById(characterId) ??
+          this.allCharacters().find((c) => c.id === characterId) ??
+          null
+        );
+      }
+    }
+    return (
+      this.characterStore.getCharacterById(characterId) ??
+      this.allCharacters().find((c) => c.id === characterId) ??
+      null
+    );
+  }
+
   async importCharacterToRoster(
     character: CharacterModel,
-    folderId: string | null = null
+    folderId: string | null = null,
+    options?: { silent?: boolean }
   ): Promise<VttRosterActorModel | null> {
     if (!this.isGm()) return null;
     const existing = this.rosterActors().find(
-      (a) => a.character_id === character.id
+      (a) =>
+        a.actor_kind !== 'npc' &&
+        resolveRosterActorSourceCharacterId(a) === character.id
     );
     if (existing) {
-      if (folderId !== existing.folder_id) {
+      if (folderId !== null && folderId !== existing.folder_id) {
         await this.updateRosterActor(existing.id, { folder_id: folderId });
       }
-      this.notifications.info(
-        'Already in Actors',
-        `${character.name} is already loaded in Actors.`
-      );
+      if (!options?.silent) {
+        this.notifications.info(
+          'Already in Actors',
+          `${character.name} is already loaded in Actors. Use Re-import to copy fresh sheet changes.`
+        );
+      }
       return existing;
     }
 
-    if (
-      !this.allCharacters().some((c) => c.id === character.id)
-    ) {
+    if (!this.allCharacters().some((c) => c.id === character.id)) {
       this.allCharacters.update((curr) => [...curr, character]);
     }
 
@@ -3268,9 +3676,392 @@ export class VttStore {
       character,
       this.compendiumStore.allWeapons(),
       this.compendiumStore.allPerkNodes(),
-      folderId
+      folderId,
+      this.getArmorsForStats()
     );
-    return this.createRosterActorFromScratch(draft);
+    return this.createRosterActorFromScratch(draft, {
+      silent: options?.silent,
+    });
+  }
+
+  async reimportCharacterForActor(actorId: string): Promise<boolean> {
+    return this.reimportRosterActorFromSource(actorId);
+  }
+
+  async reimportRosterActorFromSource(actorId: string): Promise<boolean> {
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!actor || !this.canManageRosterActor(actor)) return false;
+
+    if (actor.collection_actor_id) {
+      if (typeof this.collectionsStore.loadCollections === 'function') {
+        await this.collectionsStore.loadCollections(true);
+      }
+      const colActor =
+        this.collectionsStore
+          .actors()
+          .find((c) => c.id === actor.collection_actor_id) ?? null;
+      if (colActor) {
+        const portraitUrl = resolveEntityPortraitUrl(colActor);
+        const tokenImageUrl = resolveEntityTokenImageUrl(colActor);
+        const tokenAppearance = resolveEntityTokenAppearance(colActor);
+        const darkvisionFeet = resolveActorDarkvisionFeet(
+          colActor.darkvision_feet,
+          colActor.npc_stats
+        );
+        const existingSheet = this.resolveRosterActorCharacterSheet(actor);
+        const clonedNpcStats = cloneDetachedNpcStats(colActor.npc_stats);
+        if (
+          colActor.actor_kind === 'character' &&
+          clonedNpcStats.__character_sheet
+        ) {
+          const detachedId =
+            existingSheet?.id &&
+            existingSheet.id !== colActor.source_character_id
+              ? existingSheet.id
+              : makeDetachedVttCharacterId();
+          clonedNpcStats.__character_sheet = cloneDetachedVttCharacterSheet(
+            clonedNpcStats.__character_sheet,
+            detachedId
+          );
+        }
+
+        const ok = await this.updateRosterActor(actor.id, {
+          character_id: null,
+          actor_kind: colActor.actor_kind,
+          is_unique: colActor.is_unique,
+          name: colActor.name,
+          faction: colActor.faction,
+          size: colActor.size,
+          icon: colActor.icon,
+          color: colActor.color,
+          max_hp: colActor.max_hp,
+          max_sp: colActor.max_sp,
+          max_ap: colActor.max_ap,
+          armor_dr: colActor.armor_dr,
+          shield_block: colActor.shield_block,
+          move_feet: colActor.move_feet,
+          vision_feet: colActor.vision_feet,
+          darkvision_feet: darkvisionFeet,
+          light_bright_feet: colActor.light_bright_feet,
+          light_dim_feet: colActor.light_dim_feet,
+          light_color: colActor.light_color,
+          portrait_url: portraitUrl,
+          token_image_url: tokenImageUrl,
+          token_appearance: tokenAppearance,
+          notes: colActor.notes ?? '',
+          npc_stats: enrichNpcStatsWithVisuals(
+            {
+              ...clonedNpcStats,
+              __darkvision_feet: darkvisionFeet,
+              __assigned_user_id: this.getActorAssignedUserId(actor),
+            },
+            portraitUrl,
+            tokenImageUrl,
+            tokenAppearance
+          ),
+        });
+        if (!ok) return false;
+
+        const deployedTokens = this.tokens().filter(
+          (t) => t.npc_stats?.__roster_actor_id === actor.id
+        );
+        for (const tok of deployedTokens) {
+          await this.patchToken(tok.id, {
+            current_hp: colActor.max_hp,
+            current_sp: colActor.max_sp,
+            current_ap: colActor.max_ap,
+          });
+        }
+
+        this.notifications.success(
+          'Actor Re-imported',
+          `Copied the latest details from ${colActor.name} in Collections.`
+        );
+        return true;
+      }
+    }
+
+    const sourceId = resolveRosterActorSourceCharacterId(actor);
+    if (sourceId) {
+      await this.compendiumStore.ensureLoaded();
+      const freshChar = await this.fetchSourceCharacterFresh(sourceId);
+      if (!freshChar) {
+        this.notifications.error(
+          'Unable to Re-import Character',
+          'Could not find the original Character Sheet.'
+        );
+        return false;
+      }
+
+      const existingSheet = this.resolveRosterActorCharacterSheet(actor);
+      const detachedId =
+        existingSheet?.id && existingSheet.id !== sourceId
+          ? existingSheet.id
+          : makeDetachedVttCharacterId();
+
+      const weapons = this.compendiumStore.allWeapons();
+      const perkNodes = this.compendiumStore.allPerkNodes();
+      const armors = this.getArmorsForStats();
+      const stats = computeDerivedStats(freshChar, weapons, perkNodes, armors);
+      const wepVis = stats.activeWeapon
+        ? resolveWeaponVisuals(stats.activeWeapon)
+        : { icon: actor.icon || 'greatsword', color: '#38B29A' };
+      const reachFeet = stats.activeWeapon
+        ? Math.max(5, Math.round((stats.activeWeapon.reach_tiles ?? 1) * 5))
+        : 5;
+
+      const portraitUrl = sanitizeOptionalImageUrl(freshChar.portrait_url);
+      const tokenImageUrl = sanitizeOptionalImageUrl(freshChar.token_image_url);
+      const tokenAppearance = normalizeTokenAppearance(
+        freshChar.token_appearance
+      );
+
+      const sheetCopy = cloneDetachedVttCharacterSheet(
+        {
+          ...freshChar,
+          current_hp: Math.max(
+            0,
+            Math.min(stats.maxHp, freshChar.current_hp ?? stats.maxHp)
+          ),
+          current_sp: Math.max(
+            0,
+            Math.min(stats.maxSp, freshChar.current_sp ?? stats.maxSp)
+          ),
+          current_ap: Math.max(0, Math.min(8, freshChar.current_ap ?? 4)),
+        },
+        detachedId
+      );
+
+      const normalizedInv = normalizeInventoryItems(sheetCopy.inventory);
+      const prevCharId = actor.character_id;
+
+      const ok = await this.updateRosterActor(actor.id, {
+        character_id: null,
+        actor_kind: 'character',
+        is_unique: true,
+        name: sheetCopy.name,
+        icon: wepVis.icon,
+        max_hp: stats.maxHp,
+        max_sp: stats.maxSp,
+        armor_dr: stats.armorDr,
+        shield_block: stats.shieldBlockTotal,
+        move_feet: stats.moveFeet,
+        portrait_url: portraitUrl,
+        token_image_url: tokenImageUrl,
+        token_appearance: tokenAppearance,
+        notes: sheetCopy.notes ?? '',
+        npc_stats: enrichNpcStatsWithVisuals(
+          {
+            ...actor.npc_stats,
+            weapon_name: stats.activeWeapon?.name ?? 'Unarmed',
+            attack_ap: stats.activeWeapon?.ap_cost ?? 1,
+            attack_mod: stats.attackRollMod,
+            flat_damage: stats.flatWeaponDamage,
+            reach_feet: reachFeet,
+            parry_mod: stats.parryMod,
+            dodge_mod: stats.dodgeMod,
+            can_dodge: stats.canDodge,
+            enables_martial_parry: stats.enablesMartialParry,
+            __inventory: normalizedInv,
+            __source_character_id: sourceId,
+            __character_sheet: sheetCopy,
+          },
+          portraitUrl,
+          tokenImageUrl,
+          tokenAppearance
+        ),
+      });
+
+      if (!ok) return false;
+
+      const deployedTokens = this.tokens().filter(
+        (t) =>
+          t.npc_stats?.__roster_actor_id === actor.id ||
+          Boolean(prevCharId && t.character_id === prevCharId)
+      );
+      for (const tok of deployedTokens) {
+        await this.patchToken(tok.id, {
+          character_id: null,
+          name: sheetCopy.name,
+          icon: wepVis.icon,
+          max_hp: stats.maxHp,
+          current_hp: sheetCopy.current_hp,
+          max_sp: stats.maxSp,
+          current_sp: sheetCopy.current_sp,
+          current_ap: sheetCopy.current_ap,
+          armor_dr: stats.armorDr,
+          shield_block: stats.shieldBlockTotal,
+          move_feet: stats.moveFeet,
+          portrait_url: portraitUrl,
+          token_image_url: tokenImageUrl,
+          token_appearance: tokenAppearance,
+          shield_raised: Boolean(
+            sheetCopy.active_cooldowns?.['__shield_raised']
+          ),
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __roster_actor_id: actor.id,
+          },
+        });
+      }
+
+      this.notifications.success(
+        'Character Re-imported',
+        `Copied the latest details from ${sheetCopy.name}'s Character Sheet.`
+      );
+      return true;
+    }
+
+    const presetId = actor.npc_stats?.__source_preset_id;
+    if (presetId) {
+      const preset = VTT_NPC_PRESETS.find((p) => p.id === presetId) ?? null;
+      if (preset) {
+        const draft = buildActorTemplateFromNpcPreset(preset, actor.folder_id);
+        const darkvisionFeet = resolveActorDarkvisionFeet(
+          draft.darkvision_feet,
+          draft.npc_stats
+        );
+        const ok = await this.updateRosterActor(actor.id, {
+          name: draft.name,
+          faction: draft.faction,
+          size: draft.size,
+          icon: draft.icon,
+          color: draft.color,
+          max_hp: draft.max_hp,
+          max_sp: draft.max_sp,
+          max_ap: draft.max_ap,
+          armor_dr: draft.armor_dr,
+          shield_block: draft.shield_block,
+          move_feet: draft.move_feet,
+          vision_feet: draft.vision_feet,
+          darkvision_feet: darkvisionFeet,
+          light_bright_feet: draft.light_bright_feet,
+          light_dim_feet: draft.light_dim_feet,
+          light_color: draft.light_color,
+          portrait_url: null,
+          token_image_url: null,
+          token_appearance: normalizeTokenAppearance(null),
+          notes: draft.notes,
+          npc_stats: {
+            ...draft.npc_stats,
+            __darkvision_feet: darkvisionFeet,
+            __assigned_user_id: this.getActorAssignedUserId(actor),
+          },
+        });
+        if (!ok) return false;
+
+        const deployedTokens = this.tokens().filter(
+          (t) => t.npc_stats?.__roster_actor_id === actor.id
+        );
+        for (const tok of deployedTokens) {
+          await this.patchToken(tok.id, {
+            current_hp: draft.max_hp,
+            current_sp: draft.max_sp,
+            current_ap: draft.max_ap,
+          });
+        }
+
+        this.notifications.success(
+          'NPC Re-imported',
+          `Reset ${draft.name} from its Starter NPC template.`
+        );
+        return true;
+      }
+    }
+
+    this.notifications.info(
+      'No Linked Source Sheet',
+      'This VTT actor was created from scratch and has no external template to re-import from.'
+    );
+    return false;
+  }
+
+  async importCharacterByUrlOrId(
+    rawInput: string,
+    folderId: string | null = null
+  ): Promise<VttRosterActorModel | null> {
+    if (!this.isGm()) return null;
+
+    const parsedCollectionId = parseCollectionActorIdFromUrlOrInput(rawInput);
+    if (parsedCollectionId) {
+      if (typeof this.collectionsStore.loadCollections === 'function') {
+        await this.collectionsStore.loadCollections(true);
+      }
+      const colActor =
+        this.collectionsStore
+          .actors()
+          .find((c) => c.id === parsedCollectionId) ?? null;
+      if (!colActor) {
+        this.notifications.error(
+          'Collection Actor Not Found',
+          'Could not find an actor in your Collections matching that link.'
+        );
+        return null;
+      }
+      const existingCol = this.rosterActors().find(
+        (a) => a.collection_actor_id === colActor.id
+      );
+      if (existingCol) {
+        if (folderId !== null && folderId !== existingCol.folder_id) {
+          await this.updateRosterActor(existingCol.id, { folder_id: folderId });
+        }
+        await this.reimportRosterActorFromSource(existingCol.id);
+        return (
+          this.rosterActors().find((a) => a.id === existingCol.id) ??
+          existingCol
+        );
+      }
+      return this.importCollectionActorToRoster(colActor, folderId);
+    }
+
+    const parsedId = parseCharacterIdFromUrlOrInput(rawInput);
+    if (!parsedId) {
+      this.notifications.error(
+        'Invalid Import URL',
+        'Paste a valid Character Sheet URL, Collections URL, or ID.'
+      );
+      return null;
+    }
+
+    await this.compendiumStore.ensureLoaded();
+    const freshChar = await this.fetchSourceCharacterFresh(parsedId);
+    if (!freshChar) {
+      const colFallback =
+        this.collectionsStore.actors().find((c) => c.id === parsedId) ?? null;
+      if (colFallback) {
+        const existingCol = this.rosterActors().find(
+          (a) => a.collection_actor_id === colFallback.id
+        );
+        if (existingCol) {
+          await this.reimportRosterActorFromSource(existingCol.id);
+          return (
+            this.rosterActors().find((a) => a.id === existingCol.id) ??
+            existingCol
+          );
+        }
+        return this.importCollectionActorToRoster(colFallback, folderId);
+      }
+      this.notifications.error(
+        'Character Not Found',
+        'Could not find a Character Sheet matching that link.'
+      );
+      return null;
+    }
+
+    const existing = this.rosterActors().find(
+      (a) =>
+        a.actor_kind !== 'npc' &&
+        resolveRosterActorSourceCharacterId(a) === freshChar.id
+    );
+    if (existing) {
+      if (folderId !== null && folderId !== existing.folder_id) {
+        await this.updateRosterActor(existing.id, { folder_id: folderId });
+      }
+      await this.reimportRosterActorFromSource(existing.id);
+      return this.rosterActors().find((a) => a.id === existing.id) ?? existing;
+    }
+
+    return this.importCharacterToRoster(freshChar, folderId);
   }
 
   async importCollectionActorToRoster(
@@ -3306,7 +4097,10 @@ export class VttStore {
         portrait_url: resolveEntityPortraitUrl(colActor),
         token_image_url: resolveEntityTokenImageUrl(colActor),
         token_appearance: resolveEntityTokenAppearance(colActor),
-        npc_stats: { ...colActor.npc_stats, __assigned_user_id: null },
+        npc_stats: {
+          ...cloneDetachedNpcStats(colActor.npc_stats),
+          __assigned_user_id: null,
+        },
         notes: colActor.notes,
       },
       {
@@ -3450,10 +4244,16 @@ export class VttStore {
           tokenPatch.darkvision_feet = normalizedPatch.darkvision_feet;
           needsFogSync = true;
         }
+        if (normalizedPatch.character_id === null && tok.character_id) {
+          tokenPatch.character_id = null;
+        }
         if (normalizedPatch.npc_stats !== undefined) {
+          const { __character_sheet: _omitSheet, ...actorStatsForToken } =
+            normalizedPatch.npc_stats;
           tokenPatch.npc_stats = {
             ...(tok.npc_stats ?? {}),
-            ...normalizedPatch.npc_stats,
+            ...actorStatsForToken,
+            __roster_actor_id: actorId,
             ...(tok.npc_stats?.__world_x !== undefined
               ? { __world_x: tok.npc_stats.__world_x }
               : {}),
@@ -3462,9 +4262,6 @@ export class VttStore {
               : {}),
             ...(tok.npc_stats?.__unsnapped !== undefined
               ? { __unsnapped: tok.npc_stats.__unsnapped }
-              : {}),
-            ...(tok.npc_stats?.__roster_actor_id !== undefined
-              ? { __roster_actor_id: tok.npc_stats.__roster_actor_id }
               : {}),
             ...(tok.npc_stats?.__flip_x !== undefined
               ? { __flip_x: tok.npc_stats.__flip_x }
@@ -3479,6 +4276,7 @@ export class VttStore {
               ? { __rotation: tok.npc_stats.__rotation }
               : {}),
           };
+          delete tokenPatch.npc_stats.__character_sheet;
         }
         if (Object.keys(tokenPatch).length > 0) {
           await this.patchToken(tok.id, tokenPatch);
@@ -3498,12 +4296,21 @@ export class VttStore {
     const existing = this.rosterActors().find((a) => a.id === actorId);
     if (!existing || !this.isGm()) return null;
 
+    const copyName = `${existing.name} (Copy)`;
+    const existingSheet = this.resolveRosterActorCharacterSheet(existing);
+    const clonedSheet = existingSheet
+      ? cloneDetachedVttCharacterSheet({
+          ...existingSheet,
+          name: copyName,
+        })
+      : undefined;
+
     return this.createRosterActorFromScratch({
       folder_id: existing.folder_id,
-      source_character_id: existing.character_id,
+      source_character_id: resolveRosterActorSourceCharacterId(existing),
       actor_kind: existing.actor_kind,
       is_unique: existing.is_unique,
-      name: `${existing.name} (Copy)`,
+      name: copyName,
       faction: existing.faction,
       size: existing.size,
       icon: existing.icon,
@@ -3525,7 +4332,11 @@ export class VttStore {
       portrait_url: existing.portrait_url,
       token_image_url: existing.token_image_url,
       token_appearance: existing.token_appearance,
-      npc_stats: { ...existing.npc_stats, __assigned_user_id: null },
+      npc_stats: {
+        ...existing.npc_stats,
+        __assigned_user_id: null,
+        ...(clonedSheet ? { __character_sheet: clonedSheet } : {}),
+      },
       notes: existing.notes,
     });
   }
@@ -3548,8 +4359,12 @@ export class VttStore {
     if (!camp || !existing || !this.isGm()) return;
 
     this.rosterActors.update((curr) => curr.filter((a) => a.id !== actorId));
-    if (this.openSheetTarget()?.rosterActorId === actorId) {
-      this.openSheetTarget.set(null);
+    this.openSheetWindows.update((curr) =>
+      curr.filter((e) => e.target.rosterActorId !== actorId)
+    );
+    this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+    if (this.openTokenizerTarget()?.rosterActorId === actorId) {
+      this.openTokenizerTarget.set(null);
     }
     const err = await this.vttService.deleteRosterActor(camp.id, actorId);
     if (err) {
@@ -3560,19 +4375,28 @@ export class VttStore {
   openActorSheet(actorId: string): void {
     const actor = this.rosterActors().find((a) => a.id === actorId);
     if (!actor || (!this.isGm() && !this.canDeployRosterActor(actor))) return;
-    this.selectedRosterActorId.set(actor.id);
-    if (actor.character_id) {
-      this.selectedCharacterId.set(actor.character_id);
-      const localChar = this.characterByIdMap().get(actor.character_id);
-      if (localChar) {
-        this.characterStore.upsertRealtimeCharacter(localChar);
-      } else {
-        void this.characterStore.ensureCharacterLoaded(actor.character_id);
-      }
+    const hasSceneToken = this.sceneTokens().some(
+      (t) =>
+        t.npc_stats?.__roster_actor_id === actor.id ||
+        (Boolean(actor.character_id) && t.character_id === actor.character_id)
+    );
+    if (!hasSceneToken) {
+      this.clearTokenSelection();
     }
-    this.openSheetTarget.set({
+    const sheet = this.resolveRosterActorCharacterSheet(actor);
+    const charId = sheet?.id ?? actor.character_id ?? null;
+    this.selectedRosterActorId.set(actor.id);
+    this.selectedCharacterId.set(charId);
+    if (
+      actor.character_id &&
+      !actor.npc_stats?.__character_sheet &&
+      !this.characterByIdMap().has(actor.character_id)
+    ) {
+      void this.characterStore.ensureCharacterLoaded(actor.character_id);
+    }
+    this.upsertOpenSheetWindow({
       rosterActorId: actor.id,
-      characterId: actor.character_id ?? null,
+      characterId: charId,
       tokenId: null,
     });
   }
@@ -3580,20 +4404,29 @@ export class VttStore {
   openCharacterSheetInVtt(characterId: string): void {
     if (!characterId || !this.canEditCharacterInVtt(characterId)) return;
     const linkedActor =
-      this.rosterActors().find((a) => a.character_id === characterId) ?? null;
-    if (linkedActor) {
-      this.selectedRosterActorId.set(linkedActor.id);
+      this.findRosterActorsForCharacterId(characterId)[0] ?? null;
+    const sheet = linkedActor
+      ? this.resolveRosterActorCharacterSheet(linkedActor)
+      : null;
+    const resolvedCharId = sheet?.id ?? characterId;
+    const hasSceneToken = this.sceneTokens().some(
+      (t) =>
+        t.character_id === characterId ||
+        t.character_id === resolvedCharId ||
+        (Boolean(linkedActor) &&
+          t.npc_stats?.__roster_actor_id === linkedActor?.id)
+    );
+    if (!hasSceneToken) {
+      this.clearTokenSelection();
     }
-    this.selectedCharacterId.set(characterId);
-    const localChar = this.characterByIdMap().get(characterId);
-    if (localChar) {
-      this.characterStore.upsertRealtimeCharacter(localChar);
-    } else {
+    this.selectedRosterActorId.set(linkedActor?.id ?? null);
+    this.selectedCharacterId.set(resolvedCharId);
+    if (!sheet && !this.characterByIdMap().has(characterId)) {
       void this.characterStore.ensureCharacterLoaded(characterId);
     }
-    this.openSheetTarget.set({
+    this.upsertOpenSheetWindow({
       rosterActorId: linkedActor?.id ?? null,
-      characterId,
+      characterId: resolvedCharId,
       tokenId: null,
     });
   }
@@ -3601,57 +4434,119 @@ export class VttStore {
   openTokenSheet(tokenId: string): void {
     const tok = this.tokens().find((t) => t.id === tokenId);
     if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
-    const linkedActor =
-      (tok.npc_stats?.__roster_actor_id
-        ? this.rosterActors().find(
-            (a) => a.id === tok.npc_stats.__roster_actor_id
-          )
-        : null) ??
-      (tok.character_id
-        ? this.rosterActors().find((a) => a.character_id === tok.character_id)
-        : null) ??
-      null;
-    const charId = tok.character_id ?? linkedActor?.character_id ?? null;
+    const linkedActor = this.resolveRosterActorForToken(tok);
+    const sheet = this.resolveCharacterForToken(tok);
+    const charId =
+      sheet?.id ?? tok.character_id ?? linkedActor?.character_id ?? null;
     if (linkedActor) {
       this.selectedRosterActorId.set(linkedActor.id);
     }
     if (charId) {
       this.selectedCharacterId.set(charId);
-      const localChar = this.characterByIdMap().get(charId);
-      if (localChar) {
-        this.characterStore.upsertRealtimeCharacter(localChar);
-      } else {
-        void this.characterStore.ensureCharacterLoaded(charId);
+      if (!sheet && tok.character_id && !this.characterByIdMap().has(tok.character_id)) {
+        void this.characterStore.ensureCharacterLoaded(tok.character_id);
       }
     }
-    this.openSheetTarget.set({
+    this.upsertOpenSheetWindow({
       rosterActorId: linkedActor?.id ?? null,
       characterId: charId,
       tokenId: tok.id,
     });
   }
 
-  closeActorSheet(): void {
+  closeActorSheet(key?: string): void {
+    if (key) {
+      this.closeSheetWindow(key);
+      return;
+    }
+    for (const entry of this.openSheetWindows()) {
+      releaseFloatingWindow(entry.windowId);
+    }
+    this.openSheetWindows.set([]);
     this.openSheetTarget.set(null);
   }
 
-  canEditOpenSheet(): boolean {
+  canEditTarget(target: VttOpenSheetTarget | null): boolean {
+    if (!target) return false;
     if (this.isGm()) return true;
     const uid = this.authStore.user()?.id;
     if (!uid) return false;
-    const actor = this.openSheetRosterActor();
+    const actor = this.resolveTargetRosterActor(target);
     if (actor) {
       return this.getActorAssignedUserId(actor) === uid;
     }
-    const tok = this.openSheetToken();
+    const tok = this.resolveTargetToken(target);
     if (tok) {
       return this.getTokenAssignedUserId(tok) === uid;
     }
-    const char = this.openSheetCharacter();
+    const char = this.resolveTargetCharacter(target);
     if (char) {
       return this.canEditCharacterInVtt(char.id);
     }
     return false;
+  }
+
+  canEditOpenSheet(): boolean {
+    return this.canEditTarget(this.openSheetTarget());
+  }
+
+  canEditOpenTokenizer(): boolean {
+    return this.canEditTarget(this.openTokenizerTarget());
+  }
+
+  openTokenizerStudio(target: VttOpenSheetTarget): void {
+    if (!this.canEditTarget(target)) return;
+    const actor = this.resolveTargetRosterActor(target);
+    const tok = this.resolveTargetToken(target);
+    const sheet =
+      this.resolveRosterActorCharacterSheet(actor) ??
+      this.resolveCharacterForToken(tok);
+    const charId =
+      target.characterId ??
+      sheet?.id ??
+      actor?.character_id ??
+      tok?.character_id ??
+      null;
+    this.openTokenizerTarget.set({
+      rosterActorId: target.rosterActorId ?? actor?.id ?? null,
+      characterId: charId,
+      tokenId: target.tokenId ?? null,
+    });
+    this.openTokenizerFocusTick.update((n) => n + 1);
+  }
+
+  openTokenizerFromOpenSheet(): void {
+    const target = this.openSheetTarget();
+    if (!target) return;
+    this.openTokenizerStudio(target);
+  }
+
+  openTokenizerForActor(actorId: string): void {
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!actor || (!this.isGm() && !this.canDeployRosterActor(actor))) return;
+    const sheet = this.resolveRosterActorCharacterSheet(actor);
+    this.openTokenizerStudio({
+      rosterActorId: actor.id,
+      characterId: sheet?.id ?? actor.character_id ?? null,
+      tokenId: null,
+    });
+  }
+
+  openTokenizerForToken(tokenId: string): void {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || (!this.isGm() && !this.canControlToken(tok))) return;
+    const linkedActor = this.resolveRosterActorForToken(tok);
+    const sheet = this.resolveCharacterForToken(tok);
+    this.openTokenizerStudio({
+      rosterActorId: linkedActor?.id ?? null,
+      characterId:
+        sheet?.id ?? tok.character_id ?? linkedActor?.character_id ?? null,
+      tokenId: tok.id,
+    });
+  }
+
+  closeTokenizerStudio(): void {
+    this.openTokenizerTarget.set(null);
   }
 
   async createVttActorQuick(input: {
@@ -3672,68 +4567,69 @@ export class VttStore {
     await this.compendiumStore.ensureLoaded();
 
     if (resolvedKind === 'character') {
-      const createdChar = await this.characterStore.createCharacter(
-        {
-          name: trimmedName,
-          level: 1,
-          attributes: {
-            Brawn: 0,
-            Agility: 0,
-            Technique: 0,
-            Iron: 0,
-            Cunning: 0,
-          },
-          combat_skills: {
-            Strike: 0,
-            Shoot: 0,
-            Parry: 0,
-            Dodge: 0,
-            Block: 0,
-          },
-          field_skills: {
-            Athletics: 0,
-            Menace: 0,
-            Stealth: 0,
-            Tinkering: 0,
-            Medicine: 0,
-            Survival: 0,
-            Resolve: 0,
-            Perception: 0,
-            Sway: 0,
-            Lore: 0,
-          },
-          equipped_armor: 'None',
-          equipped_shield: 'None',
-          weapon_slot_1_id: null,
-          weapon_slot_2_id: null,
-          active_weapon_slot: 1,
-          unlocked_perk_ids: [],
-          inventory: [],
-          notes: '',
+      const detachedCharId = makeDetachedVttCharacterId();
+      const vttChar: CharacterModel = {
+        id: detachedCharId,
+        owner_id: uid,
+        name: trimmedName,
+        level: 1,
+        attributes: {
+          Brawn: 0,
+          Agility: 0,
+          Technique: 0,
+          Iron: 0,
+          Cunning: 0,
         },
-        { silent: true }
-      );
-
-      if (!createdChar) {
-        this.notifications.error(
-          'Unable to Create Player Character',
-          this.characterStore.error() ?? 'Could not create character sheet.'
-        );
-        return null;
-      }
-
-      this.allCharacters.update((curr) =>
-        curr.some((c) => c.id === createdChar.id)
-          ? curr.map((c) => (c.id === createdChar.id ? createdChar : c))
-          : [...curr, createdChar]
-      );
+        combat_skills: {
+          Strike: 0,
+          Shoot: 0,
+          Parry: 0,
+          Dodge: 0,
+          Block: 0,
+        },
+        field_skills: {
+          Athletics: 0,
+          Menace: 0,
+          Stealth: 0,
+          Tinkering: 0,
+          Medicine: 0,
+          Survival: 0,
+          Resolve: 0,
+          Perception: 0,
+          Sway: 0,
+          Lore: 0,
+        },
+        current_hp: 10,
+        current_sp: 5,
+        current_ap: 4,
+        equipped_armor: 'None',
+        equipped_shield: 'None',
+        weapon_slot_1_id: null,
+        weapon_slot_2_id: null,
+        active_weapon_slot: 1,
+        unlocked_perk_ids: [],
+        active_cooldowns: {},
+        inventory: [],
+        notes: '',
+        portrait_url: null,
+        token_image_url: null,
+        token_appearance: normalizeTokenAppearance(undefined),
+      };
 
       const draft = buildActorTemplateFromCharacter(
-        createdChar,
+        vttChar,
         this.compendiumStore.allWeapons(),
         this.compendiumStore.allPerkNodes(),
-        input.folder_id ?? null
+        input.folder_id ?? null,
+        this.getArmorsForStats()
       );
+      draft.source_character_id = null;
+      if (draft.npc_stats) {
+        draft.npc_stats.__source_character_id = null;
+        if (draft.npc_stats.__character_sheet) {
+          draft.npc_stats.__character_sheet.id = detachedCharId;
+        }
+      }
       draft.notes = '';
 
       const actor = await this.createRosterActorFromScratch(draft, {
@@ -3743,7 +4639,7 @@ export class VttStore {
       if (!actor) {
         this.notifications.error(
           'Unable to Add Player Character',
-          'Character was created, but adding to campaign Actors failed.'
+          'Could not add Player Character to campaign Actors.'
         );
         return null;
       }
@@ -3819,81 +4715,138 @@ export class VttStore {
   ): Promise<CharacterModel | null> {
     const actor = this.rosterActors().find((a) => a.id === actorId);
     if (!actor || !this.canManageRosterActor(actor)) return null;
-    if (actor.character_id) {
-      return this.characterByIdMap().get(actor.character_id) ?? null;
+    const existingSheet = this.resolveRosterActorCharacterSheet(actor);
+    if (existingSheet) {
+      return existingSheet;
     }
 
     await this.compendiumStore.ensureLoaded();
+    const uid = this.authStore.user()?.id ?? '';
     const seededInventory = normalizeInventoryItems(
       actor.npc_stats?.__inventory
     );
-    const createdChar = await this.characterStore.createCharacter(
-      {
-        name: actor.name,
-        level: 1,
-        attributes: {
-          Brawn: 0,
-          Agility: 0,
-          Technique: 0,
-          Iron: 0,
-          Cunning: 0,
-        },
-        combat_skills: {
-          Strike: 0,
-          Shoot: 0,
-          Parry: 0,
-          Dodge: 0,
-          Block: 0,
-        },
-        field_skills: {
-          Athletics: 0,
-          Menace: 0,
-          Stealth: 0,
-          Tinkering: 0,
-          Medicine: 0,
-          Survival: 0,
-          Resolve: 0,
-          Perception: 0,
-          Sway: 0,
-          Lore: 0,
-        },
-        equipped_armor: 'None',
-        equipped_shield: 'None',
-        weapon_slot_1_id: null,
-        weapon_slot_2_id: null,
-        active_weapon_slot: 1,
-        unlocked_perk_ids: [],
-        inventory: seededInventory,
-        notes: actor.notes ?? '',
-        portrait_url: resolveEntityPortraitUrl(actor),
-        token_image_url: resolveEntityTokenImageUrl(actor),
-        token_appearance: resolveEntityTokenAppearance(actor),
+    const portraitUrl = resolveEntityPortraitUrl(actor);
+    const tokenImageUrl = resolveEntityTokenImageUrl(actor);
+    const tokenAppearance = resolveEntityTokenAppearance(actor);
+    const baseChar: CharacterModel = {
+      id: makeDetachedVttCharacterId(),
+      owner_id: uid,
+      name: actor.name,
+      level: 1,
+      attributes: {
+        Brawn: 0,
+        Agility: 0,
+        Technique: 0,
+        Iron: 0,
+        Cunning: 0,
       },
-      { silent: true }
+      combat_skills: {
+        Strike: 0,
+        Shoot: 0,
+        Parry: 0,
+        Dodge: 0,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 0,
+        Menace: 0,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 0,
+        Resolve: 0,
+        Perception: 0,
+        Sway: 0,
+        Lore: 0,
+      },
+      current_hp: 10,
+      current_sp: 5,
+      current_ap: 4,
+      equipped_armor: 'None',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      active_cooldowns: {},
+      inventory: seededInventory,
+      notes: actor.notes ?? '',
+      portrait_url: portraitUrl,
+      token_image_url: tokenImageUrl,
+      token_appearance: tokenAppearance,
+    };
+    const stats = computeDerivedStats(
+      baseChar,
+      this.compendiumStore.allWeapons(),
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
     );
-    if (!createdChar) return null;
+    const createdChar: CharacterModel = cloneDetachedVttCharacterSheet(
+      {
+        ...baseChar,
+        current_hp: stats.maxHp,
+        current_sp: stats.maxSp,
+      },
+      baseChar.id
+    );
 
-    this.allCharacters.update((curr) =>
-      curr.some((c) => c.id === createdChar.id)
-        ? curr
-        : [...curr, createdChar]
-    );
     await this.updateRosterActor(actor.id, {
-      character_id: createdChar.id,
+      character_id: null,
       actor_kind: 'character',
       is_unique: true,
+      max_hp: stats.maxHp,
+      max_sp: stats.maxSp,
+      armor_dr: stats.armorDr,
+      shield_block: stats.shieldBlockTotal,
+      move_feet: stats.moveFeet,
+      npc_stats: enrichNpcStatsWithVisuals(
+        {
+          ...actor.npc_stats,
+          __source_character_id: resolveRosterActorSourceCharacterId(actor),
+          __character_sheet: createdChar,
+        },
+        portraitUrl,
+        tokenImageUrl,
+        tokenAppearance
+      ),
     });
-    const linkedTokens = this.tokens().filter(
-      (t) => t.npc_stats?.__roster_actor_id === actor.id
+    const tick = ++this.nextSheetFocusTick;
+    this.openSheetWindows.update((curr) =>
+      curr.map((e) =>
+        e.target.rosterActorId === actor.id
+          ? {
+              key: `actor:${actor.id}`,
+              target: {
+                rosterActorId: actor.id,
+                characterId: createdChar.id,
+                tokenId: e.target.tokenId,
+              },
+              focusTick: tick,
+              windowId: e.windowId,
+            }
+          : e
+      )
     );
-    for (const tok of linkedTokens) {
-      await this.patchToken(tok.id, { character_id: createdChar.id });
+    if (
+      !this.openSheetWindows().some(
+        (e) => e.target.rosterActorId === actor.id
+      )
+    ) {
+      this.upsertOpenSheetWindow({
+        rosterActorId: actor.id,
+        characterId: createdChar.id,
+        tokenId: this.openSheetTarget()?.tokenId ?? null,
+      });
+    } else {
+      this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
     }
-    this.openSheetTarget.set({
-      rosterActorId: actor.id,
-      characterId: createdChar.id,
-      tokenId: this.openSheetTarget()?.tokenId ?? null,
-    });
+    if (this.openTokenizerTarget()?.rosterActorId === actor.id) {
+      this.openTokenizerTarget.set({
+        rosterActorId: actor.id,
+        characterId: createdChar.id,
+        tokenId: this.openTokenizerTarget()?.tokenId ?? null,
+      });
+    }
     return createdChar;
   }
 
@@ -3901,18 +4854,35 @@ export class VttStore {
     characterId: string,
     mutator: (char: CharacterModel) => CharacterModel
   ): Promise<void> {
-    const current =
-      this.characterByIdMap().get(characterId) ??
-      this.characterStore.getCharacterById(characterId);
-    if (!current) return;
+    if (!characterId || !this.canEditCharacterInVtt(characterId)) return;
 
-    if (!this.canEditCharacterInVtt(characterId)) return;
+    const linkedActors = this.findRosterActorsForCharacterId(characterId);
+    const currentFromActor =
+      linkedActors.length > 0
+        ? this.resolveRosterActorCharacterSheet(linkedActors[0])
+        : null;
+    const currentFromToken =
+      !currentFromActor
+        ? (this.tokens()
+            .map((t) => this.resolveCharacterForToken(t))
+            .find((c) => c?.id === characterId) ?? null)
+        : null;
+    const fallbackStore = this.characterStore.getCharacterById(characterId);
+    const current =
+      currentFromActor ??
+      currentFromToken ??
+      this.characterByIdMap().get(characterId) ??
+      (fallbackStore
+        ? cloneDetachedVttCharacterSheet(fallbackStore, characterId)
+        : null);
+    if (!current) return;
 
     const weapons = this.compendiumStore.allWeapons();
     const perkNodes = this.compendiumStore.allPerkNodes();
-    const oldDerived = computeDerivedStats(current, weapons, perkNodes);
-    const mutated = mutator(current);
-    const nextDerived = computeDerivedStats(mutated, weapons, perkNodes);
+    const armors = this.getArmorsForStats();
+    const oldDerived = computeDerivedStats(current, weapons, perkNodes, armors);
+    const mutated = mutator(cloneDetachedVttCharacterSheet(current, current.id));
+    const nextDerived = computeDerivedStats(mutated, weapons, perkNodes, armors);
 
     const hpGrowth =
       mutated.current_hp === current.current_hp
@@ -3937,52 +4907,48 @@ export class VttStore {
         ? normalizeTokenAppearance(mutated.token_appearance)
         : normalizeTokenAppearance(current.token_appearance);
 
-    const clamped: CharacterModel = {
-      ...mutated,
-      name: mutated.name.trim() || current.name,
-      current_hp: Math.max(
-        0,
-        Math.min(nextDerived.maxHp, mutated.current_hp + hpGrowth)
-      ),
-      current_sp: Math.max(
-        0,
-        Math.min(nextDerived.maxSp, mutated.current_sp + spGrowth)
-      ),
-      current_ap: Math.max(0, Math.min(8, mutated.current_ap ?? 4)),
-      inventory: normalizedInv,
-      notes: mutated.notes ?? current.notes ?? '',
-      portrait_url: normalizedPortrait,
-      token_image_url: normalizedTokenImg,
-      token_appearance: normalizedAppearance,
-    };
-
-    this.allCharacters.update((curr) =>
-      curr.some((c) => c.id === characterId)
-        ? curr.map((c) => (c.id === characterId ? clamped : c))
-        : [...curr, clamped]
+    const clamped: CharacterModel = cloneDetachedVttCharacterSheet(
+      {
+        ...mutated,
+        id: current.id,
+        name: mutated.name.trim() || current.name,
+        current_hp: Math.max(
+          0,
+          Math.min(nextDerived.maxHp, mutated.current_hp + hpGrowth)
+        ),
+        current_sp: Math.max(
+          0,
+          Math.min(nextDerived.maxSp, mutated.current_sp + spGrowth)
+        ),
+        current_ap: Math.max(0, Math.min(8, mutated.current_ap ?? 4)),
+        inventory: normalizedInv,
+        notes: mutated.notes ?? current.notes ?? '',
+        portrait_url: normalizedPortrait,
+        token_image_url: normalizedTokenImg,
+        token_appearance: normalizedAppearance,
+      },
+      current.id
     );
-    this.characterStore.upsertRealtimeCharacter(clamped);
-
-    const err = await this.characterService.updateCharacterRecord(
-      characterId,
-      clamped
-    );
-    if (err) {
-      this.notifications.error('Unable to Update Character', err);
-    }
 
     const reachFeet = nextDerived.activeWeapon
       ? Math.max(5, Math.round((nextDerived.activeWeapon.reach_tiles ?? 1) * 5))
       : 5;
-    const linkedActors = this.rosterActors().filter(
-      (a) => a.character_id === characterId
-    );
+
+    const patchedTokenIds = new Set<string>();
     for (const actor of linkedActors) {
+      const prevActorCharId = actor.character_id;
+      const actorSheetId =
+        this.resolveRosterActorCharacterSheet(actor)?.id ?? clamped.id;
+      const actorSheetCopy = cloneDetachedVttCharacterSheet(
+        clamped,
+        actorSheetId
+      );
       const nextIcon = nextDerived.activeWeapon
         ? resolveWeaponVisuals(nextDerived.activeWeapon).icon
         : actor.icon || 'greatsword';
       await this.updateRosterActor(actor.id, {
-        name: clamped.name,
+        character_id: null,
+        name: actorSheetCopy.name,
         icon: nextIcon,
         max_hp: nextDerived.maxHp,
         max_sp: nextDerived.maxSp,
@@ -3992,11 +4958,12 @@ export class VttStore {
         portrait_url: normalizedPortrait,
         token_image_url: normalizedTokenImg,
         token_appearance: normalizedAppearance,
-        notes: clamped.notes ?? actor.notes,
+        notes: actorSheetCopy.notes ?? actor.notes,
         npc_stats: enrichNpcStatsWithVisuals(
           {
             ...actor.npc_stats,
             weapon_name: nextDerived.activeWeapon?.name ?? 'Unarmed',
+            attack_ap: nextDerived.activeWeapon?.ap_cost ?? 1,
             attack_mod: nextDerived.attackRollMod,
             flat_damage: nextDerived.flatWeaponDamage,
             reach_feet: reachFeet,
@@ -4005,19 +4972,56 @@ export class VttStore {
             can_dodge: nextDerived.canDodge,
             enables_martial_parry: nextDerived.enablesMartialParry,
             __inventory: normalizedInv,
+            __source_character_id: resolveRosterActorSourceCharacterId(actor),
+            __character_sheet: actorSheetCopy,
           },
           normalizedPortrait,
           normalizedTokenImg,
           normalizedAppearance
         ),
       });
+
+      const actorTokens = this.tokens().filter(
+        (t) =>
+          t.npc_stats?.__roster_actor_id === actor.id ||
+          Boolean(prevActorCharId && t.character_id === prevActorCharId)
+      );
+      for (const tok of actorTokens) {
+        patchedTokenIds.add(tok.id);
+        await this.patchToken(tok.id, {
+          character_id: null,
+          name: actorSheetCopy.name,
+          max_hp: nextDerived.maxHp,
+          current_hp: actorSheetCopy.current_hp,
+          max_sp: nextDerived.maxSp,
+          current_sp: actorSheetCopy.current_sp,
+          current_ap: actorSheetCopy.current_ap,
+          armor_dr: nextDerived.armorDr,
+          shield_block: nextDerived.shieldBlockTotal,
+          move_feet: nextDerived.moveFeet,
+          portrait_url: normalizedPortrait,
+          token_image_url: normalizedTokenImg,
+          token_appearance: normalizedAppearance,
+          shield_raised: Boolean(
+            actorSheetCopy.active_cooldowns?.['__shield_raised']
+          ),
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __roster_actor_id: actor.id,
+          },
+        });
+      }
     }
 
-    const deployedTokens = this.tokens().filter(
-      (t) => t.character_id === characterId
+    const standaloneTokens = this.tokens().filter(
+      (t) =>
+        !patchedTokenIds.has(t.id) &&
+        (t.character_id === characterId ||
+          this.resolveCharacterForToken(t)?.id === characterId)
     );
-    for (const tok of deployedTokens) {
+    for (const tok of standaloneTokens) {
       await this.patchToken(tok.id, {
+        character_id: null,
         name: clamped.name,
         max_hp: nextDerived.maxHp,
         current_hp: clamped.current_hp,
@@ -4031,6 +5035,10 @@ export class VttStore {
         token_image_url: normalizedTokenImg,
         token_appearance: normalizedAppearance,
         shield_raised: Boolean(clamped.active_cooldowns?.['__shield_raised']),
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __character_sheet: clamped,
+        },
       });
     }
   }
@@ -4235,7 +5243,7 @@ export class VttStore {
 
     const saved = await this.collectionsStore.createActorFromScratch({
       folder_id: null,
-      source_character_id: existing.character_id,
+      source_character_id: resolveRosterActorSourceCharacterId(existing),
       actor_kind: existing.actor_kind,
       is_unique: existing.is_unique,
       name: existing.name,
@@ -4277,13 +5285,7 @@ export class VttStore {
     const actor = this.rosterActors().find((a) => a.id === actorId);
     if (!sc || !actor || !this.canDeployRosterActor(actor)) return null;
 
-    const linkedChar = actor.character_id
-      ? (this.allCharacters().find((c) => c.id === actor.character_id) ??
-        this.characterStore
-          .characters()
-          .find((c) => c.id === actor.character_id) ??
-        null)
-      : null;
+    const linkedChar = this.resolveRosterActorCharacterSheet(actor);
 
     let maxHp = actor.max_hp;
     let currentHp = actor.max_hp;
@@ -4299,7 +5301,8 @@ export class VttStore {
       const stats = computeDerivedStats(
         linkedChar,
         this.compendiumStore.allWeapons(),
-        this.compendiumStore.allPerkNodes()
+        this.compendiumStore.allPerkNodes(),
+        this.getArmorsForStats()
       );
       maxHp = stats.maxHp;
       currentHp = Math.min(linkedChar.current_hp, stats.maxHp);
@@ -4331,10 +5334,12 @@ export class VttStore {
     const portraitUrl = resolveEntityPortraitUrl(actor, linkedChar);
     const tokenImageUrl = resolveEntityTokenImageUrl(actor, linkedChar);
     const tokenAppearance = resolveEntityTokenAppearance(actor, linkedChar);
+    const { __character_sheet: _omitSheet, ...actorStatsForToken } =
+      actor.npc_stats ?? {};
 
     const res = await this.vttService.insertToken({
       encounter_id: sc.id,
-      character_id: actor.character_id,
+      character_id: null,
       owner_id: assignedUserId,
       name: finalName,
       faction: actor.faction,
@@ -4372,7 +5377,7 @@ export class VttStore {
       token_appearance: tokenAppearance,
       npc_stats: enrichNpcStatsWithVisuals(
         {
-          ...actor.npc_stats,
+          ...actorStatsForToken,
           __darkvision_feet: resolveActorDarkvisionFeet(
             actor.darkvision_feet,
             actor.npc_stats
@@ -4589,24 +5594,88 @@ export class VttStore {
       return;
     }
 
+    const tokenSheet = this.resolveCharacterForToken(existing);
     if (
-      existing.character_id &&
+      tokenSheet &&
       (patch.current_hp !== undefined ||
         patch.current_sp !== undefined ||
         patch.current_ap !== undefined ||
         patch.shield_raised !== undefined)
     ) {
-      await this.syncTokenVitalsToCharacter(existing.character_id, patch);
+      await this.syncTokenVitalsToCharacter(existing, tokenSheet, patch);
+    }
+  }
+
+  private async persistDetachedSheetOnActorForToken(
+    token: VttTokenModel,
+    updatedSheet: CharacterModel,
+    extraActorPatch?: Partial<VttRosterActorModel>
+  ): Promise<void> {
+    const camp = this.campaign();
+    const linkedActor = this.resolveRosterActorForToken(token);
+    if (linkedActor && camp && this.canManageRosterActor(linkedActor)) {
+      const actorSheetId =
+        this.resolveRosterActorCharacterSheet(linkedActor)?.id ??
+        updatedSheet.id;
+      const sheetCopy = cloneDetachedVttCharacterSheet(
+        updatedSheet,
+        actorSheetId
+      );
+      const actorPatch: Partial<VttRosterActorModel> = {
+        ...extraActorPatch,
+        character_id: null,
+        npc_stats: {
+          ...(linkedActor.npc_stats ?? {}),
+          ...(extraActorPatch?.npc_stats ?? {}),
+          __source_character_id: resolveRosterActorSourceCharacterId(linkedActor),
+          __character_sheet: sheetCopy,
+        },
+      };
+      this.rosterActors.update((curr) =>
+        curr.map((a) =>
+          a.id === linkedActor.id ? { ...a, ...actorPatch } : a
+        )
+      );
+      await this.vttService.updateRosterActor(
+        camp.id,
+        linkedActor.id,
+        actorPatch
+      );
+      return;
+    }
+
+    if (token.npc_stats?.__character_sheet || token.character_id) {
+      const sheetCopy = cloneDetachedVttCharacterSheet(
+        updatedSheet,
+        updatedSheet.id
+      );
+      const tokStatsPatch: Partial<VttTokenModel> = {
+        character_id: null,
+        npc_stats: {
+          ...(token.npc_stats ?? {}),
+          __character_sheet: sheetCopy,
+        },
+      };
+      this.tokens.update((curr) =>
+        curr.map((t) => (t.id === token.id ? { ...t, ...tokStatsPatch } : t))
+      );
+      await this.vttService.updateToken(
+        token.id,
+        tokStatsPatch,
+        this.needsMigration(),
+        token
+      );
     }
   }
 
   private async syncTokenVitalsToCharacter(
-    characterId: string,
+    token: VttTokenModel,
+    char: CharacterModel,
     patch: Partial<VttTokenModel>
   ): Promise<void> {
-    const char = this.characterByIdMap().get(characterId);
-    if (!char) return;
-    if (!this.canEditCharacterInVtt(characterId)) return;
+    if (!this.canEditCharacterInVtt(char.id) && !this.canControlToken(token)) {
+      return;
+    }
 
     const prevShieldRaised = Boolean(
       char.active_cooldowns?.['__shield_raised']
@@ -4640,19 +5709,18 @@ export class VttStore {
       }
     }
 
-    const updated: CharacterModel = {
-      ...char,
-      current_hp: nextHp,
-      current_sp: nextSp,
-      current_ap: nextAp,
-      active_cooldowns: nextCooldowns,
-    };
-
-    this.allCharacters.update((list) =>
-      list.map((c) => (c.id === characterId ? updated : c))
+    const updated: CharacterModel = cloneDetachedVttCharacterSheet(
+      {
+        ...char,
+        current_hp: nextHp,
+        current_sp: nextSp,
+        current_ap: nextAp,
+        active_cooldowns: nextCooldowns,
+      },
+      char.id
     );
-    this.characterStore.upsertRealtimeCharacter(updated);
-    await this.characterService.updateCharacterRecord(characterId, updated);
+
+    await this.persistDetachedSheetOnActorForToken(token, updated);
   }
 
   async moveTokenToHex(
@@ -5640,13 +6708,24 @@ export class VttStore {
     if (this.pendingTargetAction()?.attackerTokenId === tokenId) {
       this.pendingTargetAction.set(null);
     }
-    const target = this.openSheetTarget();
+    this.openSheetWindows.update((curr) =>
+      curr.filter(
+        (e) =>
+          !(
+            e.target.tokenId === tokenId &&
+            !e.target.rosterActorId &&
+            !e.target.characterId
+          )
+      )
+    );
+    this.syncPrimaryOpenSheetTarget(this.openSheetWindows());
+    const tokTarget = this.openTokenizerTarget();
     if (
-      target?.tokenId === tokenId &&
-      !target.rosterActorId &&
-      !target.characterId
+      tokTarget?.tokenId === tokenId &&
+      !tokTarget.rosterActorId &&
+      !tokTarget.characterId
     ) {
-      this.openSheetTarget.set(null);
+      this.openTokenizerTarget.set(null);
     }
     const err = await this.vttService.deleteToken(tokenId);
     if (err) {
@@ -5677,16 +6756,15 @@ export class VttStore {
   async performStanceRecovery(token: VttTokenModel): Promise<void> {
     if (!this.canControlToken(token) || token.current_ap < 1) return;
     let recoveryAmount = 3;
-    if (token.character_id) {
-      const ch = this.characterByIdMap().get(token.character_id);
-      if (ch) {
-        const stats = computeDerivedStats(
-          ch,
-          this.compendiumStore.allWeapons(),
-          this.compendiumStore.allPerkNodes()
-        );
-        recoveryAmount = stats.stanceRecoverySp;
-      }
+    const ch = this.resolveCharacterForToken(token);
+    if (ch) {
+      const stats = computeDerivedStats(
+        ch,
+        this.compendiumStore.allWeapons(),
+        this.compendiumStore.allPerkNodes(),
+        this.getArmorsForStats()
+      );
+      recoveryAmount = stats.stanceRecoverySp;
     }
 
     const nextSp = Math.min(token.max_sp, token.current_sp + recoveryAmount);
@@ -5741,29 +6819,47 @@ export class VttStore {
   }
 
   async switchCharacterWeaponSlotInVtt(token: VttTokenModel): Promise<void> {
-    if (!token.character_id || token.current_ap < 1) return;
-    const ch = this.characterByIdMap().get(token.character_id);
+    if (token.current_ap < 1) return;
+    const ch = this.resolveCharacterForToken(token);
     if (!ch) return;
 
     const nextSlot: 1 | 2 = ch.active_weapon_slot === 1 ? 2 : 1;
-    const updatedChar: CharacterModel = {
-      ...ch,
-      active_weapon_slot: nextSlot,
-      current_ap: Math.max(0, token.current_ap - 1),
-    };
+    const updatedChar: CharacterModel = cloneDetachedVttCharacterSheet(
+      {
+        ...ch,
+        active_weapon_slot: nextSlot,
+        current_ap: Math.max(0, token.current_ap - 1),
+      },
+      ch.id
+    );
     const nextStats = computeDerivedStats(
       updatedChar,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.getArmorsForStats()
     );
     const vis = nextStats.activeWeapon
       ? resolveWeaponVisuals(nextStats.activeWeapon)
       : { icon: token.icon ?? 'greatsword' };
+    const reachFeet = nextStats.activeWeapon
+      ? Math.max(5, Math.round((nextStats.activeWeapon.reach_tiles ?? 1) * 5))
+      : 5;
 
-    this.allCharacters.update((list) =>
-      list.map((c) => (c.id === ch.id ? updatedChar : c))
-    );
-    await this.characterService.updateCharacterRecord(ch.id, updatedChar);
+    await this.persistDetachedSheetOnActorForToken(token, updatedChar, {
+      icon: vis.icon,
+      shield_block: nextStats.shieldBlockTotal,
+      npc_stats: {
+        weapon_name: nextStats.activeWeapon?.name ?? 'Unarmed',
+        attack_ap: nextStats.activeWeapon?.ap_cost ?? 1,
+        attack_mod: nextStats.attackRollMod,
+        flat_damage: nextStats.flatWeaponDamage,
+        reach_feet: reachFeet,
+        parry_mod: nextStats.parryMod,
+        dodge_mod: nextStats.dodgeMod,
+        can_dodge: nextStats.canDodge,
+        enables_martial_parry: nextStats.enablesMartialParry,
+      },
+    });
     await this.patchToken(token.id, {
       current_ap: Math.max(0, token.current_ap - 1),
       shield_block: nextStats.shieldBlockTotal,
@@ -5782,9 +6878,8 @@ export class VttStore {
     weapon?: WeaponModel | null,
     stats?: DerivedCharacterStats | null
   ): void {
-    if (weapon && stats && token.character_id) {
-      const ch = this.characterByIdMap().get(token.character_id);
-      if (!ch) return;
+    const ch = this.resolveCharacterForToken(token);
+    if (weapon && stats && ch) {
       const reachFeet = Math.max(
         (weapon.reach_tiles ?? 1) * 5,
         (weapon.thrown_range_tiles ?? 0) * 5
@@ -5901,6 +6996,78 @@ export class VttStore {
     });
   }
 
+  getNpcStandaloneNodes(
+    entity: { npc_stats?: VttNpcStats | null } | null | undefined
+  ): PerkNodeModel[] {
+    const rawIds = entity?.npc_stats?.__standalone_perk_ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) return [];
+    const allNodes =
+      typeof this.compendiumStore.allPerkNodes === 'function'
+        ? this.compendiumStore.allPerkNodes()
+        : [];
+    if (allNodes.length === 0) return [];
+    const byId = new Map<string, PerkNodeModel>();
+    for (const node of allNodes) {
+      byId.set(node.id, node);
+    }
+    const resolved: PerkNodeModel[] = [];
+    for (const id of rawIds) {
+      if (typeof id !== 'string') continue;
+      const found = byId.get(id);
+      if (found) {
+        resolved.push(found);
+      }
+    }
+    return resolved;
+  }
+
+  getNpcStandaloneCombatArts(token: VttTokenModel): PerkNodeModel[] {
+    return this.getNpcStandaloneNodes(token).filter(
+      (node) => node.node_type === 'combat_art'
+    );
+  }
+
+  beginNpcStandaloneArtTargetSelection(
+    token: VttTokenModel,
+    node: PerkNodeModel
+  ): void {
+    const npc = token.npc_stats ?? {};
+    const hooks = node.rule_hooks ?? {};
+    const apCost = Math.max(1, Number(node.ap_cost ?? 1));
+    const bonusAtk = Number(hooks.bonus_attack_mod ?? 0);
+    const bonusDmg = Number(hooks.bonus_flat_damage ?? 0);
+    const combatTags: ActiveCombatTag[] =
+      node.combat_tag && node.combat_tag !== 'None' ? [node.combat_tag] : [];
+    const disallowedDefenses: ('Parry' | 'Dodge' | 'Block')[] = [];
+    if (combatTags.includes('Crushing')) disallowedDefenses.push('Parry');
+    if (combatTags.includes('Sweeping')) disallowedDefenses.push('Dodge');
+    if (combatTags.includes('Piercing')) disallowedDefenses.push('Block');
+    const inflictStatuses: Exclude<CombatStatusEffect, 'None'>[] =
+      hooks.inflict_status && hooks.inflict_status !== 'None'
+        ? [hooks.inflict_status]
+        : [];
+
+    this.pendingTargetAction.set({
+      attackerTokenId: token.id,
+      kind: 'combat_art',
+      actionName: node.name,
+      apCost,
+      cooldownRounds: Math.max(0, Number(node.cooldown_rounds ?? 0)),
+      perkId: node.id,
+      reachFeet: Number(npc.reach_feet ?? 5),
+      attackMod: Number(npc.attack_mod ?? 3) + bonusAtk,
+      flatDamage: Number(npc.flat_damage ?? 4) + bonusDmg,
+      combatTags,
+      disallowedDefenses,
+      bonusSpDamage: Number(hooks.bonus_sp_damage ?? 0),
+      ignoreArmorDr: Number(hooks.ignore_armor_dr ?? 0),
+      defendedSpChip: 0,
+      pushFeet: Math.round(Number(hooks.push_tiles ?? 0) * 5),
+      selfShiftFeet: Math.round(Number(hooks.self_shift_tiles ?? 0) * 5),
+      inflictStatuses,
+    });
+  }
+
   cancelTargetSelection(): void {
     this.pendingTargetAction.set(null);
   }
@@ -5955,26 +7122,22 @@ export class VttStore {
     const nextAp = Math.max(0, attacker.current_ap - action.apCost);
     await this.patchToken(attacker.id, { current_ap: nextAp });
 
-    if (
-      attacker.character_id &&
-      action.perkId &&
-      action.cooldownRounds > 0
-    ) {
-      const ch = this.characterByIdMap().get(attacker.character_id);
+    if (action.perkId && action.cooldownRounds > 0) {
+      const ch = this.resolveCharacterForToken(attacker);
       if (ch) {
         const nextCooldowns = {
           ...(ch.active_cooldowns ?? {}),
           [action.perkId]: action.cooldownRounds,
         };
-        const updated = {
-          ...ch,
-          current_ap: nextAp,
-          active_cooldowns: nextCooldowns,
-        };
-        this.allCharacters.update((list) =>
-          list.map((c) => (c.id === ch.id ? updated : c))
+        const updated = cloneDetachedVttCharacterSheet(
+          {
+            ...ch,
+            current_ap: nextAp,
+            active_cooldowns: nextCooldowns,
+          },
+          ch.id
         );
-        await this.characterService.updateCharacterRecord(ch.id, updated);
+        await this.persistDetachedSheetOnActorForToken(attacker, updated);
       }
     }
   }
@@ -6229,28 +7392,26 @@ export class VttStore {
       shield_raised: false,
     });
 
-    if (nextTok.character_id) {
-      const ch = this.characterByIdMap().get(nextTok.character_id);
-      if (ch) {
-        const nextCd: Record<string, number | string> = {};
-        for (const [k, v] of Object.entries(ch.active_cooldowns ?? {})) {
-          if (k.startsWith(UPGRADE_SLOT_PREFIX)) {
-            nextCd[k] = v;
-          } else if (k !== '__shield_raised') {
-            const rem = Number(v) - 1;
-            if (rem > 0) nextCd[k] = rem;
-          }
+    const ch = this.resolveCharacterForToken(nextTok);
+    if (ch) {
+      const nextCd: Record<string, number | string> = {};
+      for (const [k, v] of Object.entries(ch.active_cooldowns ?? {})) {
+        if (k.startsWith(UPGRADE_SLOT_PREFIX)) {
+          nextCd[k] = v;
+        } else if (k !== '__shield_raised') {
+          const rem = Number(v) - 1;
+          if (rem > 0) nextCd[k] = rem;
         }
-        const updated = {
+      }
+      const updated = cloneDetachedVttCharacterSheet(
+        {
           ...ch,
           current_ap: nextTok.max_ap,
           active_cooldowns: nextCd,
-        };
-        this.allCharacters.update((list) =>
-          list.map((c) => (c.id === ch.id ? updated : c))
-        );
-        await this.characterService.updateCharacterRecord(ch.id, updated);
-      }
+        },
+        ch.id
+      );
+      await this.persistDetachedSheetOnActorForToken(nextTok, updated);
     }
 
     await this.patchScene(sc.id, {

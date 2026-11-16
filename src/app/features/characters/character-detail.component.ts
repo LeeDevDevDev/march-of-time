@@ -24,29 +24,51 @@ import {
 } from '../../shared/token-avatar/tokenizer-editor.component';
 import {
   ARMOR_TIERS,
+  ARMOR_WEIGHT_OPTIONS,
   ATTRIBUTE_LIST,
   ActorInventoryItem,
+  ArmorModel,
+  ArmorTier,
+  ArmorWeightClass,
+  AttributeName,
   COMBAT_SKILL_LIST,
   CharacterModel,
+  CharacterWeaponFormulaSummary,
+  CombatSkillName,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
   DerivedCharacterStats,
   FIELD_SKILL_LIST,
+  ITEM_SUBCATEGORY_OPTIONS,
+  InventoryFilterTab,
+  InventoryItemCategory,
   PerkNodeModel,
   ResolvedCombatArt,
   SHIELD_TIERS,
+  ShieldTier,
   SkillTreeModel,
   UPGRADE_SLOT_PREFIX,
   WeaponModel,
+  buildArmorInventoryEntry,
+  buildCompendiumGearInventoryEntry,
+  buildWeaponInventoryEntry,
+  computeCharacterWeaponFormula,
   computeDerivedStats,
   formatRuleHookBadges,
   formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
+  getInventoryItemCategory,
   getUpgradeSlotKey,
   hasCustomTokenAppearance,
   isCombatArtUpgradeNode,
   isStandalonePerkNode,
   isWeaponHeavy,
   isWeaponTwoHanded,
+  mergeInventoryEntry,
   normalizeInventoryItems,
+  resolveArmorVisuals,
+  resolveCompendiumItemVisuals,
 } from './models/character.model';
 import { CharacterStore } from './store/character.store';
 
@@ -83,7 +105,10 @@ export class CharacterDetailComponent {
   readonly combatSkillList = COMBAT_SKILL_LIST;
   readonly fieldSkillList = FIELD_SKILL_LIST;
   readonly armorTiers = ARMOR_TIERS;
+  readonly armorWeightOptions = ARMOR_WEIGHT_OPTIONS;
   readonly shieldTiers = SHIELD_TIERS;
+  readonly shieldTierKeys: ShieldTier[] = ['None', 'Buckler', 'Heater', 'Tower'];
+  readonly itemSubcategoryOptions = ITEM_SUBCATEGORY_OPTIONS;
   readonly getCombatTagBadgeClass = getCombatTagBadgeClass;
   readonly getCombatTagCounterLabel = getCombatTagCounterLabel;
   readonly isCombatArtUpgradeNode = isCombatArtUpgradeNode;
@@ -93,6 +118,7 @@ export class CharacterDetailComponent {
   readonly tokenizerModalOpen = signal(false);
   readonly brokenPortraitUrl = signal<string | null>(null);
   readonly lastRoll = signal<SheetRollResult | null>(null);
+  readonly inventoryTab = signal<InventoryFilterTab>('all');
 
   readonly characterId = computed(() => this.route.snapshot.paramMap.get('id') ?? '');
 
@@ -100,13 +126,20 @@ export class CharacterDetailComponent {
     this.characterStore.getCharacterById(this.characterId())
   );
 
+  private resolveArmorsList(): ArmorModel[] {
+    return typeof this.characterStore.allArmors === 'function'
+      ? this.characterStore.allArmors()
+      : DEFAULT_COMPENDIUM_ARMORS;
+  }
+
   readonly derived = computed(() => {
     const char = this.character();
     if (!char) return null;
     return computeDerivedStats(
       char,
       this.characterStore.allWeapons(),
-      this.characterStore.allPerkNodes()
+      this.characterStore.allPerkNodes(),
+      this.resolveArmorsList()
     );
   });
 
@@ -432,7 +465,8 @@ export class CharacterDetailComponent {
       const nextStats = computeDerivedStats(
         nextChar,
         this.characterStore.allWeapons(),
-        this.characterStore.allPerkNodes()
+        this.characterStore.allPerkNodes(),
+        this.resolveArmorsList()
       );
       const nextCooldowns = { ...(c.active_cooldowns ?? {}) };
       if (!nextStats.usesRaiseShield) {
@@ -601,25 +635,550 @@ export class CharacterDetailComponent {
     return (uid !== null && char.owner_id === uid) || this.authStore.isAdmin();
   }
 
+  getActiveCompendiumArmors(): ArmorModel[] {
+    return typeof this.characterStore.armors === 'function'
+      ? this.characterStore.armors()
+      : DEFAULT_COMPENDIUM_ARMORS;
+  }
+
+  getActiveCompendiumItems(): CompendiumItemModel[] {
+    return typeof this.characterStore.items === 'function'
+      ? this.characterStore.items()
+      : DEFAULT_COMPENDIUM_ITEMS;
+  }
+
+  getWeaponFormula(
+    char: CharacterModel,
+    target: WeaponModel | ActorInventoryItem,
+    stats: DerivedCharacterStats
+  ): CharacterWeaponFormulaSummary {
+    return computeCharacterWeaponFormula(
+      char,
+      target,
+      stats.unlockedPerks,
+      this.characterStore.allWeapons()
+    );
+  }
+
   getInventoryItems(char: CharacterModel): ActorInventoryItem[] {
     return normalizeInventoryItems(char.inventory);
   }
 
-  async addInventoryItem(char: CharacterModel): Promise<void> {
-    if (!this.canEditCharacter(char)) return;
-    const newItem: ActorInventoryItem = {
-      id:
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: 'New Item',
-      quantity: 1,
-      description: '',
+  getInventoryWeapons(char: CharacterModel): ActorInventoryItem[] {
+    return this.getInventoryItems(char).filter(
+      (it) => getInventoryItemCategory(it) === 'weapon'
+    );
+  }
+
+  getInventoryArmors(char: CharacterModel): ActorInventoryItem[] {
+    return this.getInventoryItems(char)
+      .filter((it) => getInventoryItemCategory(it) === 'armor')
+      .sort((a, b) => Number(Boolean(b.equipped)) - Number(Boolean(a.equipped)));
+  }
+
+  getInventoryGearItems(char: CharacterModel): ActorInventoryItem[] {
+    return this.getInventoryItems(char).filter(
+      (it) => getInventoryItemCategory(it) === 'item'
+    );
+  }
+
+  hasStandardTierArmorEquipped(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): boolean {
+    return char.equipped_armor !== 'None' && !stats.equippedInventoryArmorId;
+  }
+
+  getWeaponsCategoryCount(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): number {
+    return (
+      (stats.weaponSlot1 ? 1 : 0) +
+      (stats.weaponSlot2 ? 1 : 0) +
+      this.getInventoryWeapons(char).length
+    );
+  }
+
+  getArmorsCategoryCount(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): number {
+    return (
+      (this.hasStandardTierArmorEquipped(char, stats) ? 1 : 0) +
+      this.getInventoryArmors(char).length
+    );
+  }
+
+  getItemsCategoryCount(char: CharacterModel): number {
+    return this.getInventoryGearItems(char).length;
+  }
+
+  getTotalCategorizedCount(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): number {
+    return (
+      this.getWeaponsCategoryCount(char, stats) +
+      this.getArmorsCategoryCount(char, stats) +
+      this.getItemsCategoryCount(char)
+    );
+  }
+
+  getArmorItemSp(item: ActorInventoryItem): number {
+    if (typeof item.armor_sp === 'number') return item.armor_sp;
+    const match = item.compendium_id
+      ? this.resolveArmorsList().find((a) => a.id === item.compendium_id)
+      : null;
+    if (match) return match.armor_sp;
+    const w = item.armor_weight ?? 'Light';
+    return ARMOR_TIERS[w].armorSp;
+  }
+
+  getArmorItemDr(item: ActorInventoryItem): number {
+    if (typeof item.armor_dr === 'number') return item.armor_dr;
+    const match = item.compendium_id
+      ? this.resolveArmorsList().find((a) => a.id === item.compendium_id)
+      : null;
+    if (match) return match.armor_dr;
+    const w = item.armor_weight ?? 'Light';
+    return ARMOR_TIERS[w].hpDr;
+  }
+
+  getArmorItemAllowsDodge(item: ActorInventoryItem): boolean {
+    if (typeof item.allows_dodge === 'boolean') return item.allows_dodge;
+    const match = item.compendium_id
+      ? this.resolveArmorsList().find((a) => a.id === item.compendium_id)
+      : null;
+    if (match) return match.allows_dodge;
+    const w = item.armor_weight ?? 'Light';
+    return ARMOR_TIERS[w].allowsDodge;
+  }
+
+  getArmorItemVisuals(item: ActorInventoryItem): ResolvedCompendiumVisuals {
+    const match = item.compendium_id
+      ? this.resolveArmorsList().find((a) => a.id === item.compendium_id)
+      : null;
+    if (match) return resolveArmorVisuals(match);
+    const w = item.armor_weight ?? 'Light';
+    return {
+      icon: w === 'Heavy' ? 'iron-helm' : 'breastplate',
+      color: w === 'Heavy' ? '#F26464' : w === 'Medium' ? '#F59E0B' : '#38B29A',
+      tintCustom: true,
+      isCustomUpload: false,
     };
+  }
+
+  getInventoryWeaponVisuals(
+    item: ActorInventoryItem
+  ): ResolvedCompendiumVisuals {
+    const match = item.compendium_id
+      ? this.characterStore.allWeapons().find((w) => w.id === item.compendium_id)
+      : null;
+    if (match) return resolveWeaponVisuals(match);
+    return {
+      icon: item.gov_skill === 'Shoot' ? 'bow' : 'greatsword',
+      color: '#FF8C5A',
+      tintCustom: true,
+      isCustomUpload: false,
+    };
+  }
+
+  getGearItemVisuals(item: ActorInventoryItem): ResolvedCompendiumVisuals {
+    const match = item.compendium_id
+      ? this.getActiveCompendiumItems().find((i) => i.id === item.compendium_id)
+      : null;
+    if (match) return resolveCompendiumItemVisuals(match);
+    return {
+      icon: 'pack',
+      color: '#38B29A',
+      tintCustom: true,
+      isCustomUpload: false,
+    };
+  }
+
+  getLoadoutArmorSelectValue(
+    char: CharacterModel,
+    stats: DerivedCharacterStats
+  ): string {
+    if (char.equipped_armor === 'None') return 'None';
+    if (stats.equippedInventoryArmorId) {
+      return `inv:${stats.equippedInventoryArmorId}`;
+    }
+    return `tier:${char.equipped_armor}`;
+  }
+
+  async selectLoadoutArmorChoice(
+    char: CharacterModel,
+    choice: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    if (!choice || choice === 'None') {
+      await this.unequipCharacterArmor(char);
+      return;
+    }
+    if (choice.startsWith('tier:')) {
+      const tier = choice.slice(5) as ArmorTier;
+      await this.characterStore.updateCharacter(char.id, (c) => {
+        const oldStats = computeDerivedStats(
+          c,
+          this.characterStore.allWeapons(),
+          this.characterStore.allPerkNodes(),
+          this.resolveArmorsList()
+        );
+        const nextInv = normalizeInventoryItems(c.inventory).map((it) =>
+          getInventoryItemCategory(it) === 'armor'
+            ? { ...it, equipped: false }
+            : it
+        );
+        const draft = { ...c, equipped_armor: tier, inventory: nextInv };
+        const nextStats = computeDerivedStats(
+          draft,
+          this.characterStore.allWeapons(),
+          this.characterStore.allPerkNodes(),
+          this.resolveArmorsList()
+        );
+        const spGain = Math.max(0, nextStats.maxSp - oldStats.maxSp);
+        return {
+          ...draft,
+          current_sp: Math.min(nextStats.maxSp, c.current_sp + spGain),
+        };
+      });
+      return;
+    }
+    if (choice.startsWith('inv:')) {
+      await this.equipInventoryArmor(char, choice.slice(4));
+      return;
+    }
+    if (choice.startsWith('comp:')) {
+      const compId = choice.slice(5);
+      const armor = this.getActiveCompendiumArmors().find(
+        (a) => a.id === compId
+      );
+      if (!armor) return;
+      await this.characterStore.updateCharacter(char.id, (c) => {
+        const oldStats = computeDerivedStats(
+          c,
+          this.characterStore.allWeapons(),
+          this.characterStore.allPerkNodes(),
+          this.resolveArmorsList()
+        );
+        const list = normalizeInventoryItems(c.inventory);
+        const existingIdx = list.findIndex(
+          (it) =>
+            getInventoryItemCategory(it) === 'armor' &&
+            it.compendium_id === armor.id
+        );
+        const nextInv =
+          existingIdx >= 0
+            ? list.map((it, idx) =>
+                getInventoryItemCategory(it) === 'armor'
+                  ? { ...it, equipped: idx === existingIdx }
+                  : it
+              )
+            : [
+                ...list.map((it) =>
+                  getInventoryItemCategory(it) === 'armor'
+                    ? { ...it, equipped: false }
+                    : it
+                ),
+                buildArmorInventoryEntry(armor, true),
+              ];
+        const draft: CharacterModel = {
+          ...c,
+          equipped_armor: armor.weight_class,
+          inventory: nextInv,
+        };
+        const nextStats = computeDerivedStats(
+          draft,
+          this.characterStore.allWeapons(),
+          this.characterStore.allPerkNodes(),
+          this.resolveArmorsList()
+        );
+        const spGain = Math.max(0, nextStats.maxSp - oldStats.maxSp);
+        return {
+          ...draft,
+          current_sp: Math.min(nextStats.maxSp, c.current_sp + spGain),
+        };
+      });
+    }
+  }
+
+  async changeCharacterShield(
+    char: CharacterModel,
+    shield: ShieldTier
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      equipped_shield: shield,
+    }));
+  }
+
+  async addFromCompendiumPicker(
+    char: CharacterModel,
+    encoded: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char) || !encoded) return;
+    const colonIdx = encoded.indexOf(':');
+    if (colonIdx < 0) return;
+    const kind = encoded.slice(0, colonIdx);
+    const id = encoded.slice(colonIdx + 1);
+
+    if (kind === 'weapon') {
+      const wep = this.characterStore.weapons().find((w) => w.id === id);
+      if (!wep) return;
+      const entry = buildWeaponInventoryEntry(wep, 1);
+      await this.characterStore.updateCharacter(char.id, (c) => ({
+        ...c,
+        inventory: mergeInventoryEntry(c.inventory ?? [], entry, false),
+      }));
+      return;
+    }
+
+    if (kind === 'armor') {
+      const armor = this.getActiveCompendiumArmors().find((a) => a.id === id);
+      if (!armor) return;
+      const entry = buildArmorInventoryEntry(armor, false);
+      await this.characterStore.updateCharacter(char.id, (c) => ({
+        ...c,
+        inventory: mergeInventoryEntry(c.inventory ?? [], entry, false),
+      }));
+      return;
+    }
+
+    if (kind === 'item') {
+      const compItem = this.getActiveCompendiumItems().find((i) => i.id === id);
+      if (!compItem) return;
+      const entry = buildCompendiumGearInventoryEntry(compItem);
+      await this.characterStore.updateCharacter(char.id, (c) => ({
+        ...c,
+        inventory: mergeInventoryEntry(
+          c.inventory ?? [],
+          entry,
+          compItem.stackable !== false
+        ),
+      }));
+    }
+  }
+
+  async addCustomInventoryEntry(
+    char: CharacterModel,
+    category: InventoryItemCategory
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    const newId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    let newItem: ActorInventoryItem;
+    if (category === 'weapon') {
+      newItem = {
+        id: newId,
+        category: 'weapon',
+        subcategory: 'Martial',
+        name: 'Custom Weapon',
+        quantity: 1,
+        description: '',
+        gov_attribute: 'Brawn',
+        gov_skill: 'Strike',
+        ap_cost: 1,
+        attack_bonus: 0,
+        base_damage: 4,
+        reach_feet: 5,
+        two_handed: false,
+      };
+    } else if (category === 'armor') {
+      newItem = {
+        id: newId,
+        category: 'armor',
+        subcategory: 'Light',
+        name: 'Custom Armor',
+        quantity: 1,
+        description: '',
+        equipped: false,
+        armor_weight: 'Light',
+        armor_sp: 2,
+        armor_dr: 1,
+        allows_dodge: true,
+      };
+    } else {
+      newItem = {
+        id: newId,
+        category: 'item',
+        subcategory: 'Adventuring Gear',
+        name: 'New Item',
+        quantity: 1,
+        description: '',
+      };
+    }
+
     await this.characterStore.updateCharacter(char.id, (c) => ({
       ...c,
       inventory: [...normalizeInventoryItems(c.inventory), newItem],
     }));
+  }
+
+  async addInventoryItem(char: CharacterModel): Promise<void> {
+    const tab = this.inventoryTab();
+    const category: InventoryItemCategory = tab === 'all' ? 'item' : tab;
+    await this.addCustomInventoryEntry(char, category);
+  }
+
+  async stowSlotWeaponToInventory(
+    char: CharacterModel,
+    slot: 1 | 2
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    const slotWeaponId =
+      slot === 1 ? char.weapon_slot_1_id : char.weapon_slot_2_id;
+    if (!slotWeaponId) return;
+    const wep = this.characterStore
+      .allWeapons()
+      .find((w) => w.id === slotWeaponId);
+    if (!wep) return;
+
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      weapon_slot_1_id: slot === 1 ? null : c.weapon_slot_1_id,
+      weapon_slot_2_id: slot === 2 ? null : c.weapon_slot_2_id,
+      inventory: [
+        ...normalizeInventoryItems(c.inventory),
+        buildWeaponInventoryEntry(wep, 1),
+      ],
+    }));
+  }
+
+  async equipInventoryWeaponToSlot(
+    char: CharacterModel,
+    item: ActorInventoryItem,
+    slot: 1 | 2
+  ): Promise<void> {
+    if (!this.canEditCharacter(char) || !item.compendium_id) return;
+    const wep = this.characterStore
+      .allWeapons()
+      .find((w) => w.id === item.compendium_id);
+    if (!wep) return;
+
+    await this.characterStore.updateCharacter(char.id, (c) => {
+      const prevSlotId =
+        slot === 1 ? c.weapon_slot_1_id : c.weapon_slot_2_id;
+      const prevWep = prevSlotId
+        ? (this.characterStore.allWeapons().find((w) => w.id === prevSlotId) ??
+          null)
+        : null;
+
+      let nextInv = normalizeInventoryItems(c.inventory)
+        .map((it) =>
+          it.id === item.id ? { ...it, quantity: it.quantity - 1 } : it
+        )
+        .filter((it) => it.id !== item.id || it.quantity > 0);
+
+      if (prevWep) {
+        nextInv = [...nextInv, buildWeaponInventoryEntry(prevWep, 1)];
+      }
+
+      const nextSlot1 = slot === 1 ? wep.id : c.weapon_slot_1_id;
+      const nextSlot2 = slot === 2 ? wep.id : c.weapon_slot_2_id;
+      const activeId =
+        c.active_weapon_slot === 1 ? nextSlot1 : nextSlot2;
+      const activeWep = activeId
+        ? (this.characterStore.allWeapons().find((w) => w.id === activeId) ??
+          null)
+        : null;
+
+      return {
+        ...c,
+        weapon_slot_1_id: nextSlot1,
+        weapon_slot_2_id: nextSlot2,
+        equipped_shield: isWeaponTwoHanded(activeWep)
+          ? 'None'
+          : c.equipped_shield,
+        inventory: nextInv,
+      };
+    });
+  }
+
+  async equipInventoryArmor(
+    char: CharacterModel,
+    itemId: string
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => {
+      const list = normalizeInventoryItems(c.inventory);
+      const target = list.find(
+        (it) => it.id === itemId && getInventoryItemCategory(it) === 'armor'
+      );
+      if (!target) return c;
+
+      const oldStats = computeDerivedStats(
+        c,
+        this.characterStore.allWeapons(),
+        this.characterStore.allPerkNodes(),
+        this.resolveArmorsList()
+      );
+      const weight: ArmorWeightClass = target.armor_weight ?? 'Light';
+      const nextInv = list.map((it) =>
+        getInventoryItemCategory(it) === 'armor'
+          ? { ...it, equipped: it.id === itemId }
+          : it
+      );
+      const draft: CharacterModel = {
+        ...c,
+        equipped_armor: weight,
+        inventory: nextInv,
+      };
+      const nextStats = computeDerivedStats(
+        draft,
+        this.characterStore.allWeapons(),
+        this.characterStore.allPerkNodes(),
+        this.resolveArmorsList()
+      );
+      const spGain = Math.max(0, nextStats.maxSp - oldStats.maxSp);
+      return {
+        ...draft,
+        current_sp: Math.min(nextStats.maxSp, c.current_sp + spGain),
+      };
+    });
+  }
+
+  async unequipCharacterArmor(char: CharacterModel): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => ({
+      ...c,
+      equipped_armor: 'None',
+      inventory: normalizeInventoryItems(c.inventory).map((it) =>
+        getInventoryItemCategory(it) === 'armor'
+          ? { ...it, equipped: false }
+          : it
+      ),
+    }));
+  }
+
+  async patchInventoryItem(
+    char: CharacterModel,
+    itemId: string,
+    patch: Partial<ActorInventoryItem>
+  ): Promise<void> {
+    if (!this.canEditCharacter(char)) return;
+    await this.characterStore.updateCharacter(char.id, (c) => {
+      const nextInv = normalizeInventoryItems(c.inventory).map((it) =>
+        it.id === itemId ? { ...it, ...patch } : it
+      );
+      const updatedTarget = nextInv.find((it) => it.id === itemId);
+      const syncArmorTier =
+        updatedTarget?.equipped &&
+        getInventoryItemCategory(updatedTarget) === 'armor' &&
+        updatedTarget.armor_weight
+          ? updatedTarget.armor_weight
+          : c.equipped_armor;
+      return {
+        ...c,
+        equipped_armor: syncArmorTier,
+        inventory: nextInv,
+      };
+    });
   }
 
   async updateInventoryItemField(
@@ -628,13 +1187,7 @@ export class CharacterDetailComponent {
     field: 'name' | 'description',
     value: string
   ): Promise<void> {
-    if (!this.canEditCharacter(char)) return;
-    await this.characterStore.updateCharacter(char.id, (c) => ({
-      ...c,
-      inventory: normalizeInventoryItems(c.inventory).map((item) =>
-        item.id === itemId ? { ...item, [field]: value } : item
-      ),
-    }));
+    await this.patchInventoryItem(char, itemId, { [field]: value });
   }
 
   async adjustInventoryItemQuantity(

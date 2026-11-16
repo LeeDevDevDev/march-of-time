@@ -124,6 +124,20 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'armors',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
+        path: 'items',
+        loadComponent: () =>
+          import('./features/content-manager/content-manager.component').then(
+            (m) => m.ContentManagerRouteSlotComponent
+          ),
+      },
+      {
         path: 'keywords',
         loadComponent: () =>
           import('./features/content-manager/content-manager.component').then(

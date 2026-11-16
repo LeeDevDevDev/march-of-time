@@ -14,6 +14,10 @@ import { UserAssetsService } from './core/assets/user-assets.service';
 import { UserAssetsStore } from './core/assets/user-assets.store';
 import { AuthService } from './core/auth/auth.service';
 import {
+  ArmorModel,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
   PerkNodeModel,
   WeaponModel,
   artUpgradeToHookRows,
@@ -62,10 +66,17 @@ import {
 import { ThemeStore } from './core/theme/theme.store';
 import { SupabaseService } from './core/supabase/supabase.service';
 import { AuthStore } from './core/auth/auth.store';
+import { CharacterDetailComponent } from './features/characters/character-detail.component';
 import {
   CharacterModel,
+  buildArmorInventoryEntry,
+  buildCompendiumGearInventoryEntry,
+  buildWeaponInventoryEntry,
+  computeCharacterWeaponFormula,
   computeDerivedStats,
+  getInventoryItemCategory,
   getUpgradeSlotKey,
+  mergeInventoryEntry,
 } from './features/characters/models/character.model';
 import { CharacterService } from './features/characters/services/character.service';
 import { CharacterStore } from './features/characters/store/character.store';
@@ -153,6 +164,7 @@ import {
   DEFAULT_VTT_SCENE_HEIGHT_PX,
   DEFAULT_VTT_SCENE_PADDING,
   DEFAULT_VTT_SCENE_WIDTH_PX,
+  CollectionActorModel,
   VTT_SCENE_LIGHTING_PRESETS,
   VttFolderModel,
   VttLogEntry,
@@ -163,11 +175,15 @@ import {
   VttWallSegment,
   computeEffectiveActorSightFeet,
   findMatchingSceneLightingPreset,
+  parseCharacterIdFromUrlOrInput,
+  parseCollectionActorIdFromUrlOrInput,
   resolveActorDarkvisionFeet,
+  resolveRosterActorSourceCharacterId,
 } from './features/vtt/models/vtt.model';
 import { VttActorSheetComponent } from './features/vtt/components/vtt-actor-sheet/vtt-actor-sheet.component';
 import { VttCanvasComponent } from './features/vtt/components/vtt-canvas/vtt-canvas.component';
 import { VttFloatingWindowComponent } from './features/vtt/components/vtt-floating-window/vtt-floating-window.component';
+import { VttTokenizerWindowComponent } from './features/vtt/components/vtt-tokenizer-window/vtt-tokenizer-window.component';
 import { VttService } from './features/vtt/services/vtt.service';
 import { VttStore } from './features/vtt/store/vtt.store';
 import { VttRoomComponent } from './features/vtt/vtt-room.component';
@@ -4203,6 +4219,8 @@ describe('App', () => {
     await compendiumService.fetchFullCompendium(false);
     expect(fromTables).toEqual([
       'v_active_weapons',
+      'v_active_armors',
+      'v_active_items',
       'v_active_skill_trees',
       'v_active_perk_nodes',
       'v_active_keywords',
@@ -4212,6 +4230,8 @@ describe('App', () => {
     await compendiumService.fetchFullCompendium(true);
     expect(fromTables).toEqual([
       'weapons',
+      'compendium_armors',
+      'compendium_items',
       'skill_trees',
       'perk_nodes',
       'compendium_keywords',
@@ -5092,7 +5112,7 @@ describe('App', () => {
     expect(insertedLogs[3].sender_name).toBe('Oathbreaker');
 
     vttStore.pendingTargetAction.set(null);
-    comp.selectRosterActorRow(vttStore.rosterActors()[0], null);
+    vttStore.openActorSheet(vttStore.rosterActors()[0].id);
     expect(vttStore.activeCharacterSpeaker()?.name).toBe('Tavern Keeper');
     comp.onChatInputChange('Ale is two copper a mug.');
     await comp.sendChatMessage();
@@ -5663,11 +5683,11 @@ describe('App', () => {
     const createdPcActor = vttStore.rosterActors()[0];
     expect(createdPcActor.actor_kind).toBe('character');
     expect(createdPcActor.name).toBe('Kaelen Thorne');
-    expect(createdPcActor.character_id).toBe('quick-char-1');
+    expect(createdPcActor.character_id).toBeNull();
     expect(createdPcActor.npc_stats.weapon_name).toBe('Unarmed');
 
     expect(vttStore.openSheetRosterActor()?.id).toBe(createdPcActor.id);
-    expect(vttStore.openSheetCharacter()?.id).toBe('quick-char-1');
+    expect(vttStore.openSheetCharacter()?.name).toBe('Kaelen Thorne');
     expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('None');
     expect(vttStore.openSheetCharacter()?.inventory).toEqual([]);
 
@@ -5984,7 +6004,7 @@ describe('App', () => {
       notes: 'Carries the watchtower cipher.',
     }));
 
-    expect(updatedCharacterPayloads.length).toBe(1);
+    expect(updatedCharacterPayloads.length).toBe(0);
     expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('Medium');
     expect(vttStore.openSheetCharacter()?.inventory?.[0]?.name).toBe(
       'Sunleaf Salve'
@@ -6324,7 +6344,10 @@ describe('App', () => {
     expect(assignedHudText).not.toContain('Torch 40ft');
 
     vttStore.openTokenSheet(firstTokenId);
-    expect(vttStore.openSheetCharacter()?.id).toBe('char-sera-1');
+    expect(vttStore.openSheetCharacter()?.name).toBe('Sera Vane');
+    expect(
+      resolveRosterActorSourceCharacterId(vttStore.openSheetRosterActor())
+    ).toBe('char-sera-1');
     expect(vttStore.canEditOpenSheet()).toBe(true);
     vttStore.closeActorSheet();
 
@@ -7100,6 +7123,19 @@ describe('App', () => {
       })
     );
     expect(vttStore.selectedTokenIds()).toEqual(['tok-m1']);
+    fixture.detectChanges();
+
+    const m1SelBox = rootEl.querySelector(
+      '[data-token-id="tok-m1"] [data-token-selection-box="true"]'
+    ) as HTMLElement | null;
+    expect(m1SelBox).toBeTruthy();
+    expect(m1SelBox?.style.width).toBe(`${r1.tileSizePx}px`);
+    expect(m1SelBox?.style.height).toBe(`${r1.tileSizePx}px`);
+    expect(
+      rootEl.querySelector(
+        '[data-token-id="tok-m2"] [data-token-selection-box="true"]'
+      )
+    ).toBeNull();
 
     canvasComp.onTokenPointerDown(
       new PointerEvent('pointerdown', {
@@ -7119,6 +7155,10 @@ describe('App', () => {
       })
     );
     expect(vttStore.selectedTokenIds()).toEqual(['tok-m1', 'tok-m2']);
+    fixture.detectChanges();
+    expect(
+      rootEl.querySelectorAll('[data-token-selection-box="true"]').length
+    ).toBe(2);
 
     const r2Selected = canvasComp
       .renderableTokens()
@@ -7922,13 +7962,16 @@ describe('App', () => {
     }));
     roomFixture.detectChanges();
 
-    expect(updatedCharPatches.length).toBeGreaterThanOrEqual(1);
-    expect(
-      updatedCharPatches[updatedCharPatches.length - 1].portrait_url
-    ).toBe('https://cdn.example.com/kaelen-new-portrait.webp');
-    expect(
-      updatedCharPatches[updatedCharPatches.length - 1].token_image_url
-    ).toBe('https://cdn.example.com/kaelen-new-token.webp');
+    expect(updatedCharPatches.length).toBe(0);
+    const updatedKaelenActor = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'roster-kaelen')!;
+    expect(updatedKaelenActor.portrait_url).toBe(
+      'https://cdn.example.com/kaelen-new-portrait.webp'
+    );
+    expect(updatedKaelenActor.token_image_url).toBe(
+      'https://cdn.example.com/kaelen-new-token.webp'
+    );
     expect(updatedTokenPatches.length).toBeGreaterThanOrEqual(1);
     const syncedKaelen = canvasComp
       .renderableTokens()
@@ -7961,5 +8004,2309 @@ describe('App', () => {
     );
     expect(kaelenSpeakerVis?.appearance.frame).toBe('boss');
     expect(kaelenSpeakerVis?.appearance.scale).toBe(1.5);
+  });
+
+  it('should omit Sheet and Select buttons from the Actors tab, open sheets on row click, and launch a separate Tokenizer Studio floating window from Edit Token', async () => {
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-studio-1',
+      email: 'gm@example.com',
+    });
+    const updatedRosterPatches: {
+      id: string;
+      patch: Partial<VttRosterActorModel>;
+    }[] = [];
+    const updatedTokenPatches: {
+      id: string;
+      patch: Partial<VttTokenModel>;
+    }[] = [];
+
+    const unimportedChar: CharacterModel = {
+      id: 'char-avail-1',
+      owner_id: 'gm-studio-1',
+      name: 'Rowan Thorne',
+      level: 2,
+      attributes: {
+        Brawn: 2,
+        Agility: 2,
+        Technique: 1,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Medium',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 16,
+      current_sp: 8,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+    const charStoreListSig = signal<CharacterModel[]>([unimportedChar]);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => activeUserSig(),
+            isAdmin: () => false,
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal<WeaponModel[]>([]),
+            allPerkNodes: signal<PerkNodeModel[]>([]),
+            allSkillTrees: signal([]),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: charStoreListSig,
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              charStoreListSig().find((c) => c.id === id),
+            upsertRealtimeCharacter: (ch: CharacterModel) =>
+              charStoreListSig.update((curr) =>
+                curr.some((c) => c.id === ch.id)
+                  ? curr.map((c) => (c.id === ch.id ? ch : c))
+                  : [...curr, ch]
+              ),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateRosterActor: async (
+              _cid: string,
+              aid: string,
+              patch: Partial<VttRosterActorModel>
+            ) => {
+              updatedRosterPatches.push({ id: aid, patch });
+              return null;
+            },
+            updateToken: async (id: string, patch: Partial<VttTokenModel>) => {
+              updatedTokenPatches.push({ id, patch });
+              return null;
+            },
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `studio-tok-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-studio-1',
+      gm_id: 'gm-studio-1',
+      name: 'Tokenizer Window Campaign',
+      cover_image_url: null,
+      invite_code: 'STDO01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-studio-1',
+        campaign_id: 'camp-studio-1',
+        gm_id: 'gm-studio-1',
+        folder_id: null,
+        name: 'Brazier Keep',
+        is_active_scene: true,
+        map_image_url: null,
+        background_color: DEFAULT_VTT_BG_COLOR,
+        grid_mode: 'square',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-studio-1');
+    vttStore.allCharacters.set([unimportedChar]);
+
+    const npcActor: VttRosterActorModel = {
+      id: 'actor-studio-npc',
+      campaign_id: 'camp-studio-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Ashblade Captain',
+      faction: 'enemy',
+      size: 1,
+      icon: 'skull',
+      color: '#F43F5E',
+      portrait_url: 'https://cdn.example.com/ashblade-portrait.webp',
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+      max_hp: 24,
+      max_sp: 10,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vttStore.rosterActors.set([npcActor]);
+    await vttStore.deployRosterActor('actor-studio-npc');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    const rootEl = fixture.nativeElement as HTMLElement;
+    comp.sidebarOpen.set(true);
+    comp.sidebarTab.set('actors');
+    fixture.detectChanges();
+
+    const sidebarEl = rootEl.querySelector('aside') as HTMLElement;
+    expect(sidebarEl).toBeTruthy();
+
+    const sidebarButtonLabels = Array.from(
+      sidebarEl.querySelectorAll('button')
+    ).map((btn) => (btn.textContent ?? '').trim());
+    expect(sidebarButtonLabels).not.toContain('Sheet');
+    expect(sidebarButtonLabels).not.toContain('Select');
+
+    const actorRowEl = Array.from(
+      sidebarEl.querySelectorAll('div[draggable="true"]')
+    ).find((el) => (el.textContent ?? '').includes('Ashblade Captain')) as HTMLElement;
+    expect(actorRowEl).toBeTruthy();
+
+    actorRowEl.click();
+    fixture.detectChanges();
+
+    const sheetEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"]'
+    ) as HTMLElement | null;
+    expect(sheetEl).toBeTruthy();
+    expect(sheetEl?.querySelector('app-tokenizer-editor')).toBeNull();
+    expect(
+      rootEl.querySelector(
+        'section[data-vtt-floating-window="true"][aria-label="Tokenizer Studio"]'
+      )
+    ).toBeNull();
+
+    const sheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent
+      )!;
+    sheetComp.npcTab.set('token');
+    fixture.detectChanges();
+    expect(sheetEl?.querySelector('app-tokenizer-editor')).toBeNull();
+
+    const openStudioBtn = sheetEl?.querySelector(
+      'button[data-open-tokenizer-studio="true"]'
+    ) as HTMLButtonElement | null;
+    expect(openStudioBtn).toBeTruthy();
+    openStudioBtn!.click();
+    fixture.detectChanges();
+
+    const studioSectionEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Tokenizer Studio"]'
+    ) as HTMLElement | null;
+    expect(studioSectionEl).toBeTruthy();
+    expect(studioSectionEl?.querySelector('app-tokenizer-editor')).toBeTruthy();
+
+    const studioWindowComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttTokenizerWindowComponent =>
+          inst instanceof VttTokenizerWindowComponent
+      )!;
+    expect(studioWindowComp).toBeTruthy();
+    const studioFloatingWrapper = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttFloatingWindowComponent =>
+          inst instanceof VttFloatingWindowComponent &&
+          inst.ariaLabel() === 'Tokenizer Studio'
+      )!;
+    expect(studioFloatingWrapper.zIndex()).toBeGreaterThan(sheetComp.zIndex());
+
+    await studioWindowComp.onVisualsChange({
+      portrait_url: 'https://cdn.example.com/ashblade-portrait.webp',
+      token_image_url: 'https://cdn.example.com/ashblade-token.webp',
+      token_appearance: {
+        ...DEFAULT_TOKEN_APPEARANCE,
+        frame: 'boss',
+        frame_color: '#EF4444',
+        scale: 1.4,
+        offset_x: 12,
+        offset_y: -8,
+      },
+    });
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(updatedRosterPatches.length).toBeGreaterThanOrEqual(1);
+    expect(updatedTokenPatches.length).toBeGreaterThanOrEqual(1);
+    expect(vttStore.rosterActors()[0].token_image_url).toBe(
+      'https://cdn.example.com/ashblade-token.webp'
+    );
+    expect(vttStore.rosterActors()[0].token_appearance?.frame).toBe('boss');
+    expect(vttStore.tokens()[0].token_image_url).toBe(
+      'https://cdn.example.com/ashblade-token.webp'
+    );
+    expect(vttStore.tokens()[0].token_appearance?.scale).toBe(1.4);
+
+    comp.onGlobalKeyDown(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        cancelable: true,
+      })
+    );
+    fixture.detectChanges();
+    expect(vttStore.openTokenizerTarget()).toBeNull();
+    expect(vttStore.openSheetTarget()).not.toBeNull();
+  });
+
+  it('should declutter Edit Token buttons, enlarge header portrait, and drag Compendium weapons & standalone skills onto PC and NPC sheets', async () => {
+    const activeUserSig = signal<{ id: string; email?: string } | null>({
+      id: 'gm-comp-1',
+      email: 'gm@marchoftime.test',
+    });
+
+    const testWeapon: WeaponModel = {
+      id: 'wep-sunforged-halberd',
+      slug: 'sunforged-halberd',
+      name: 'Sunforged Halberd',
+      category: 'Heavy',
+      ap_cost: 2,
+      requires_aim: false,
+      gov_attribute: 'Brawn',
+      gov_skill: 'Strike',
+      base_damage: 6,
+      reach_tiles: 2,
+      thrown_range_tiles: null,
+      trait_name: 'Sweep Reach',
+      trait_description: 'Strikes foes from 10 ft.',
+      rule_hooks: { two_handed: true, guard: true },
+      is_active: true,
+    };
+
+    const testDagger: WeaponModel = {
+      id: 'wep-whisper-dagger',
+      slug: 'whisper-dagger',
+      name: 'Whisper Dagger',
+      category: 'Light',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Agility',
+      gov_skill: 'Strike',
+      base_damage: 3,
+      reach_tiles: 1,
+      thrown_range_tiles: 3,
+      trait_name: 'Quickdraw',
+      trait_description: 'Nimble offhand blade.',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const standaloneArt: PerkNodeModel = {
+      id: 'perk-ashen-whirl',
+      tree_id: null,
+      slug: 'ashen-whirl',
+      name: 'Ashen Whirl',
+      node_type: 'combat_art',
+      tier: 1,
+      perk_cost: 0,
+      ap_cost: 2,
+      cooldown_rounds: 2,
+      combat_tag: 'Sweeping',
+      description: 'Spin in a cinder arc.',
+      rule_hooks: {
+        __is_standalone: true,
+        bonus_attack_mod: 1,
+        bonus_flat_damage: 2,
+      },
+      is_active: true,
+    };
+
+    const pcChar: CharacterModel = {
+      id: 'char-comp-pc-1',
+      owner_id: 'gm-comp-1',
+      name: 'Seraphina',
+      portrait_url: 'https://cdn.example.com/seraphina-portrait.webp',
+      token_image_url: 'https://cdn.example.com/seraphina-token.webp',
+      token_appearance: {
+        ...DEFAULT_TOKEN_APPEARANCE,
+        frame: 'boss',
+      },
+      level: 2,
+      attributes: {
+        Brawn: 2,
+        Agility: 2,
+        Technique: 1,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Medium',
+      equipped_shield: 'Heater',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 16,
+      current_sp: 8,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+    const charStoreListSig = signal<CharacterModel[]>([pcChar]);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => activeUserSig(),
+            isAdmin: () => false,
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal<WeaponModel[]>([testWeapon, testDagger]),
+            weapons: signal<WeaponModel[]>([testWeapon, testDagger]),
+            allPerkNodes: signal<PerkNodeModel[]>([standaloneArt]),
+            perkNodes: signal<PerkNodeModel[]>([]),
+            standaloneNodes: signal<PerkNodeModel[]>([standaloneArt]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: charStoreListSig,
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              charStoreListSig().find((c) => c.id === id),
+            upsertRealtimeCharacter: (ch: CharacterModel) =>
+              charStoreListSig.update((curr) =>
+                curr.some((c) => c.id === ch.id)
+                  ? curr.map((c) => (c.id === ch.id ? ch : c))
+                  : [...curr, ch]
+              ),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `comp-tok-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-comp-1',
+      gm_id: 'gm-comp-1',
+      name: 'Compendium Drag Campaign',
+      cover_image_url: null,
+      invite_code: 'COMP01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-comp-1',
+        campaign_id: 'camp-comp-1',
+        gm_id: 'gm-comp-1',
+        folder_id: null,
+        name: 'Armory Hall',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#0D1615',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-comp-1');
+    vttStore.allCharacters.set([pcChar]);
+
+    const pcRosterActor: VttRosterActorModel = {
+      id: 'actor-comp-pc',
+      campaign_id: 'camp-comp-1',
+      folder_id: null,
+      character_id: pcChar.id,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'character',
+      is_unique: true,
+      name: pcChar.name,
+      faction: 'ally',
+      size: 1,
+      icon: 'greatsword',
+      color: '#38B29A',
+      portrait_url: pcChar.portrait_url,
+      token_image_url: pcChar.token_image_url,
+      token_appearance: pcChar.token_appearance,
+      max_hp: 16,
+      max_sp: 8,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 2,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const npcRosterActor: VttRosterActorModel = {
+      id: 'actor-comp-npc',
+      campaign_id: 'camp-comp-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Iron Sentinel',
+      faction: 'enemy',
+      size: 1,
+      icon: 'skull',
+      color: '#EF4444',
+      portrait_url: 'https://cdn.example.com/sentinel-portrait.webp',
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+      max_hp: 22,
+      max_sp: 8,
+      max_ap: 4,
+      armor_dr: 3,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    vttStore.rosterActors.set([pcRosterActor, npcRosterActor]);
+    await vttStore.deployRosterActor('actor-comp-npc');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    const rootEl = fixture.nativeElement as HTMLElement;
+    comp.sidebarOpen.set(true);
+    fixture.detectChanges();
+
+    const gmCompendiumTabBtn = rootEl.querySelector(
+      'button[data-sidebar-tab="compendium"]'
+    ) as HTMLButtonElement | null;
+    expect(gmCompendiumTabBtn).toBeTruthy();
+
+    activeUserSig.set({ id: 'player-non-gm', email: 'player@marchoftime.test' });
+    fixture.detectChanges();
+    expect(
+      rootEl.querySelector('button[data-sidebar-tab="compendium"]')
+    ).toBeNull();
+
+    activeUserSig.set({ id: 'gm-comp-1', email: 'gm@marchoftime.test' });
+    fixture.detectChanges();
+
+    const compendiumBtn = rootEl.querySelector(
+      'button[data-sidebar-tab="compendium"]'
+    ) as HTMLButtonElement;
+    compendiumBtn.click();
+    fixture.detectChanges();
+
+    expect(
+      rootEl.querySelectorAll('div[data-compendium-drag-kind="weapon"]').length
+    ).toBe(0);
+    expect(
+      rootEl.querySelectorAll('div[data-compendium-drag-kind="standalone"]').length
+    ).toBe(0);
+
+    const openWeaponsBtn = rootEl.querySelector(
+      'button[data-open-compendium-pack="weapons"]'
+    ) as HTMLButtonElement | null;
+    const openSkillsBtn = rootEl.querySelector(
+      'button[data-open-compendium-pack="skills"]'
+    ) as HTMLButtonElement | null;
+    expect(openWeaponsBtn).toBeTruthy();
+    expect(openSkillsBtn).toBeTruthy();
+
+    openWeaponsBtn!.click();
+    fixture.detectChanges();
+
+    const weaponsWinEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Compendium Weapons"]'
+    ) as HTMLElement | null;
+    expect(weaponsWinEl).toBeTruthy();
+    expect(
+      weaponsWinEl!.querySelectorAll('div[data-compendium-drag-kind="weapon"]').length
+    ).toBe(2);
+
+    comp.compendiumWeaponsSearch.set('Whisper');
+    fixture.detectChanges();
+    expect(
+      weaponsWinEl!.querySelectorAll('div[data-compendium-drag-kind="weapon"]').length
+    ).toBe(1);
+    comp.compendiumWeaponsSearch.set('');
+    fixture.detectChanges();
+
+    openSkillsBtn!.click();
+    fixture.detectChanges();
+
+    const skillsWinEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Compendium Skills"]'
+    ) as HTMLElement | null;
+    expect(skillsWinEl).toBeTruthy();
+    expect(
+      skillsWinEl!.querySelectorAll('div[data-compendium-drag-kind="standalone"]').length
+    ).toBe(1);
+
+    comp.compendiumSkillsSearch.set('Nonexistent');
+    fixture.detectChanges();
+    expect(
+      skillsWinEl!.querySelectorAll('div[data-compendium-drag-kind="standalone"]').length
+    ).toBe(0);
+    comp.compendiumSkillsSearch.set('');
+    fixture.detectChanges();
+
+    vttStore.openActorSheet('actor-comp-npc');
+    fixture.detectChanges();
+
+    const sheetEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"]'
+    ) as HTMLElement;
+    expect(sheetEl).toBeTruthy();
+
+    const statblockEditTokenBtns = Array.from(
+      sheetEl.querySelectorAll('button')
+    ).filter((b) => (b.textContent ?? '').trim() === 'Edit Token');
+    expect(statblockEditTokenBtns.length).toBe(0);
+
+    const headerPortraitBtn = sheetEl.querySelector(
+      'button[data-header-portrait-avatar="true"]'
+    ) as HTMLButtonElement | null;
+    expect(headerPortraitBtn).toBeTruthy();
+    expect(headerPortraitBtn?.innerHTML).toContain('h-20 w-16');
+
+    const sheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent
+      )!;
+
+    comp.onCompendiumWeaponDragStart(new Event('dragstart') as DragEvent, testWeapon);
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    const updatedNpc = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-comp-npc')!;
+    expect(updatedNpc.npc_stats.weapon_name).toBe('Sunforged Halberd');
+    expect(updatedNpc.npc_stats.flat_damage).toBe(6);
+    expect(updatedNpc.npc_stats.attack_ap).toBe(2);
+    expect(updatedNpc.npc_stats.reach_feet).toBe(10);
+    expect(vttStore.tokens()[0].npc_stats.weapon_name).toBe('Sunforged Halberd');
+
+    comp.onCompendiumStandaloneDragStart(
+      new Event('dragstart') as DragEvent,
+      standaloneArt
+    );
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    const npcAfterGrant = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-comp-npc')!;
+    expect(npcAfterGrant.npc_stats.__standalone_perk_ids).toEqual([
+      'perk-ashen-whirl',
+    ]);
+    expect(
+      vttStore.getNpcStandaloneCombatArts(vttStore.tokens()[0]).map((n) => n.name)
+    ).toEqual(['Ashen Whirl']);
+
+    vttStore.openActorSheet('actor-comp-pc');
+    fixture.detectChanges();
+
+    const pcSheetEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"][data-actor-id="actor-comp-pc"]'
+    ) as HTMLElement;
+    expect(pcSheetEl).toBeTruthy();
+
+    const pcSheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent &&
+          inst.sheetRosterActor()?.id === 'actor-comp-pc'
+      )!;
+
+    const pcCharacterTabEditBtns = Array.from(
+      pcSheetEl.querySelectorAll('button')
+    ).filter((b) => (b.textContent ?? '').trim() === 'Edit Token');
+    expect(pcCharacterTabEditBtns.length).toBe(0);
+
+    comp.onCompendiumWeaponDragStart(new Event('dragstart') as DragEvent, testWeapon);
+    await pcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    let updatedPc = vttStore.openSheetCharacter()!;
+    expect(updatedPc.weapon_slot_1_id).toBe('wep-sunforged-halberd');
+    expect(updatedPc.equipped_shield).toBe('None');
+    expect(pcSheetComp.pcTab()).toBe('loadout');
+
+    comp.onCompendiumWeaponDragStart(new Event('dragstart') as DragEvent, testDagger);
+    await pcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'inventory');
+    fixture.detectChanges();
+
+    updatedPc = vttStore.openSheetCharacter()!;
+    expect(updatedPc.inventory?.length).toBe(1);
+    expect(updatedPc.inventory?.[0].name).toBe('Whisper Dagger');
+
+    comp.onCompendiumStandaloneDragStart(
+      new Event('dragstart') as DragEvent,
+      standaloneArt
+    );
+    await pcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    updatedPc = vttStore.openSheetCharacter()!;
+    expect(updatedPc.unlocked_perk_ids).toContain('perk-ashen-whirl');
+    expect(
+      vttStore.allCharacters().find((c) => c.id === pcChar.id)?.weapon_slot_1_id
+    ).toBeNull();
+    expect(vttStore.openSheetDerived()?.perkSpent).toBe(0);
+    expect(pcSheetComp.pcTab()).toBe('perks');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(comp.compendiumSkillsWindowOpen()).toBe(false);
+    expect(comp.compendiumWeaponsWindowOpen()).toBe(true);
+    expect(vttStore.openSheetTarget()).toBeTruthy();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(comp.compendiumWeaponsWindowOpen()).toBe(false);
+    expect(vttStore.openSheetTarget()).toBeTruthy();
+  });
+
+  it('should parse Content Manager Armors and Items URLs, seed starter armors and non-weapon items, and create/update armors and items via CompendiumStore', async () => {
+    expect(parseContentManagerUrl('/content-manager/armors')).toEqual({
+      tab: 'armors',
+      treeId: null,
+    });
+    expect(parseContentManagerUrl('/content-manager/items')).toEqual({
+      tab: 'items',
+      treeId: null,
+    });
+
+    expect(
+      DEFAULT_COMPENDIUM_ARMORS.some(
+        (a) => a.name === 'Fortress Full Plate' && a.armor_sp === 6 && a.armor_dr === 6
+      )
+    ).toBe(true);
+    expect(
+      DEFAULT_COMPENDIUM_ITEMS.some(
+        (i) => i.name === 'Bodkin Arrows' && i.default_quantity === 20
+      )
+    ).toBe(true);
+    expect(
+      DEFAULT_COMPENDIUM_ITEMS.some((i) => i.name === 'Stone & Flint')
+    ).toBe(true);
+    expect(
+      DEFAULT_COMPENDIUM_ITEMS.some((i) => i.name === 'Canvas Field Tent')
+    ).toBe(true);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [App],
+      providers: [
+        provideRouter(routes),
+        {
+          provide: AuthService,
+          useValue: {
+            getSessionUser: async () => ({
+              id: 'user-admin-cm',
+              email: 'admin@marchoftime.test',
+              user_metadata: { handle: 'architect', full_name: 'Architect' },
+            }),
+            fetchProfile: async () => ({
+              id: 'user-admin-cm',
+              display_name: 'Architect',
+              handle: 'architect',
+              is_admin: true,
+              sheet_theme: 'light',
+              vtt_theme: 'dark',
+            }),
+            onAuthStateChange: () => {},
+          },
+        },
+        {
+          provide: CompendiumService,
+          useValue: {
+            fetchFullCompendium: async () => ({
+              weapons: [],
+              armors: DEFAULT_COMPENDIUM_ARMORS,
+              items: DEFAULT_COMPENDIUM_ITEMS,
+              skillTrees: [],
+              perkNodes: [],
+              keywords: [],
+            }),
+            insertArmor: async (payload: Omit<ArmorModel, 'id'>) => ({
+              data: { id: 'armor-custom-lamellar', ...payload },
+              error: null,
+            }),
+            updateArmorRecord: async (id: string, payload: Omit<ArmorModel, 'id'>) => ({
+              data: { id, ...payload },
+              error: null,
+            }),
+            insertCompendiumItem: async (
+              payload: Omit<CompendiumItemModel, 'id'>
+            ) => ({
+              data: { id: 'item-grappling-hook', ...payload },
+              error: null,
+            }),
+            updateCompendiumItemRecord: async (
+              id: string,
+              payload: Omit<CompendiumItemModel, 'id'>
+            ) => ({
+              data: { id, ...payload },
+              error: null,
+            }),
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const appFixture = TestBed.createComponent(App);
+    appFixture.detectChanges();
+    await appFixture.whenStable();
+
+    const harness = await RouterTestingHarness.create('/content-manager/armors');
+    await appFixture.whenStable();
+    harness.detectChanges();
+
+    expect(harness.routeNativeElement?.textContent).toContain('Padded Gambeson');
+    expect(harness.routeNativeElement?.textContent).toContain('Fortress Full Plate');
+    expect(harness.routeNativeElement?.textContent).toContain('+6 SP');
+    expect(harness.routeNativeElement?.textContent).toContain('+6 DR');
+
+    const compStore = TestBed.inject(CompendiumStore);
+    const createdArmor = await compStore.createArmor({
+      slug: 'bronze-lamellar',
+      name: 'Bronze Lamellar',
+      weight_class: 'Medium',
+      armor_sp: 3,
+      armor_dr: 3,
+      allows_dodge: true,
+      speed_penalty_tiles: 0,
+      description: 'Laced bronze plates.',
+      rule_hooks: { __icon: 'breastplate', __icon_color: '#F59E0B' },
+    });
+    expect(createdArmor?.name).toBe('Bronze Lamellar');
+    expect(compStore.armors().some((a) => a.name === 'Bronze Lamellar')).toBe(true);
+
+    await harness.navigateByUrl('/content-manager/items');
+    harness.detectChanges();
+
+    expect(harness.routeNativeElement?.textContent).toContain('Bodkin Arrows');
+    expect(harness.routeNativeElement?.textContent).toContain('Stone & Flint');
+    expect(harness.routeNativeElement?.textContent).toContain('Canvas Field Tent');
+
+    const createdItem = await compStore.createCompendiumItem({
+      slug: 'iron-grappling-hook',
+      name: 'Iron Grappling Hook',
+      subcategory: 'Adventuring Gear',
+      default_quantity: 1,
+      stackable: false,
+      description: 'Three-pronged folding iron hook.',
+      rule_hooks: { __icon: 'pack', __icon_color: '#38BDF8' },
+    });
+    expect(createdItem?.name).toBe('Iron Grappling Hook');
+    expect(
+      compStore.items().some((i) => i.name === 'Iron Grappling Hook')
+    ).toBe(true);
+  });
+
+  it('should render categorized Weapons, Armors, and Items on the site Character Sheet with live weapon Roll and Damage formulas and armor SP and DR equipping', async () => {
+    const longbow: WeaponModel = {
+      id: 'wep-ash-longbow',
+      slug: 'ash-longbow',
+      name: 'Ash Longbow',
+      category: 'Ranged',
+      ap_cost: 1,
+      requires_aim: true,
+      gov_attribute: 'Agility',
+      gov_skill: 'Shoot',
+      base_damage: 5,
+      reach_tiles: 12,
+      thrown_range_tiles: null,
+      trait_name: 'Draw Weight',
+      trait_description: 'High-tension yew stave.',
+      rule_hooks: { two_handed: true },
+      is_active: true,
+    };
+
+    const armingSword: WeaponModel = {
+      id: 'wep-arming-sword',
+      slug: 'arming-sword',
+      name: 'Arming Sword',
+      category: 'Martial',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Technique',
+      gov_skill: 'Strike',
+      base_damage: 4,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      trait_name: 'Balanced',
+      trait_description: 'Nimble cruciform blade.',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const baseHero: CharacterModel = {
+      id: 'char-cat-sheet-1',
+      owner_id: 'owner-cat-1',
+      name: 'Sylva Thorn',
+      level: 2,
+      attributes: {
+        Brawn: 1,
+        Agility: 3,
+        Technique: 2,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 1,
+        Shoot: 2,
+        Parry: 1,
+        Dodge: 2,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 2,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 2,
+        Resolve: 1,
+        Perception: 2,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      weapon_slot_1_id: 'wep-ash-longbow',
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 9,
+      current_sp: 6,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+
+    const formula = computeCharacterWeaponFormula(baseHero, longbow, [], [longbow]);
+    expect(formula.rollFormula).toBe('2d10 + 5');
+    expect(formula.damageFormula).toBe('8 DMG');
+    expect(formula.rollBreakdown).toContain('Agility (+3)');
+    expect(formula.rollBreakdown).toContain('Shoot (+2)');
+
+    let storedHero = structuredClone(baseHero);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [CharacterDetailComponent],
+      providers: [
+        provideRouter([
+          { path: 'characters/:id', component: CharacterDetailComponent },
+        ]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => ({ id: 'owner-cat-1', email: 'sylva@marchoftime.test' }),
+            isAdmin: () => false,
+          },
+        },
+        {
+          provide: CompendiumService,
+          useValue: {
+            fetchFullCompendium: async () => ({
+              weapons: [longbow, armingSword],
+              armors: DEFAULT_COMPENDIUM_ARMORS,
+              items: DEFAULT_COMPENDIUM_ITEMS,
+              skillTrees: [],
+              perkNodes: [],
+              keywords: [],
+            }),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharactersByOwner: async () => ({
+              data: [storedHero],
+              error: null,
+            }),
+            fetchCharacterById: async () => ({
+              data: storedHero,
+              error: null,
+            }),
+            updateCharacterRecord: async (next: CharacterModel) => {
+              storedHero = structuredClone(next);
+              return null;
+            },
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const harness = await RouterTestingHarness.create(
+      '/characters/char-cat-sheet-1'
+    );
+    const detailComp = harness.routeDebugElement!.componentInstance as CharacterDetailComponent;
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+
+    const sheetEl = harness.routeNativeElement as HTMLElement;
+    expect(sheetEl.textContent).toContain('Ash Longbow');
+    expect(sheetEl.textContent).toContain('2d10 + 5');
+    expect(sheetEl.textContent).toContain('8 DMG');
+
+    const arrows = DEFAULT_COMPENDIUM_ITEMS.find(
+      (i) => i.id === 'item-bodkin-arrows'
+    )!;
+    const flint = DEFAULT_COMPENDIUM_ITEMS.find(
+      (i) => i.id === 'item-stone-and-flint'
+    )!;
+    const fullPlate = DEFAULT_COMPENDIUM_ARMORS.find(
+      (a) => a.id === 'armor-fortress-full-plate'
+    )!;
+
+    await detailComp.addFromCompendiumPicker(
+      detailComp.character()!,
+      `item:${arrows.id}`
+    );
+    await detailComp.addFromCompendiumPicker(
+      detailComp.character()!,
+      `item:${arrows.id}`
+    );
+    await detailComp.addFromCompendiumPicker(
+      detailComp.character()!,
+      `item:${flint.id}`
+    );
+    await detailComp.addFromCompendiumPicker(
+      detailComp.character()!,
+      `weapon:${armingSword.id}`
+    );
+    await detailComp.addFromCompendiumPicker(
+      detailComp.character()!,
+      `armor:${fullPlate.id}`
+    );
+    harness.detectChanges();
+
+    const invAfterAdds = detailComp.character()!.inventory!;
+    const arrowEntry = invAfterAdds.find(
+      (it) => it.compendium_id === 'item-bodkin-arrows'
+    )!;
+    expect(arrowEntry.quantity).toBe(40);
+    expect(getInventoryItemCategory(arrowEntry)).toBe('item');
+
+    const plateEntry = invAfterAdds.find(
+      (it) => it.compendium_id === 'armor-fortress-full-plate'
+    )!;
+    expect(getInventoryItemCategory(plateEntry)).toBe('armor');
+
+    await detailComp.equipInventoryArmor(detailComp.character()!, plateEntry.id);
+    harness.detectChanges();
+
+    const statsAfterPlate = detailComp.derived()!;
+    expect(detailComp.character()!.equipped_armor).toBe('Heavy');
+    expect(statsAfterPlate.equippedArmorLabel).toBe('Fortress Full Plate');
+    expect(statsAfterPlate.armorSp).toBe(6);
+    expect(statsAfterPlate.armorDr).toBe(6);
+    expect(statsAfterPlate.maxSp).toBe(10);
+    expect(statsAfterPlate.canDodge).toBe(false);
+
+    detailComp.inventoryTab.set('armor');
+    harness.detectChanges();
+    expect(sheetEl.textContent).toContain('Fortress Full Plate');
+    expect(sheetEl.textContent).toContain('+6 SP');
+    expect(sheetEl.textContent).toContain('+6 DR');
+
+    detailComp.inventoryTab.set('item');
+    harness.detectChanges();
+    expect(sheetEl.textContent).toContain('Bodkin Arrows');
+    expect(sheetEl.textContent).toContain('Stone & Flint');
+  });
+
+  it('should launch Compendium Armors and Items floating windows in VTT and support dragging Weapons, Armors, and Items onto Player Character and NPC sheets with categorized display', async () => {
+    const activeUserSig = signal<{ id: string; email: string } | null>({
+      id: 'gm-gear-1',
+      email: 'gm@marchoftime.test',
+    });
+
+    const warbow: WeaponModel = {
+      id: 'wep-ironwood-bow',
+      slug: 'ironwood-bow',
+      name: 'Ironwood Warbow',
+      category: 'Ranged',
+      ap_cost: 1,
+      requires_aim: true,
+      gov_attribute: 'Agility',
+      gov_skill: 'Shoot',
+      base_damage: 5,
+      reach_tiles: 12,
+      thrown_range_tiles: null,
+      trait_name: 'Long Draw',
+      trait_description: 'Pierces distant ranks.',
+      rule_hooks: { two_handed: true },
+      is_active: true,
+    };
+
+    const pcChar: CharacterModel = {
+      id: 'char-vtt-gear-pc',
+      owner_id: 'gm-gear-1',
+      name: 'Rowan',
+      level: 1,
+      attributes: {
+        Brawn: 2,
+        Agility: 3,
+        Technique: 1,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 1,
+        Shoot: 2,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      equipped_armor: 'None',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      current_hp: 9,
+      current_sp: 4,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      created_at: new Date().toISOString(),
+    };
+    const charStoreListSig = signal<CharacterModel[]>([pcChar]);
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => activeUserSig(),
+            isAdmin: () => true,
+            displayName: () => 'Grand Warden',
+            handle: () => 'warden',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal<WeaponModel[]>([warbow]),
+            weapons: signal<WeaponModel[]>([warbow]),
+            allArmors: signal<ArmorModel[]>(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal<ArmorModel[]>(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal<CompendiumItemModel[]>(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal<CompendiumItemModel[]>(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal<PerkNodeModel[]>([]),
+            perkNodes: signal<PerkNodeModel[]>([]),
+            standaloneNodes: signal<PerkNodeModel[]>([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: charStoreListSig,
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              charStoreListSig().find((c) => c.id === id),
+            upsertRealtimeCharacter: (ch: CharacterModel) =>
+              charStoreListSig.update((curr) =>
+                curr.some((c) => c.id === ch.id)
+                  ? curr.map((c) => (c.id === ch.id ? ch : c))
+                  : [...curr, ch]
+              ),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `gear-tok-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-gear-1',
+      gm_id: 'gm-gear-1',
+      name: 'Quartermaster Campaign',
+      cover_image_url: null,
+      invite_code: 'GEAR01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-gear-1',
+        campaign_id: 'camp-gear-1',
+        gm_id: 'gm-gear-1',
+        folder_id: null,
+        name: 'Campground',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#0D1615',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-gear-1');
+    vttStore.allCharacters.set([pcChar]);
+
+    const pcActor: VttRosterActorModel = {
+      id: 'actor-gear-pc',
+      campaign_id: 'camp-gear-1',
+      folder_id: null,
+      character_id: pcChar.id,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'character',
+      is_unique: true,
+      name: pcChar.name,
+      faction: 'ally',
+      size: 1,
+      icon: 'bow',
+      color: '#38B29A',
+      portrait_url: null,
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+      max_hp: 9,
+      max_sp: 4,
+      max_ap: 4,
+      armor_dr: 0,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: {},
+      notes: '',
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const npcActor: VttRosterActorModel = {
+      id: 'actor-gear-npc',
+      campaign_id: 'camp-gear-1',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Outpost Ranger',
+      faction: 'neutral',
+      size: 1,
+      icon: 'bow',
+      color: '#F59E0B',
+      portrait_url: null,
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+      max_hp: 14,
+      max_sp: 6,
+      max_ap: 4,
+      armor_dr: 1,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      npc_stats: { attack_mod: 3, flat_damage: 4 },
+      notes: '',
+      sort_order: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    vttStore.rosterActors.set([pcActor, npcActor]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    const rootEl = fixture.nativeElement as HTMLElement;
+    comp.sidebarOpen.set(true);
+    comp.sidebarTab.set('compendium');
+    fixture.detectChanges();
+
+    const openArmorsBtn = rootEl.querySelector(
+      'button[data-open-compendium-pack="armors"]'
+    ) as HTMLButtonElement | null;
+    const openItemsBtn = rootEl.querySelector(
+      'button[data-open-compendium-pack="items"]'
+    ) as HTMLButtonElement | null;
+    expect(openArmorsBtn).toBeTruthy();
+    expect(openItemsBtn).toBeTruthy();
+
+    openArmorsBtn!.click();
+    openItemsBtn!.click();
+    fixture.detectChanges();
+
+    const armorsWinEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Compendium Armors"]'
+    ) as HTMLElement | null;
+    const itemsWinEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Compendium Items"]'
+    ) as HTMLElement | null;
+    expect(armorsWinEl).toBeTruthy();
+    expect(itemsWinEl).toBeTruthy();
+    expect(armorsWinEl!.textContent).toContain('+6 SP');
+    expect(armorsWinEl!.textContent).toContain('+6 DR');
+    expect(itemsWinEl!.textContent).toContain('Bodkin Arrows');
+    expect(itemsWinEl!.textContent).toContain('Canvas Field Tent');
+
+    vttStore.openActorSheet('actor-gear-pc');
+    fixture.detectChanges();
+
+    const sheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent
+      )!;
+
+    const brigandine = DEFAULT_COMPENDIUM_ARMORS.find(
+      (a) => a.id === 'armor-studded-brigandine'
+    )!;
+    const arrows = DEFAULT_COMPENDIUM_ITEMS.find(
+      (i) => i.id === 'item-bodkin-arrows'
+    )!;
+    const tent = DEFAULT_COMPENDIUM_ITEMS.find(
+      (i) => i.id === 'item-canvas-field-tent'
+    )!;
+
+    comp.onCompendiumArmorDragStart(new Event('dragstart') as DragEvent, brigandine);
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    let updatedRowan = vttStore.openSheetCharacter()!;
+    expect(updatedRowan.equipped_armor).toBe('Light');
+    expect(vttStore.openSheetDerived()?.armorSp).toBe(4);
+    expect(vttStore.openSheetDerived()?.armorDr).toBe(2);
+    expect(vttStore.openSheetDerived()?.equippedArmorLabel).toBe(
+      'Studded Brigandine'
+    );
+
+    comp.onCompendiumWeaponDragStart(new Event('dragstart') as DragEvent, warbow);
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'inventory');
+    comp.onCompendiumItemDragStart(new Event('dragstart') as DragEvent, arrows);
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    comp.onCompendiumItemDragStart(new Event('dragstart') as DragEvent, arrows);
+    await sheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    fixture.detectChanges();
+
+    updatedRowan = vttStore.openSheetCharacter()!;
+    expect(sheetComp.getPcWeaponsCount(updatedRowan, vttStore.openSheetDerived()!)).toBe(1);
+    expect(sheetComp.getPcArmorsCount(updatedRowan, vttStore.openSheetDerived()!)).toBe(1);
+    expect(sheetComp.getPcItemsCount(updatedRowan)).toBe(1);
+    expect(
+      updatedRowan.inventory?.find((it) => it.compendium_id === 'item-bodkin-arrows')
+        ?.quantity
+    ).toBe(40);
+
+    const sheetEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"]'
+    ) as HTMLElement;
+    expect(sheetEl.textContent).toContain('2d10 + 5');
+    expect(sheetEl.textContent).toContain('8 DMG');
+    expect(sheetEl.textContent).toContain('+4 SP');
+    expect(sheetEl.textContent).toContain('+2 DR');
+
+    vttStore.openActorSheet('actor-gear-npc');
+    fixture.detectChanges();
+
+    const allOpenSheetEls = rootEl.querySelectorAll(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"]'
+    );
+    expect(allOpenSheetEls.length).toBe(2);
+
+    const npcSheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent &&
+          inst.sheetRosterActor()?.id === 'actor-gear-npc'
+      )!;
+    expect(npcSheetComp).toBeTruthy();
+    expect(
+      npcSheetComp.windowX() !== sheetComp.windowX() ||
+        npcSheetComp.windowY() !== sheetComp.windowY()
+    ).toBe(true);
+
+    const fullPlate = DEFAULT_COMPENDIUM_ARMORS.find(
+      (a) => a.id === 'armor-fortress-full-plate'
+    )!;
+    comp.onCompendiumArmorDragStart(new Event('dragstart') as DragEvent, fullPlate);
+    await npcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    comp.onCompendiumItemDragStart(new Event('dragstart') as DragEvent, tent);
+    await npcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'sheet');
+    comp.onCompendiumWeaponDragStart(new Event('dragstart') as DragEvent, warbow);
+    await npcSheetComp.onSheetDrop(new Event('drop') as DragEvent, 'inventory');
+    fixture.detectChanges();
+
+    const npcSheetEl = rootEl.querySelector(
+      'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"][data-actor-id="actor-gear-npc"]'
+    ) as HTMLElement;
+    expect(npcSheetEl).toBeTruthy();
+    expect(npcSheetEl.textContent).not.toContain('Arm NPC');
+
+    const equipWepBtn = npcSheetEl.querySelector(
+      'button[data-npc-equip-weapon="true"]'
+    ) as HTMLButtonElement | null;
+    expect(equipWepBtn).toBeTruthy();
+    expect(equipWepBtn?.textContent?.trim()).toBe('Equip');
+
+    equipWepBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const updatedNpc = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-gear-npc')!;
+    expect(updatedNpc.armor_dr).toBe(6);
+    expect(updatedNpc.npc_stats.weapon_name).toBe('Ironwood Warbow');
+    expect(updatedNpc.npc_stats.flat_damage).toBe(5);
+    expect(updatedNpc.npc_stats.reach_feet).toBe(60);
+    expect(npcSheetComp.getNpcInventoryArmors().length).toBe(1);
+    expect(npcSheetComp.getNpcInventoryGearItems()[0]?.name).toBe('Canvas Field Tent');
+
+    const activeLoadoutEl = npcSheetEl.querySelector(
+      '[data-npc-active-loadout="true"]'
+    ) as HTMLElement | null;
+    expect(activeLoadoutEl).toBeTruthy();
+    expect(activeLoadoutEl?.textContent).toContain('Ironwood Warbow');
+    expect(activeLoadoutEl?.textContent).toContain('Fortress Full Plate');
+
+    const unequipWepBtn = npcSheetEl.querySelector(
+      'button[data-npc-unequip-weapon="true"]'
+    ) as HTMLButtonElement | null;
+    expect(unequipWepBtn).toBeTruthy();
+    expect(npcSheetEl.textContent).toContain('EQUIPPED');
+
+    unequipWepBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore.rosterActors().find((a) => a.id === 'actor-gear-npc')?.npc_stats
+        .weapon_name
+    ).toBe('Unarmed');
+
+    npcSheetComp.closeSheet();
+    fixture.detectChanges();
+    expect(
+      rootEl.querySelectorAll(
+        'section[data-vtt-floating-window="true"][aria-label="Actor Sheet"]'
+      ).length
+    ).toBe(1);
+    expect(vttStore.openSheetCharacter()?.name).toBe(pcChar.name);
+    expect(
+      vttStore.allCharacters().find((c) => c.id === pcChar.id)?.equipped_armor
+    ).toBe('None');
+  });
+
+  it('imports detached VTT character copies without mutating the real Character Sheet, supports Re-import, and imports from pasted Character Sheet URLs', async () => {
+    expect(
+      parseCharacterIdFromUrlOrInput(
+        'https://marchoftime.app/characters/char-vault-77'
+      )
+    ).toBe('char-vault-77');
+    expect(
+      parseCharacterIdFromUrlOrInput(
+        'http://localhost:4200/characters/char-vault-77/edit?tab=gear#top'
+      )
+    ).toBe('char-vault-77');
+    expect(
+      parseCharacterIdFromUrlOrInput(
+        'https://marchoftime.app/#/characters/char-hash-88'
+      )
+    ).toBe('char-hash-88');
+    expect(parseCharacterIdFromUrlOrInput('/characters/new')).toBeNull();
+    expect(
+      parseCharacterIdFromUrlOrInput('https://marchoftime.app/dashboard')
+    ).toBeNull();
+
+    const vaultCharacters = new Map<string, CharacterModel>();
+    const vaultChar1: CharacterModel = {
+      id: 'char-vault-1',
+      owner_id: 'gm-detach-1',
+      name: 'Valen Rook',
+      level: 2,
+      attributes: {
+        Brawn: 2,
+        Agility: 1,
+        Technique: 1,
+        Iron: 1,
+        Cunning: 0,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 1,
+        Dodge: 1,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 0,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 1,
+        Resolve: 0,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      current_hp: 11,
+      current_sp: 6,
+      current_ap: 4,
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      active_cooldowns: {},
+      inventory: [
+        {
+          id: 'inv-rope-1',
+          name: 'Silk Climbing Rope',
+          quantity: 1,
+          description: '50 feet of braided silk rope.',
+          category: 'item',
+        },
+      ],
+      notes: 'Original Vault Bio',
+      portrait_url: 'https://cdn.example.com/valen-portrait-v1.png',
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+    };
+    const sharedUrlChar: CharacterModel = {
+      id: 'char-shared-url-99',
+      owner_id: 'other-player-42',
+      name: 'Astrid Sol',
+      level: 3,
+      attributes: {
+        Brawn: 1,
+        Agility: 3,
+        Technique: 2,
+        Iron: 1,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 1,
+        Shoot: 3,
+        Parry: 0,
+        Dodge: 2,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 2,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 2,
+        Resolve: 0,
+        Perception: 2,
+        Sway: 0,
+        Lore: 0,
+      },
+      current_hp: 11,
+      current_sp: 6,
+      current_ap: 4,
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      weapon_slot_1_id: 'wep-url-bow',
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [],
+      active_cooldowns: {},
+      inventory: [
+        {
+          id: 'inv-quiver-1',
+          name: 'Silvered Arrows',
+          quantity: 20,
+          description: 'Arrows tipped with cold silver.',
+          category: 'item',
+        },
+      ],
+      notes: 'Scout of the Sunspire',
+      portrait_url: null,
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+    };
+    vaultCharacters.set(vaultChar1.id, { ...vaultChar1 });
+    vaultCharacters.set(sharedUrlChar.id, { ...sharedUrlChar });
+
+    const collectionNpcTemplate: CollectionActorModel = {
+      id: 'col-npc-chieftain-1',
+      owner_id: 'gm-detach-1',
+      folder_id: null,
+      source_character_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Ashfang Chieftain',
+      faction: 'enemy',
+      size: 1,
+      icon: 'battleaxe',
+      color: '#EF4444',
+      max_hp: 24,
+      max_sp: 8,
+      max_ap: 4,
+      armor_dr: 3,
+      shield_block: 0,
+      move_feet: 20,
+      vision_feet: 60,
+      darkvision_feet: 20,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#F59E0B',
+      portrait_url: null,
+      token_image_url: null,
+      token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+      npc_stats: {
+        weapon_name: 'Jagged Cleaver',
+        attack_ap: 1,
+        attack_mod: 4,
+        flat_damage: 6,
+        reach_feet: 5,
+        combat_tag: 'Crushing',
+        parry_mod: 2,
+        dodge_mod: 1,
+        can_dodge: true,
+        __inventory: [
+          {
+            id: 'npc-trophy-1',
+            name: 'War Horn',
+            quantity: 1,
+            description: 'Carved bone horn.',
+            category: 'item',
+          },
+        ],
+      },
+      notes: 'Original Collection NPC Notes',
+      sort_order: 0,
+    };
+    const colActorsSig = signal<CollectionActorModel[]>([
+      collectionNpcTemplate,
+    ]);
+    const charStoreListSig = signal<CharacterModel[]>([{ ...vaultChar1 }]);
+    const realSheetUpdates: { id: string; patch: Partial<CharacterModel> }[] =
+      [];
+    let nextRosterSeq = 1;
+
+    const urlBow: WeaponModel = {
+      id: 'wep-url-bow',
+      slug: 'sunspire-longbow',
+      name: 'Sunspire Longbow',
+      category: 'Ranged',
+      ap_cost: 2,
+      requires_aim: true,
+      gov_attribute: 'Agility',
+      gov_skill: 'Shoot',
+      base_damage: 6,
+      reach_tiles: 12,
+      thrown_range_tiles: null,
+      trait_name: 'Sunspire Draw',
+      trait_description: 'Long-range recurve bow.',
+      rule_hooks: { two_handed: true },
+      is_active: true,
+    };
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => ({ id: 'gm-detach-1', email: 'gm@example.com' }),
+            isAdmin: () => true,
+            displayName: () => 'GM Detach',
+            handle: () => 'gmdetach',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([urlBow]),
+            weapons: signal([urlBow]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: charStoreListSig,
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              charStoreListSig().find((c) => c.id === id),
+            upsertRealtimeCharacter: (ch: CharacterModel) =>
+              charStoreListSig.update((curr) =>
+                curr.some((c) => c.id === ch.id)
+                  ? curr.map((c) => (c.id === ch.id ? ch : c))
+                  : [...curr, ch]
+              ),
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharacterById: async (id: string) => ({
+              data: vaultCharacters.get(id) ?? null,
+              error: vaultCharacters.has(id) ? null : 'Not found',
+            }),
+            updateCharacterRecord: async (
+              id: string,
+              patch: Partial<CharacterModel>
+            ) => {
+              realSheetUpdates.push({ id, patch });
+              return null;
+            },
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: colActorsSig,
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            createRosterActor: async (
+              input: Omit<
+                VttRosterActorModel,
+                'id' | 'created_at' | 'updated_at'
+              >
+            ) => ({
+              actor: {
+                ...input,
+                id: `roster-detached-${nextRosterSeq++}`,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              } as VttRosterActorModel,
+              error: null,
+            }),
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `tok-detached-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            insertLog: async () => null,
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-detach-1',
+      gm_id: 'gm-detach-1',
+      name: 'Detached Sheets Campaign',
+      cover_image_url: null,
+      invite_code: 'DET001',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-detach-1',
+        campaign_id: 'camp-detach-1',
+        gm_id: 'gm-detach-1',
+        folder_id: null,
+        name: 'Watchtower Courtyard',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#0D1615',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-detach-1');
+    vttStore.allCharacters.set([{ ...vaultChar1 }]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const importedValen = await vttStore.importCharacterToRoster(vaultChar1);
+    expect(importedValen).toBeTruthy();
+    expect(importedValen!.character_id).toBeNull();
+    expect(resolveRosterActorSourceCharacterId(importedValen)).toBe(
+      vaultChar1.id
+    );
+    expect(importedValen!.npc_stats.__character_sheet?.id).not.toBe(
+      vaultChar1.id
+    );
+
+    const valenToken = await vttStore.deployRosterActor(importedValen!.id);
+    expect(valenToken).toBeTruthy();
+    expect(valenToken!.character_id).toBeNull();
+
+    vttStore.openActorSheet(importedValen!.id);
+    fixture.detectChanges();
+
+    const vttSheetChar = vttStore.openSheetCharacter()!;
+    expect(vttSheetChar.name).toBe('Valen Rook');
+    expect(vttSheetChar.id).not.toBe(vaultChar1.id);
+
+    await vttStore.updateCharacterFromVttSheet(vttSheetChar.id, (curr) => ({
+      ...curr,
+      name: 'Valen Rook (Battle-Scarred)',
+      current_hp: 3,
+      equipped_armor: 'Heavy',
+      notes: 'Campaign-only scars and notes',
+      inventory: [
+        ...(curr.inventory ?? []),
+        {
+          id: 'inv-loot-1',
+          name: 'Dungeon Key',
+          quantity: 1,
+          description: 'Iron key found in the crypt.',
+          category: 'item',
+        },
+      ],
+    }));
+    await vttStore.patchToken(valenToken!.id, { current_hp: 2 });
+    fixture.detectChanges();
+
+    expect(realSheetUpdates.length).toBe(0);
+    const untouchedStoreChar = charStoreListSig().find(
+      (c) => c.id === vaultChar1.id
+    )!;
+    expect(untouchedStoreChar.name).toBe('Valen Rook');
+    expect(untouchedStoreChar.current_hp).toBe(11);
+    expect(untouchedStoreChar.equipped_armor).toBe('Light');
+    expect(untouchedStoreChar.notes).toBe('Original Vault Bio');
+    expect(untouchedStoreChar.inventory?.length).toBe(1);
+
+    expect(vttStore.openSheetCharacter()?.name).toBe(
+      'Valen Rook (Battle-Scarred)'
+    );
+    expect(vttStore.openSheetCharacter()?.current_hp).toBe(2);
+    expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('Heavy');
+    expect(vttStore.openSheetCharacter()?.inventory?.length).toBe(2);
+
+    vaultCharacters.set(vaultChar1.id, {
+      ...vaultChar1,
+      level: 4,
+      equipped_armor: 'Medium',
+      weapon_slot_1_id: 'wep-url-bow',
+      notes: 'Updated on Real Site Sheet',
+      inventory: [
+        {
+          id: 'inv-phoenix-1',
+          name: 'Phoenix Draught',
+          quantity: 3,
+          description: 'Restorative alchemical elixir.',
+          category: 'item',
+        },
+      ],
+    });
+
+    const reimportBtn = rootEl.querySelector(
+      'button[data-reimport-character="true"]'
+    ) as HTMLButtonElement | null;
+    expect(reimportBtn).toBeTruthy();
+    reimportBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.openSheetCharacter()?.name).toBe('Valen Rook');
+    expect(vttStore.openSheetCharacter()?.level).toBe(4);
+    expect(vttStore.openSheetCharacter()?.equipped_armor).toBe('Medium');
+    expect(vttStore.openSheetCharacter()?.weapon_slot_1_id).toBe('wep-url-bow');
+    expect(vttStore.openSheetCharacter()?.notes).toBe(
+      'Updated on Real Site Sheet'
+    );
+    expect(vttStore.openSheetCharacter()?.inventory?.[0]?.name).toBe(
+      'Phoenix Draught'
+    );
+    expect(vttStore.tokens()[0].name).toBe('Valen Rook');
+    expect(realSheetUpdates.length).toBe(0);
+
+    comp.openRosterImportModal(null);
+    fixture.detectChanges();
+
+    const urlInput = rootEl.querySelector(
+      'input[data-import-character-url-input="true"]'
+    ) as HTMLInputElement | null;
+    const urlSubmit = rootEl.querySelector(
+      'button[data-import-character-url-submit="true"]'
+    ) as HTMLButtonElement | null;
+    expect(urlInput).toBeTruthy();
+    expect(urlSubmit).toBeTruthy();
+
+    comp.rosterImportUrlInput.set(
+      'https://marchoftime.app/characters/char-shared-url-99/edit'
+    );
+    fixture.detectChanges();
+
+    await comp.submitRosterImportUrl();
+    fixture.detectChanges();
+
+    expect(comp.rosterImportUrlInput()).toBe('');
+    const importedAstrid = vttStore
+      .rosterActors()
+      .find(
+        (a) => resolveRosterActorSourceCharacterId(a) === 'char-shared-url-99'
+      )!;
+    expect(importedAstrid).toBeTruthy();
+    expect(importedAstrid.character_id).toBeNull();
+    expect(importedAstrid.name).toBe('Astrid Sol');
+    expect(importedAstrid.npc_stats.weapon_name).toBe('Sunspire Longbow');
+    expect(vttStore.openSheetCharacter()?.name).toBe('Astrid Sol');
+    expect(
+      vttStore.openSheetCharacter()?.inventory?.[0]?.name
+    ).toBe('Silvered Arrows');
+    expect((rootEl.textContent ?? '').toLowerCase()).not.toContain('vtt copy');
+
+    expect(
+      parseCollectionActorIdFromUrlOrInput(
+        'https://marchoftime.app/collections?actor=col-npc-chieftain-1'
+      )
+    ).toBe('col-npc-chieftain-1');
+
+    comp.rosterImportUrlInput.set(
+      'https://marchoftime.app/collections?actor=col-npc-chieftain-1'
+    );
+    await comp.submitRosterImportUrl();
+    fixture.detectChanges();
+
+    const importedNpc = vttStore
+      .rosterActors()
+      .find((a) => a.collection_actor_id === 'col-npc-chieftain-1')!;
+    expect(importedNpc).toBeTruthy();
+    expect(importedNpc.actor_kind).toBe('npc');
+    expect(importedNpc.name).toBe('Ashfang Chieftain');
+
+    vttStore.closeActorSheet();
+    vttStore.openActorSheet(importedNpc.id);
+    fixture.detectChanges();
+
+    await vttStore.updateNpcFromVttSheet(importedNpc.id, null, {
+      name: 'Ashfang Chieftain (Wounded)',
+      max_hp: 10,
+      armor_dr: 1,
+      npc_stats: {
+        ...importedNpc.npc_stats,
+        __inventory: [],
+      },
+      notes: 'Campaign-only NPC note',
+    });
+    fixture.detectChanges();
+
+    expect(colActorsSig()[0].name).toBe('Ashfang Chieftain');
+    expect(colActorsSig()[0].max_hp).toBe(24);
+    expect(colActorsSig()[0].armor_dr).toBe(3);
+    expect(colActorsSig()[0].npc_stats.__inventory?.length).toBe(1);
+    expect(colActorsSig()[0].notes).toBe('Original Collection NPC Notes');
+
+    colActorsSig.set([
+      {
+        ...collectionNpcTemplate,
+        name: 'Ashfang Warlord',
+        max_hp: 32,
+        armor_dr: 5,
+        notes: 'Upgraded in Collections Manager',
+      },
+    ]);
+
+    const npcReimportBtn = rootEl.querySelector(
+      'button[data-reimport-character="true"]'
+    ) as HTMLButtonElement | null;
+    expect(npcReimportBtn).toBeTruthy();
+    npcReimportBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const reimportedNpc = vttStore
+      .rosterActors()
+      .find((a) => a.id === importedNpc.id)!;
+    expect(reimportedNpc.name).toBe('Ashfang Warlord');
+    expect(reimportedNpc.max_hp).toBe(32);
+    expect(reimportedNpc.armor_dr).toBe(5);
+    expect(reimportedNpc.notes).toBe('Upgraded in Collections Manager');
+    expect(reimportedNpc.npc_stats.__inventory?.[0]?.name).toBe('War Horn');
   });
 });

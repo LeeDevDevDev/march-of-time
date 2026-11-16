@@ -77,13 +77,23 @@ export class CharacterStore {
   });
 
   readonly weapons = this.compendiumStore.weapons;
+  readonly armors = this.compendiumStore.armors;
+  readonly items = this.compendiumStore.items;
   readonly skillTrees = this.compendiumStore.skillTrees;
   readonly perkNodes = this.compendiumStore.perkNodes;
   readonly standaloneNodes = this.compendiumStore.standaloneNodes;
   readonly allWeapons = this.compendiumStore.allWeapons;
+  readonly allArmors = this.compendiumStore.allArmors;
+  readonly allItems = this.compendiumStore.allItems;
   readonly allSkillTrees = this.compendiumStore.allSkillTrees;
   readonly allPerkNodes = this.compendiumStore.allPerkNodes;
   readonly allStandaloneNodes = this.compendiumStore.allStandaloneNodes;
+
+  private resolveArmorsForStats() {
+    return typeof this.compendiumStore.allArmors === 'function'
+      ? this.compendiumStore.allArmors()
+      : undefined;
+  }
 
   constructor() {
     effect(() => {
@@ -378,7 +388,8 @@ export class CharacterStore {
     const derived = computeDerivedStats(
       draft,
       this.compendiumStore.weapons(),
-      this.compendiumStore.perkNodes()
+      this.compendiumStore.perkNodes(),
+      this.resolveArmorsForStats()
     );
 
     this.#state.update((s) => ({ ...s, isLoading: true, error: null }));
@@ -453,7 +464,8 @@ export class CharacterStore {
     const derived = computeDerivedStats(
       updated,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.resolveArmorsForStats()
     );
 
     const clamped: CharacterModel = {
@@ -509,12 +521,14 @@ export class CharacterStore {
     const oldDerived = computeDerivedStats(
       current,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.resolveArmorsForStats()
     );
     const nextDerived = computeDerivedStats(
       draft,
       this.compendiumStore.allWeapons(),
-      this.compendiumStore.allPerkNodes()
+      this.compendiumStore.allPerkNodes(),
+      this.resolveArmorsForStats()
     );
 
     const hpDelta = Math.max(0, nextDerived.maxHp - oldDerived.maxHp);

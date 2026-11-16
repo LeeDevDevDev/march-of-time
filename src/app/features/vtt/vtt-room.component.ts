@@ -22,11 +22,28 @@ import { UserAssetsStore } from '../../core/assets/user-assets.store';
 import { AuthStore } from '../../core/auth/auth.store';
 import {
   ActiveCombatTag,
+  ArmorModel,
   COMPENDIUM_ICON_PRESETS,
   CombatStatusEffect,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
+  ITEM_SUBCATEGORY_OPTIONS,
+  PerkNodeModel,
+  ResolvedCompendiumVisuals,
+  WeaponModel,
+  formatWeaponHookBadges,
   formatWeaponRequirementLabel,
   getCombatTagBadgeClass,
+  getWeaponPropertyTags,
+  isCompendiumItemActive,
+  isStandalonePerkNode,
+  resolveArmorVisuals,
+  resolveCompendiumItemVisuals,
+  resolveNodeVisuals,
+  resolveWeaponVisuals,
 } from '../../core/compendium/compendium.model';
+import { CompendiumStore } from '../../core/compendium/compendium.store';
 import { NotificationStore } from '../../core/notifications/notification.store';
 import {
   DEFAULT_VTT_HOTKEYS,
@@ -53,6 +70,7 @@ import { TokenAvatarComponent } from '../../shared/token-avatar/token-avatar.com
 import {
   CharacterModel,
   ResolvedCombatArt,
+  formatRuleHookBadges,
 } from '../characters/models/character.model';
 import { CharacterStore } from '../characters/store/character.store';
 import { CollectionsStore } from '../collections/collections.store';
@@ -60,6 +78,7 @@ import { VttActorSheetComponent } from './components/vtt-actor-sheet/vtt-actor-s
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
 import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
 import { VttFloatingWindowComponent } from './components/vtt-floating-window/vtt-floating-window.component';
+import { VttTokenizerWindowComponent } from './components/vtt-tokenizer-window/vtt-tokenizer-window.component';
 import {
   VTT_CHAT_COMMANDS,
   VttChatCommandConfig,
@@ -105,9 +124,11 @@ import {
   CollectionActorModel,
   TokenAppearanceConfig,
   VTT_ACTOR_COLOR_SWATCHES,
+  VTT_COMPENDIUM_DRAG_MIME,
   VTT_NPC_PRESETS,
   VTT_SCENE_LIGHTING_PRESETS,
   VttActorKind,
+  VttCompendiumDragPayload,
   VttDefenseChoice,
   VttDirectoryScope,
   VttFaction,
@@ -125,12 +146,14 @@ import {
   computeEffectiveActorSightFeet,
   findMatchingSceneLightingPreset,
   hasCustomTokenAppearance,
+  hasRosterActorExternalSource,
   normalizeTokenAppearance,
   normalizeTokenRotation,
   resolveActorDarkvisionFeet,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
+  resolveRosterActorSourceCharacterId,
 } from './models/vtt.model';
 import {
   VttSpeakerMode,
@@ -138,7 +161,13 @@ import {
   VttWhisperTargetOption,
 } from './store/vtt.store';
 
-export type VttSidebarTab = 'log' | 'actors' | 'maps' | 'settings';
+export type VttSidebarTab =
+  | 'log'
+  | 'actors'
+  | 'maps'
+  | 'compendium'
+  | 'settings';
+export type VttCompendiumPackKind = 'weapons' | 'armors' | 'items' | 'skills';
 export type VttSettingsModalKind = 'general' | 'dice' | 'controls' | 'invites';
 export type EditSceneModalTab = 'general' | 'grid' | 'visibility';
 export type VttRosterImportTab =
@@ -215,6 +244,7 @@ export interface EditingMapDraft {
     VttCanvasComponent,
     VttDiceOverlayComponent,
     VttFloatingWindowComponent,
+    VttTokenizerWindowComponent,
   ],
   templateUrl: './vtt-room.component.html',
 })
@@ -225,6 +255,7 @@ export class VttRoomComponent {
   readonly settingsStore = inject(VttSettingsStore);
   readonly characterStore = inject(CharacterStore);
   readonly collectionsStore = inject(CollectionsStore);
+  readonly compendiumStore = inject(CompendiumStore);
   readonly userAssetsStore = inject(UserAssetsStore);
   private readonly notifications = inject(NotificationStore);
   private readonly route = inject(ActivatedRoute);
@@ -235,6 +266,14 @@ export class VttRoomComponent {
   readonly logScrollEl = viewChild<ElementRef<HTMLDivElement>>('logScroll');
   readonly chatComposerEl =
     viewChild<ElementRef<HTMLTextAreaElement>>('chatComposerInput');
+  readonly compendiumWeaponsWindowRef =
+    viewChild<VttFloatingWindowComponent>('compendiumWeaponsWin');
+  readonly compendiumArmorsWindowRef =
+    viewChild<VttFloatingWindowComponent>('compendiumArmorsWin');
+  readonly compendiumItemsWindowRef =
+    viewChild<VttFloatingWindowComponent>('compendiumItemsWin');
+  readonly compendiumSkillsWindowRef =
+    viewChild<VttFloatingWindowComponent>('compendiumSkillsWin');
 
   readonly npcPresets = VTT_NPC_PRESETS;
   readonly sceneLightingPresets = VTT_SCENE_LIGHTING_PRESETS;
@@ -242,6 +281,7 @@ export class VttRoomComponent {
   readonly mapBgSwatches = MAP_BG_COLOR_SWATCHES;
   readonly actorColorSwatches = VTT_ACTOR_COLOR_SWATCHES;
   readonly iconPresets = COMPENDIUM_ICON_PRESETS;
+  readonly itemSubcategories = ITEM_SUBCATEGORY_OPTIONS;
   readonly defaultSceneWidthPx = DEFAULT_VTT_SCENE_WIDTH_PX;
   readonly defaultSceneHeightPx = DEFAULT_VTT_SCENE_HEIGHT_PX;
   readonly defaultGridSizePx = DEFAULT_VTT_GRID_SIZE_PX;
@@ -266,6 +306,152 @@ export class VttRoomComponent {
 
   readonly mapSearchQuery = signal('');
   readonly rosterSearchQuery = signal('');
+  readonly compendiumWeaponsWindowOpen = signal(false);
+  readonly compendiumArmorsWindowOpen = signal(false);
+  readonly compendiumItemsWindowOpen = signal(false);
+  readonly compendiumSkillsWindowOpen = signal(false);
+  readonly compendiumWeaponsSearch = signal('');
+  readonly compendiumWeaponSubfilter = signal<
+    'all' | 'Light' | 'Martial' | 'Heavy' | 'Ranged'
+  >('all');
+  readonly expandedCompendiumWeaponId = signal<string | null>(null);
+  readonly compendiumArmorsSearch = signal('');
+  readonly compendiumArmorSubfilter = signal<
+    'all' | 'Light' | 'Medium' | 'Heavy'
+  >('all');
+  readonly expandedCompendiumArmorId = signal<string | null>(null);
+  readonly compendiumItemsSearch = signal('');
+  readonly compendiumItemSubfilter = signal<string>('all');
+  readonly expandedCompendiumItemId = signal<string | null>(null);
+  readonly compendiumSkillsSearch = signal('');
+  readonly compendiumSkillSubfilter = signal<
+    'all' | 'combat_art' | 'passive_upgrade'
+  >('all');
+  readonly expandedCompendiumSkillId = signal<string | null>(null);
+  readonly getCombatTagBadge = getCombatTagBadgeClass;
+
+  readonly compendiumWeapons = computed<WeaponModel[]>(() => {
+    if (typeof this.compendiumStore.weapons === 'function') {
+      return this.compendiumStore.weapons();
+    }
+    if (typeof this.compendiumStore.allWeapons === 'function') {
+      return this.compendiumStore
+        .allWeapons()
+        .filter((w) => isCompendiumItemActive(w));
+    }
+    return [];
+  });
+
+  readonly compendiumArmors = computed<ArmorModel[]>(() => {
+    if (typeof this.compendiumStore.armors === 'function') {
+      return this.compendiumStore.armors();
+    }
+    if (typeof this.compendiumStore.allArmors === 'function') {
+      return this.compendiumStore
+        .allArmors()
+        .filter((a) => isCompendiumItemActive(a));
+    }
+    return DEFAULT_COMPENDIUM_ARMORS;
+  });
+
+  readonly compendiumItems = computed<CompendiumItemModel[]>(() => {
+    if (typeof this.compendiumStore.items === 'function') {
+      return this.compendiumStore.items();
+    }
+    if (typeof this.compendiumStore.allItems === 'function') {
+      return this.compendiumStore
+        .allItems()
+        .filter((i) => isCompendiumItemActive(i));
+    }
+    return DEFAULT_COMPENDIUM_ITEMS;
+  });
+
+  readonly compendiumStandaloneNodes = computed<PerkNodeModel[]>(() => {
+    if (typeof this.compendiumStore.standaloneNodes === 'function') {
+      return this.compendiumStore.standaloneNodes();
+    }
+    if (typeof this.compendiumStore.allPerkNodes === 'function') {
+      return this.compendiumStore
+        .allPerkNodes()
+        .filter((p) => isStandalonePerkNode(p) && isCompendiumItemActive(p));
+    }
+    return [];
+  });
+
+  readonly isCompendiumLoading = computed<boolean>(() => {
+    if (typeof this.compendiumStore.isLoading === 'function') {
+      return this.compendiumStore.isLoading();
+    }
+    return false;
+  });
+
+  readonly totalCompendiumCount = computed<number>(
+    () =>
+      this.compendiumWeapons().length +
+      this.compendiumArmors().length +
+      this.compendiumItems().length +
+      this.compendiumStandaloneNodes().length
+  );
+
+  readonly filteredCompendiumWeapons = computed<WeaponModel[]>(() => {
+    const sub = this.compendiumWeaponSubfilter();
+    const q = this.compendiumWeaponsSearch().trim().toLowerCase();
+    return this.compendiumWeapons().filter((w) => {
+      if (sub !== 'all' && w.category !== sub) return false;
+      if (!q) return true;
+      return (
+        w.name.toLowerCase().includes(q) ||
+        w.category.toLowerCase().includes(q) ||
+        w.gov_attribute.toLowerCase().includes(q) ||
+        w.gov_skill.toLowerCase().includes(q) ||
+        (w.trait_name ?? '').toLowerCase().includes(q) ||
+        (w.trait_description ?? '').toLowerCase().includes(q)
+      );
+    });
+  });
+
+  readonly filteredCompendiumArmors = computed<ArmorModel[]>(() => {
+    const sub = this.compendiumArmorSubfilter();
+    const q = this.compendiumArmorsSearch().trim().toLowerCase();
+    return this.compendiumArmors().filter((a) => {
+      if (sub !== 'all' && a.weight_class !== sub) return false;
+      if (!q) return true;
+      return (
+        a.name.toLowerCase().includes(q) ||
+        a.weight_class.toLowerCase().includes(q) ||
+        (a.description ?? '').toLowerCase().includes(q)
+      );
+    });
+  });
+
+  readonly filteredCompendiumItems = computed<CompendiumItemModel[]>(() => {
+    const sub = this.compendiumItemSubfilter();
+    const q = this.compendiumItemsSearch().trim().toLowerCase();
+    return this.compendiumItems().filter((it) => {
+      if (sub !== 'all' && it.subcategory !== sub) return false;
+      if (!q) return true;
+      return (
+        it.name.toLowerCase().includes(q) ||
+        it.subcategory.toLowerCase().includes(q) ||
+        (it.description ?? '').toLowerCase().includes(q)
+      );
+    });
+  });
+
+  readonly filteredCompendiumStandaloneNodes = computed<PerkNodeModel[]>(() => {
+    const sub = this.compendiumSkillSubfilter();
+    const q = this.compendiumSkillsSearch().trim().toLowerCase();
+    return this.compendiumStandaloneNodes().filter((node) => {
+      if (sub !== 'all' && node.node_type !== sub) return false;
+      if (!q) return true;
+      return (
+        node.name.toLowerCase().includes(q) ||
+        (node.description ?? '').toLowerCase().includes(q) ||
+        (node.combat_tag ?? '').toLowerCase().includes(q) ||
+        (node.node_type === 'combat_art' ? 'combat art' : 'passive').includes(q)
+      );
+    });
+  });
   readonly collapsedFolderIds = signal<Record<string, boolean>>({});
   readonly draggingMapId = signal<string | null>(null);
   readonly draggingRosterActorId = signal<string | null>(null);
@@ -283,6 +469,8 @@ export class VttRoomComponent {
   readonly rosterImportTab = signal<VttRosterImportTab>('my-characters');
   readonly rosterImportFolderId = signal<string | null>(null);
   readonly rosterImportSearch = signal('');
+  readonly rosterImportUrlInput = signal('');
+  readonly isImportingCharacterUrl = signal(false);
   readonly activeSettingsModal = signal<VttSettingsModalKind | null>(null);
   readonly assetBrowserModal = signal<{
     mode: 'picker' | 'manage';
@@ -522,7 +710,7 @@ export class VttRoomComponent {
     const importedIds = new Set(
       this.vttStore
         .rosterActors()
-        .map((a) => a.character_id)
+        .map((a) => resolveRosterActorSourceCharacterId(a))
         .filter((id): id is string => Boolean(id))
     );
     const uid = this.authStore.user()?.id;
@@ -863,8 +1051,27 @@ export class VttRoomComponent {
       if (this.canvasComp()?.dismissTransientEscapeState()) {
         return;
       }
-      if (this.vttStore.openSheetTarget()) {
-        this.vttStore.closeActorSheet();
+      if (this.compendiumSkillsWindowOpen()) {
+        this.compendiumSkillsWindowOpen.set(false);
+        return;
+      }
+      if (this.compendiumItemsWindowOpen()) {
+        this.compendiumItemsWindowOpen.set(false);
+        return;
+      }
+      if (this.compendiumArmorsWindowOpen()) {
+        this.compendiumArmorsWindowOpen.set(false);
+        return;
+      }
+      if (this.compendiumWeaponsWindowOpen()) {
+        this.compendiumWeaponsWindowOpen.set(false);
+        return;
+      }
+      if (this.vttStore.openTokenizerTarget()) {
+        this.vttStore.closeTokenizerStudio();
+        return;
+      }
+      if (this.vttStore.closeTopmostActorSheet()) {
         return;
       }
       if (this.vttStore.pendingTargetAction()) {
@@ -1128,6 +1335,7 @@ export class VttRoomComponent {
     this.draggingFolderId.set(null);
     this.dragOverTarget.set(null);
     this.vttStore.draggingRosterPayload.set(null);
+    this.vttStore.draggingCompendiumPayload.set(null);
   }
 
   canAcceptDropOnFolder(targetFolderId: string): boolean {
@@ -1410,6 +1618,11 @@ export class VttRoomComponent {
     this.vttStore.openActorSheet(actorId);
   }
 
+  editRosterActorTokenFromMenu(actorId: string): void {
+    this.closeDirectoryContextMenu();
+    this.vttStore.openTokenizerForActor(actorId);
+  }
+
   assignRosterActorFromMenu(actorId: string, userId: string | null): void {
     this.closeDirectoryContextMenu();
     void this.vttStore.assignRosterActorToPlayer(actorId, userId);
@@ -1503,6 +1716,7 @@ export class VttRoomComponent {
     this.closeDirectoryContextMenu();
     this.rosterImportFolderId.set(folderId);
     this.rosterImportSearch.set('');
+    this.rosterImportUrlInput.set('');
     this.rosterImportTab.set(
       this.collectionsStore.actors().length > 0
         ? 'collections'
@@ -1520,7 +1734,69 @@ export class VttRoomComponent {
   isCharacterInRoster(characterId: string): boolean {
     return this.vttStore
       .rosterActors()
-      .some((a) => a.character_id === characterId);
+      .some((a) => resolveRosterActorSourceCharacterId(a) === characterId);
+  }
+
+  canReimportRosterActor(
+    actor: VttRosterActorModel | null | undefined
+  ): boolean {
+    return Boolean(
+      actor &&
+        hasRosterActorExternalSource(actor) &&
+        this.vttStore.canManageRosterActor(actor)
+    );
+  }
+
+  reimportRosterActorFromMenu(actorId: string): void {
+    this.closeDirectoryContextMenu();
+    void this.vttStore.reimportRosterActorFromSource(actorId);
+  }
+
+  async reimportCharacterIntoRoster(characterId: string): Promise<void> {
+    const existing = this.vttStore
+      .rosterActors()
+      .find((a) => resolveRosterActorSourceCharacterId(a) === characterId);
+    if (!existing) return;
+    await this.vttStore.reimportRosterActorFromSource(existing.id);
+  }
+
+  async reimportCollectionActorIntoRoster(
+    collectionActorId: string
+  ): Promise<void> {
+    const matches = this.vttStore
+      .rosterActors()
+      .filter((a) => a.collection_actor_id === collectionActorId);
+    for (const actor of matches) {
+      await this.vttStore.reimportRosterActorFromSource(actor.id);
+    }
+  }
+
+  async importAndOpenCharacterInRoster(
+    character: CharacterModel
+  ): Promise<void> {
+    const actor = await this.vttStore.importCharacterToRoster(character, null);
+    if (actor) {
+      this.vttStore.openActorSheet(actor.id);
+    }
+  }
+
+  async submitRosterImportUrl(): Promise<void> {
+    const raw = this.rosterImportUrlInput().trim();
+    if (!raw || this.isImportingCharacterUrl()) return;
+    const folderId = this.vttStore.isGm() ? this.rosterImportFolderId() : null;
+    if (folderId) {
+      this.expandFolder(folderId);
+    }
+    this.isImportingCharacterUrl.set(true);
+    try {
+      const actor = await this.vttStore.importCharacterByUrlOrId(raw, folderId);
+      if (actor) {
+        this.rosterImportUrlInput.set('');
+        this.vttStore.openActorSheet(actor.id);
+      }
+    } finally {
+      this.isImportingCharacterUrl.set(false);
+    }
   }
 
   isCollectionActorInRoster(collectionActorId: string): boolean {
@@ -2114,7 +2390,12 @@ export class VttRoomComponent {
   }
 
   isCharacterDeployed(characterId: string): VttTokenModel | undefined {
-    return this.vttStore.sceneTokens().find((t) => t.character_id === characterId);
+    return this.vttStore.sceneTokens().find((t) => {
+      if (t.character_id === characterId) return true;
+      if (t.npc_stats?.__source_character_id === characterId) return true;
+      const linked = this.vttStore.resolveRosterActorForToken(t);
+      return resolveRosterActorSourceCharacterId(linked) === characterId;
+    });
   }
 
   async submitCustomNpc(): Promise<void> {
@@ -2302,32 +2583,6 @@ export class VttRoomComponent {
 
   setGmSpeakerMode(mode: VttSpeakerMode): void {
     this.vttStore.setGmSpeakerMode(mode);
-  }
-
-  selectRosterActorRow(
-    actor: VttRosterActorModel,
-    primaryToken: VttTokenModel | null
-  ): void {
-    if (primaryToken) {
-      this.vttStore.selectedRosterActorId.set(null);
-      this.vttStore.selectedCharacterId.set(null);
-      this.vttStore.selectedTokenId.set(primaryToken.id);
-      return;
-    }
-    this.vttStore.selectRosterActorForSpeech(actor.id);
-  }
-
-  selectAvailableCharacterRow(
-    ch: CharacterModel,
-    deployed: VttTokenModel | undefined
-  ): void {
-    if (deployed) {
-      this.vttStore.selectedRosterActorId.set(null);
-      this.vttStore.selectedCharacterId.set(null);
-      this.vttStore.selectedTokenId.set(deployed.id);
-      return;
-    }
-    this.vttStore.selectCharacterForSpeech(ch.id);
   }
 
   toggleOocComposer(): void {
@@ -2628,6 +2883,12 @@ export class VttRoomComponent {
     this.vttStore.selectSingleToken(tok.id);
   }
 
+  onSceneTokenRowDoubleClick(tok: VttTokenModel): void {
+    if (this.vttStore.isGm() || this.vttStore.canControlToken(tok)) {
+      this.vttStore.openTokenSheet(tok.id);
+    }
+  }
+
   toggleMultiSelectedHidden(): void {
     const ids = this.multiSelectedTokens().map((t) => t.id);
     if (ids.length > 0) {
@@ -2765,5 +3026,205 @@ export class VttRoomComponent {
   async executeClearAllLogs(): Promise<void> {
     this.confirmClearLogs.set(false);
     await this.vttStore.clearAllLogs();
+  }
+
+  openCompendiumTab(): void {
+    this.sidebarTab.set('compendium');
+    if (typeof this.compendiumStore.ensureLoaded === 'function') {
+      void this.compendiumStore.ensureLoaded();
+    }
+  }
+
+  openCompendiumWindow(pack: VttCompendiumPackKind): void {
+    if (!this.vttStore.isGm()) return;
+    if (typeof this.compendiumStore.ensureLoaded === 'function') {
+      void this.compendiumStore.ensureLoaded();
+    }
+    if (pack === 'weapons') {
+      if (this.compendiumWeaponsWindowOpen()) {
+        const win = this.compendiumWeaponsWindowRef();
+        win?.minimized.set(false);
+        win?.focusWindow();
+        return;
+      }
+      this.compendiumWeaponsWindowOpen.set(true);
+      return;
+    }
+    if (pack === 'armors') {
+      if (this.compendiumArmorsWindowOpen()) {
+        const win = this.compendiumArmorsWindowRef();
+        win?.minimized.set(false);
+        win?.focusWindow();
+        return;
+      }
+      this.compendiumArmorsWindowOpen.set(true);
+      return;
+    }
+    if (pack === 'items') {
+      if (this.compendiumItemsWindowOpen()) {
+        const win = this.compendiumItemsWindowRef();
+        win?.minimized.set(false);
+        win?.focusWindow();
+        return;
+      }
+      this.compendiumItemsWindowOpen.set(true);
+      return;
+    }
+    if (this.compendiumSkillsWindowOpen()) {
+      const win = this.compendiumSkillsWindowRef();
+      win?.minimized.set(false);
+      win?.focusWindow();
+      return;
+    }
+    this.compendiumSkillsWindowOpen.set(true);
+  }
+
+  closeCompendiumWindow(pack: VttCompendiumPackKind): void {
+    if (pack === 'weapons') {
+      this.compendiumWeaponsWindowOpen.set(false);
+    } else if (pack === 'armors') {
+      this.compendiumArmorsWindowOpen.set(false);
+    } else if (pack === 'items') {
+      this.compendiumItemsWindowOpen.set(false);
+    } else {
+      this.compendiumSkillsWindowOpen.set(false);
+    }
+  }
+
+  toggleCompendiumWeaponExpanded(weaponId: string): void {
+    this.expandedCompendiumWeaponId.update((curr) =>
+      curr === weaponId ? null : weaponId
+    );
+  }
+
+  toggleCompendiumArmorExpanded(armorId: string): void {
+    this.expandedCompendiumArmorId.update((curr) =>
+      curr === armorId ? null : armorId
+    );
+  }
+
+  toggleCompendiumItemExpanded(itemId: string): void {
+    this.expandedCompendiumItemId.update((curr) =>
+      curr === itemId ? null : itemId
+    );
+  }
+
+  toggleCompendiumSkillExpanded(skillId: string): void {
+    this.expandedCompendiumSkillId.update((curr) =>
+      curr === skillId ? null : skillId
+    );
+  }
+
+  getCompendiumWeaponVisuals(wep: WeaponModel): ResolvedCompendiumVisuals {
+    return resolveWeaponVisuals(wep);
+  }
+
+  getCompendiumArmorVisuals(armor: ArmorModel): ResolvedCompendiumVisuals {
+    return resolveArmorVisuals(armor);
+  }
+
+  getCompendiumItemVisuals(
+    item: CompendiumItemModel
+  ): ResolvedCompendiumVisuals {
+    return resolveCompendiumItemVisuals(item);
+  }
+
+  getCompendiumNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
+    return resolveNodeVisuals(node);
+  }
+
+  getCompendiumWeaponTags(wep: WeaponModel): string[] {
+    return [...getWeaponPropertyTags(wep), ...formatWeaponHookBadges(wep)];
+  }
+
+  getCompendiumNodeHookBadges(node: PerkNodeModel): string[] {
+    return formatRuleHookBadges(node.rule_hooks);
+  }
+
+  onCompendiumWeaponDragStart(event: DragEvent, wep: WeaponModel): void {
+    if (!this.vttStore.isGm()) return;
+    event.stopPropagation();
+    this.vttStore.draggingRosterPayload.set(null);
+    const payload: VttCompendiumDragPayload = {
+      kind: 'compendium-weapon',
+      itemId: wep.id,
+      name: wep.name,
+    };
+    this.vttStore.draggingCompendiumPayload.set(payload);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData(
+        VTT_COMPENDIUM_DRAG_MIME,
+        JSON.stringify(payload)
+      );
+      event.dataTransfer.setData('text/plain', wep.name);
+    }
+  }
+
+  onCompendiumArmorDragStart(event: DragEvent, armor: ArmorModel): void {
+    if (!this.vttStore.isGm()) return;
+    event.stopPropagation();
+    this.vttStore.draggingRosterPayload.set(null);
+    const payload: VttCompendiumDragPayload = {
+      kind: 'compendium-armor',
+      itemId: armor.id,
+      name: armor.name,
+    };
+    this.vttStore.draggingCompendiumPayload.set(payload);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData(
+        VTT_COMPENDIUM_DRAG_MIME,
+        JSON.stringify(payload)
+      );
+      event.dataTransfer.setData('text/plain', armor.name);
+    }
+  }
+
+  onCompendiumItemDragStart(
+    event: DragEvent,
+    item: CompendiumItemModel
+  ): void {
+    if (!this.vttStore.isGm()) return;
+    event.stopPropagation();
+    this.vttStore.draggingRosterPayload.set(null);
+    const payload: VttCompendiumDragPayload = {
+      kind: 'compendium-item',
+      itemId: item.id,
+      name: item.name,
+    };
+    this.vttStore.draggingCompendiumPayload.set(payload);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData(
+        VTT_COMPENDIUM_DRAG_MIME,
+        JSON.stringify(payload)
+      );
+      event.dataTransfer.setData('text/plain', item.name);
+    }
+  }
+
+  onCompendiumStandaloneDragStart(event: DragEvent, node: PerkNodeModel): void {
+    if (!this.vttStore.isGm()) return;
+    event.stopPropagation();
+    this.vttStore.draggingRosterPayload.set(null);
+    const payload: VttCompendiumDragPayload = {
+      kind: 'compendium-standalone',
+      itemId: node.id,
+      name: node.name,
+    };
+    this.vttStore.draggingCompendiumPayload.set(payload);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData(
+        VTT_COMPENDIUM_DRAG_MIME,
+        JSON.stringify(payload)
+      );
+      event.dataTransfer.setData('text/plain', node.name);
+    }
+  }
+
+  onCompendiumDragEnd(): void {
+    this.vttStore.draggingCompendiumPayload.set(null);
   }
 }

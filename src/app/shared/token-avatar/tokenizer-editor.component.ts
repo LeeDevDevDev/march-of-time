@@ -365,6 +365,21 @@ export class TokenizerEditorComponent {
     });
   }
 
+  stepScale(delta: number): void {
+    if (!this.editable() || !this.cleanTokenImageUrl()) return;
+    const base = this.liveAppearance();
+    const scale = clampTokenScale(Number((base.scale + delta).toFixed(2)));
+    this.draftAppearance.set(null);
+    this.emitVisuals({
+      portrait_url: this.cleanPortraitUrl(),
+      token_image_url: this.cleanTokenImageUrl(),
+      token_appearance: {
+        ...base,
+        scale,
+      },
+    });
+  }
+
   onStagePointerDown(event: PointerEvent): void {
     if (!this.editable() || !this.cleanTokenImageUrl() || event.button !== 0) {
       return;
@@ -387,7 +402,7 @@ export class TokenizerEditorComponent {
     event.preventDefault();
     event.stopPropagation();
     const stageEl = this.stageRef()?.nativeElement;
-    const diameter = Math.max(64, stageEl?.getBoundingClientRect().width ?? 144);
+    const diameter = Math.max(64, stageEl?.getBoundingClientRect().width || 224);
     const dxPct = ((event.clientX - this.panStartClientX) / diameter) * 100;
     const dyPct = ((event.clientY - this.panStartClientY) / diameter) * 100;
     const base = this.liveAppearance();

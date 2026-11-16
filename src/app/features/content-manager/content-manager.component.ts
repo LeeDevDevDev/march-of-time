@@ -8,6 +8,8 @@ import {
 } from '@angular/router';
 import { filter } from 'rxjs';
 import {
+  ArmorModel,
+  CompendiumItemModel,
   KeywordDefinition,
   PerkNodeModel,
   SkillTreeModel,
@@ -20,6 +22,8 @@ import { CompendiumStore } from '../../core/compendium/compendium.store';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog.component';
 import { CollectionsManagerComponent } from '../collections/collections-manager.component';
 import { CollectionsStore } from '../collections/collections.store';
+import { ArmorsManagerComponent } from './components/armors-manager/armors-manager.component';
+import { ItemsManagerComponent } from './components/items-manager/items-manager.component';
 import { KeywordsManagerComponent } from './components/keywords-manager/keywords-manager.component';
 import { PerkNodeModalComponent } from './components/perk-node-modal/perk-node-modal.component';
 import { SkillTreesManagerComponent } from './components/skill-trees-manager/skill-trees-manager.component';
@@ -30,6 +34,8 @@ export type ContentStudioTab =
   | 'trees'
   | 'standalone'
   | 'weapons'
+  | 'armors'
+  | 'items'
   | 'keywords'
   | 'collections';
 
@@ -56,6 +62,8 @@ export function parseContentManagerUrl(rawUrl: string): {
   if (
     first === 'standalone' ||
     first === 'weapons' ||
+    first === 'armors' ||
+    first === 'items' ||
     first === 'keywords' ||
     first === 'collections'
   ) {
@@ -107,6 +115,26 @@ type PendingDeleteState =
       confirmLabel: string;
     }
   | {
+      kind: 'armor';
+      target: ArmorModel;
+      title: string;
+      itemName: string;
+      badge: string;
+      message: string;
+      warningNote: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: 'item';
+      target: CompendiumItemModel;
+      title: string;
+      itemName: string;
+      badge: string;
+      message: string;
+      warningNote: string;
+      confirmLabel: string;
+    }
+  | {
       kind: 'keyword';
       target: KeywordDefinition;
       title: string;
@@ -126,6 +154,8 @@ type PendingDeleteState =
     SkillTreesManagerComponent,
     StandaloneArtsManagerComponent,
     WeaponsManagerComponent,
+    ArmorsManagerComponent,
+    ItemsManagerComponent,
     KeywordsManagerComponent,
     CollectionsManagerComponent,
     PerkNodeModalComponent,
@@ -292,6 +322,36 @@ export class ContentManagerComponent implements OnInit {
     });
   }
 
+  confirmDeleteArmor(a: ArmorModel): void {
+    this.compendiumStore.clearMessages();
+    this.pendingDelete.set({
+      kind: 'armor',
+      target: a,
+      title: 'Delete Armor from Compendium',
+      itemName: a.name,
+      badge: `${a.weight_class} · +${a.armor_sp} SP · +${a.armor_dr} DR`,
+      message: `Are you sure you want to remove "${a.name}" from the active Armors compendium?`,
+      warningNote:
+        'Existing characters carrying or wearing this armor keep their saved stats intact.',
+      confirmLabel: 'Delete Armor',
+    });
+  }
+
+  confirmDeleteItem(item: CompendiumItemModel): void {
+    this.compendiumStore.clearMessages();
+    this.pendingDelete.set({
+      kind: 'item',
+      target: item,
+      title: 'Delete Item from Compendium',
+      itemName: item.name,
+      badge: `${item.subcategory} · ×${item.default_quantity}`,
+      message: `Are you sure you want to remove "${item.name}" from the active Items compendium?`,
+      warningNote:
+        'Characters already carrying this item in their inventory keep their stack intact.',
+      confirmLabel: 'Delete Item',
+    });
+  }
+
   confirmDeleteKeyword(kw: KeywordDefinition): void {
     this.compendiumStore.clearMessages();
     this.pendingDelete.set({
@@ -331,6 +391,10 @@ export class ContentManagerComponent implements OnInit {
       await this.compendiumStore.deletePerkNode(pending.target.id);
     } else if (pending.kind === 'weapon') {
       await this.compendiumStore.deleteWeapon(pending.target.id);
+    } else if (pending.kind === 'armor') {
+      await this.compendiumStore.deleteArmor(pending.target.id);
+    } else if (pending.kind === 'item') {
+      await this.compendiumStore.deleteCompendiumItem(pending.target.id);
     } else if (pending.kind === 'keyword') {
       await this.compendiumStore.deleteKeyword(pending.target);
     }

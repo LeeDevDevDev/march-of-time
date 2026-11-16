@@ -4,6 +4,7 @@ import {
 } from '../../../core/compendium/compendium.model';
 import {
   ActorInventoryItem,
+  CharacterModel,
   DEFAULT_TOKEN_APPEARANCE,
   TokenAppearanceConfig,
   TokenFramePresetId,
@@ -280,6 +281,10 @@ export interface VttNpcStats {
   __portrait_url?: string | null;
   __token_image_url?: string | null;
   __token_appearance?: TokenAppearanceConfig;
+  __standalone_perk_ids?: string[];
+  __source_character_id?: string | null;
+  __source_preset_id?: string | null;
+  __character_sheet?: CharacterModel | null;
 }
 
 export interface VisualBearingEntity {
@@ -778,6 +783,18 @@ export interface VttRosterDragPayload {
   tokenAppearance?: TokenAppearanceConfig;
 }
 
+export const VTT_COMPENDIUM_DRAG_MIME = 'application/x-mot-compendium';
+
+export interface VttCompendiumDragPayload {
+  kind:
+    | 'compendium-weapon'
+    | 'compendium-armor'
+    | 'compendium-item'
+    | 'compendium-standalone';
+  itemId: string;
+  name: string;
+}
+
 export const VTT_ACTOR_COLOR_SWATCHES: string[] = [
   '#38B29A',
   '#C4491A',
@@ -788,3 +805,183 @@ export const VTT_ACTOR_COLOR_SWATCHES: string[] = [
   '#E11D48',
   '#64748B',
 ];
+
+export function makeDetachedVttCharacterId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `vtt-char-${crypto.randomUUID()}`;
+  }
+  return `vtt-char-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function cloneDetachedVttCharacterSheet(
+  source: CharacterModel,
+  sheetIdOverride?: string
+): CharacterModel {
+  const nextId =
+    sheetIdOverride && sheetIdOverride.trim().length > 0
+      ? sheetIdOverride.trim()
+      : makeDetachedVttCharacterId();
+  return {
+    ...source,
+    id: nextId,
+    attributes: {
+      Brawn: Number(source.attributes?.Brawn ?? 0),
+      Agility: Number(source.attributes?.Agility ?? 0),
+      Technique: Number(source.attributes?.Technique ?? 0),
+      Iron: Number(source.attributes?.Iron ?? 0),
+      Cunning: Number(source.attributes?.Cunning ?? 0),
+    },
+    combat_skills: {
+      Strike: Number(source.combat_skills?.Strike ?? 0),
+      Shoot: Number(source.combat_skills?.Shoot ?? 0),
+      Parry: Number(source.combat_skills?.Parry ?? 0),
+      Dodge: Number(source.combat_skills?.Dodge ?? 0),
+      Block: Number(source.combat_skills?.Block ?? 0),
+    },
+    field_skills: {
+      Athletics: Number(source.field_skills?.Athletics ?? 0),
+      Menace: Number(source.field_skills?.Menace ?? 0),
+      Stealth: Number(source.field_skills?.Stealth ?? 0),
+      Tinkering: Number(source.field_skills?.Tinkering ?? 0),
+      Medicine: Number(source.field_skills?.Medicine ?? 0),
+      Survival: Number(source.field_skills?.Survival ?? 0),
+      Resolve: Number(source.field_skills?.Resolve ?? 0),
+      Perception: Number(source.field_skills?.Perception ?? 0),
+      Sway: Number(source.field_skills?.Sway ?? 0),
+      Lore: Number(source.field_skills?.Lore ?? 0),
+    },
+    unlocked_perk_ids: Array.isArray(source.unlocked_perk_ids)
+      ? [...source.unlocked_perk_ids]
+      : [],
+    active_cooldowns: { ...(source.active_cooldowns ?? {}) },
+    inventory: normalizeInventoryItems(source.inventory).map((item) => ({
+      ...item,
+    })),
+    notes: typeof source.notes === 'string' ? source.notes : '',
+    portrait_url: sanitizeOptionalImageUrl(source.portrait_url),
+    token_image_url: sanitizeOptionalImageUrl(source.token_image_url),
+    token_appearance: normalizeTokenAppearance(source.token_appearance),
+  };
+}
+
+export function resolveRosterActorSourceCharacterId(
+  actor:
+    | Pick<VttRosterActorModel, 'character_id' | 'npc_stats'>
+    | null
+    | undefined
+): string | null {
+  if (!actor) return null;
+  const fromMeta = actor.npc_stats?.__source_character_id;
+  if (typeof fromMeta === 'string' && fromMeta.trim().length > 0) {
+    return fromMeta.trim();
+  }
+  if (typeof actor.character_id === 'string' && actor.character_id.trim().length > 0) {
+    return actor.character_id.trim();
+  }
+  return null;
+}
+
+export function parseCharacterIdFromUrlOrInput(
+  rawInput: string | null | undefined
+): string | null {
+  if (typeof rawInput !== 'string') return null;
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  const routeMatch = trimmed.match(
+    /(?:^|\/)characters\/([^/\s?#]+)(?:\/edit)?\/?(?:[?#].*)?$/i
+  );
+  if (routeMatch && routeMatch[1]) {
+    const candidate = decodeURIComponent(routeMatch[1]).trim();
+    if (!candidate || candidate.toLowerCase() === 'new') {
+      return null;
+    }
+    return candidate;
+  }
+
+  if (
+    !trimmed.includes('/') &&
+    !trimmed.includes(':') &&
+    !/\s/.test(trimmed) &&
+    trimmed.toLowerCase() !== 'new'
+  ) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+export function cloneDetachedNpcStats(
+  stats: VttNpcStats | null | undefined
+): VttNpcStats {
+  if (!stats || typeof stats !== 'object') return {};
+  const next: VttNpcStats = { ...stats };
+  if (stats.__inventory !== undefined) {
+    next.__inventory = normalizeInventoryItems(stats.__inventory).map((it) => ({
+      ...it,
+    }));
+  }
+  if (Array.isArray(stats.__standalone_perk_ids)) {
+    next.__standalone_perk_ids = [...stats.__standalone_perk_ids];
+  }
+  if (stats.__token_appearance && typeof stats.__token_appearance === 'object') {
+    next.__token_appearance = normalizeTokenAppearance(stats.__token_appearance);
+  }
+  if (
+    stats.__character_sheet &&
+    typeof stats.__character_sheet === 'object' &&
+    !Array.isArray(stats.__character_sheet)
+  ) {
+    next.__character_sheet = cloneDetachedVttCharacterSheet(
+      stats.__character_sheet
+    );
+  }
+  return next;
+}
+
+export function hasRosterActorExternalSource(
+  actor:
+    | Pick<VttRosterActorModel, 'character_id' | 'collection_actor_id' | 'npc_stats'>
+    | null
+    | undefined
+): boolean {
+  if (!actor) return false;
+  if (resolveRosterActorSourceCharacterId(actor)) return true;
+  if (
+    typeof actor.collection_actor_id === 'string' &&
+    actor.collection_actor_id.trim().length > 0
+  ) {
+    return true;
+  }
+  const presetId = actor.npc_stats?.__source_preset_id;
+  return typeof presetId === 'string' && presetId.trim().length > 0;
+}
+
+export function parseCollectionActorIdFromUrlOrInput(
+  rawInput: string | null | undefined
+): string | null {
+  if (typeof rawInput !== 'string') return null;
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  const queryMatch = trimmed.match(
+    /(?:^|\/)collections\/?(?:\?|.*?[?&])(?:actor|actorId|id)=([^&\s#]+)/i
+  );
+  if (queryMatch && queryMatch[1]) {
+    const candidate = decodeURIComponent(queryMatch[1]).trim();
+    return candidate || null;
+  }
+
+  const pathMatch = trimmed.match(
+    /(?:^|\/)collections\/([^/\s?#]+)(?:\/edit)?\/?(?:[?#].*)?$/i
+  );
+  if (pathMatch && pathMatch[1]) {
+    const candidate = decodeURIComponent(pathMatch[1]).trim();
+    if (!candidate || candidate.toLowerCase() === 'new') {
+      return null;
+    }
+    return candidate;
+  }
+
+  return null;
+}

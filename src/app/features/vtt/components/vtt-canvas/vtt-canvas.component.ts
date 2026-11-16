@@ -27,6 +27,7 @@ import {
   getHexDistanceFeet,
   getHexPolygonPoints,
   getHexRadius,
+  getTileSizePx,
   getTokenDistanceFeet,
   getTokenWorldCenter,
   hexKey,
@@ -180,6 +181,7 @@ export interface RenderableVttToken {
   token: VttTokenModel;
   center: VttPoint;
   radiusPx: number;
+  tileSizePx: number;
   hpPct: number;
   spPct: number;
   isSelected: boolean;
@@ -578,11 +580,14 @@ export class VttCanvasComponent implements AfterViewInit {
           : hexToWorldCenter(chain.currentHex, geom);
       }
 
+      const sizeScale = Math.min(2, Math.max(1, tok.size || 1));
       const radiusPx = Math.max(
         18,
-        getHexRadius(geom.gridSizePx) *
-          0.82 *
-          Math.min(2, Math.max(1, tok.size || 1))
+        getHexRadius(geom.gridSizePx) * 0.82 * sizeScale
+      );
+      const tileSizePx = Math.max(
+        radiusPx * 2 + 6,
+        getTileSizePx(geom.gridSizePx) * sizeScale
       );
 
       let distFromAttacker: number | null = null;
@@ -624,6 +629,7 @@ export class VttCanvasComponent implements AfterViewInit {
         token: tok,
         center,
         radiusPx,
+        tileSizePx,
         hpPct: Math.max(
           0,
           Math.min(100, (tok.current_hp / Math.max(1, tok.max_hp)) * 100)
@@ -2075,6 +2081,11 @@ export class VttCanvasComponent implements AfterViewInit {
   openTokenSheetFromMenu(tokenId: string): void {
     this.tokenContextMenu.set(null);
     this.vttStore.openTokenSheet(tokenId);
+  }
+
+  openTokenTokenizerFromMenu(tokenId: string): void {
+    this.tokenContextMenu.set(null);
+    this.vttStore.openTokenizerForToken(tokenId);
   }
 
   toggleTokenHiddenFromMenu(token: VttTokenModel): void {

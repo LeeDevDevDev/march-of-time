@@ -1,11 +1,19 @@
 import {
+  ARMOR_WEIGHT_OPTIONS,
   ActiveCombatTag,
+  ArmorModel,
+  ArmorWeightClass,
   AttributeName,
   CombatArtUpgradeSpec,
   CombatArtWeaponRequirement,
   CombatSkillName,
   CombatStatusEffect,
   CombatTag,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
+  ITEM_SUBCATEGORY_OPTIONS,
+  ItemSubcategoryOption,
   PerkNodeModel,
   PerkNodeUiKind,
   PerkRuleHooks,
@@ -26,6 +34,8 @@ import {
   isWeaponHeavy,
   isWeaponTwoHanded,
   normalizeWeaponRequirement,
+  resolveArmorVisuals,
+  resolveCompendiumItemVisuals,
 } from '../../../core/compendium/compendium.model';
 import {
   DEFAULT_TOKEN_APPEARANCE,
@@ -52,13 +62,21 @@ export {
 };
 
 export {
+  ARMOR_WEIGHT_OPTIONS,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
+  ITEM_SUBCATEGORY_OPTIONS,
   type ActiveCombatTag,
+  type ArmorModel,
+  type ArmorWeightClass,
   type AttributeName,
   type CombatArtUpgradeSpec,
   type CombatArtWeaponRequirement,
   type CombatSkillName,
   type CombatStatusEffect,
   type CombatTag,
+  type CompendiumItemModel,
+  type ItemSubcategoryOption,
   type PerkNodeModel,
   type PerkNodeUiKind,
   type PerkRuleHooks,
@@ -79,6 +97,8 @@ export {
   isWeaponHeavy,
   isWeaponTwoHanded,
   normalizeWeaponRequirement,
+  resolveArmorVisuals,
+  resolveCompendiumItemVisuals,
 };
 
 export const UPGRADE_SLOT_PREFIX = '__upgrade_slot:';
@@ -286,11 +306,38 @@ export const SHIELD_TIERS: Record<ShieldTier, ShieldTierSpec> = {
   },
 };
 
+export type InventoryItemCategory = 'weapon' | 'armor' | 'item';
+export type InventoryFilterTab = 'all' | 'weapon' | 'armor' | 'item';
+
 export interface ActorInventoryItem {
   id: string;
+  category?: InventoryItemCategory;
   name: string;
   quantity: number;
   description: string;
+  compendium_id?: string | null;
+  subcategory?: string;
+  equipped?: boolean;
+  gov_attribute?: AttributeName;
+  gov_skill?: CombatSkillName;
+  ap_cost?: number;
+  attack_bonus?: number;
+  base_damage?: number;
+  reach_feet?: number;
+  two_handed?: boolean;
+  armor_weight?: ArmorWeightClass;
+  armor_sp?: number;
+  armor_dr?: number;
+  allows_dodge?: boolean;
+}
+
+export function getInventoryItemCategory(
+  item: Pick<ActorInventoryItem, 'category'> | null | undefined
+): InventoryItemCategory {
+  if (item?.category === 'weapon' || item?.category === 'armor') {
+    return item.category;
+  }
+  return 'item';
 }
 
 export function normalizeInventoryItems(raw: unknown): ActorInventoryItem[] {
@@ -311,14 +358,357 @@ export function normalizeInventoryItems(raw: unknown): ActorInventoryItem[] {
       : 1;
     const description =
       typeof obj['description'] === 'string' ? obj['description'] : '';
-    items.push({
+    const rawCategory = obj['category'];
+    const category: InventoryItemCategory =
+      rawCategory === 'weapon' || rawCategory === 'armor'
+        ? rawCategory
+        : 'item';
+
+    const normalized: ActorInventoryItem = {
       id: rawId,
+      category,
       name: rawName,
       quantity,
       description,
-    });
+    };
+
+    if (
+      typeof obj['compendium_id'] === 'string' &&
+      obj['compendium_id'].trim().length > 0
+    ) {
+      normalized.compendium_id = obj['compendium_id'].trim();
+    }
+    if (
+      typeof obj['subcategory'] === 'string' &&
+      obj['subcategory'].trim().length > 0
+    ) {
+      normalized.subcategory = obj['subcategory'].trim();
+    }
+    if (typeof obj['equipped'] === 'boolean') {
+      normalized.equipped = obj['equipped'];
+    }
+    if (
+      obj['gov_attribute'] === 'Brawn' ||
+      obj['gov_attribute'] === 'Agility' ||
+      obj['gov_attribute'] === 'Technique' ||
+      obj['gov_attribute'] === 'Iron' ||
+      obj['gov_attribute'] === 'Cunning'
+    ) {
+      normalized.gov_attribute = obj['gov_attribute'];
+    }
+    if (
+      obj['gov_skill'] === 'Strike' ||
+      obj['gov_skill'] === 'Shoot' ||
+      obj['gov_skill'] === 'Parry' ||
+      obj['gov_skill'] === 'Dodge' ||
+      obj['gov_skill'] === 'Block'
+    ) {
+      normalized.gov_skill = obj['gov_skill'];
+    }
+    if (Number.isFinite(Number(obj['ap_cost']))) {
+      normalized.ap_cost = Math.max(1, Math.round(Number(obj['ap_cost'])));
+    }
+    if (Number.isFinite(Number(obj['attack_bonus']))) {
+      normalized.attack_bonus = Math.round(Number(obj['attack_bonus']));
+    }
+    if (Number.isFinite(Number(obj['base_damage']))) {
+      normalized.base_damage = Math.max(
+        0,
+        Math.round(Number(obj['base_damage']))
+      );
+    }
+    if (Number.isFinite(Number(obj['reach_feet']))) {
+      normalized.reach_feet = Math.max(
+        5,
+        Math.round(Number(obj['reach_feet']))
+      );
+    }
+    if (typeof obj['two_handed'] === 'boolean') {
+      normalized.two_handed = obj['two_handed'];
+    }
+    if (
+      obj['armor_weight'] === 'Light' ||
+      obj['armor_weight'] === 'Medium' ||
+      obj['armor_weight'] === 'Heavy'
+    ) {
+      normalized.armor_weight = obj['armor_weight'];
+    }
+    if (Number.isFinite(Number(obj['armor_sp']))) {
+      normalized.armor_sp = Math.max(0, Math.round(Number(obj['armor_sp'])));
+    }
+    if (Number.isFinite(Number(obj['armor_dr']))) {
+      normalized.armor_dr = Math.max(0, Math.round(Number(obj['armor_dr'])));
+    }
+    if (typeof obj['allows_dodge'] === 'boolean') {
+      normalized.allows_dodge = obj['allows_dodge'];
+    }
+
+    items.push(normalized);
   }
   return items;
+}
+
+function makeLocalInventoryId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export function buildWeaponInventoryEntry(
+  wep: WeaponModel,
+  quantity = 1
+): ActorInventoryItem {
+  const reachFeet = Math.max(5, Math.round((wep.reach_tiles || 1) * 5));
+  const detailParts = [
+    wep.trait_name
+      ? `${wep.trait_name}: ${wep.trait_description}`
+      : wep.trait_description,
+  ].filter(Boolean);
+  return {
+    id: makeLocalInventoryId(),
+    category: 'weapon',
+    compendium_id: wep.id,
+    subcategory: wep.category || 'Martial',
+    name: wep.name,
+    quantity: Math.max(1, Math.round(quantity)),
+    description: detailParts.join(' · '),
+    gov_attribute: wep.gov_attribute,
+    gov_skill: wep.gov_skill,
+    ap_cost: wep.ap_cost || 1,
+    attack_bonus: 0,
+    base_damage: wep.base_damage ?? 3,
+    reach_feet: reachFeet,
+    two_handed: isWeaponTwoHanded(wep),
+  };
+}
+
+export function buildArmorInventoryEntry(
+  armor: ArmorModel,
+  equipped = false
+): ActorInventoryItem {
+  return {
+    id: makeLocalInventoryId(),
+    category: 'armor',
+    compendium_id: armor.id,
+    subcategory: armor.weight_class,
+    name: armor.name,
+    quantity: 1,
+    description: armor.description || '',
+    equipped,
+    armor_weight: armor.weight_class,
+    armor_sp: Math.max(0, Math.round(armor.armor_sp)),
+    armor_dr: Math.max(0, Math.round(armor.armor_dr)),
+    allows_dodge: Boolean(armor.allows_dodge),
+  };
+}
+
+export function buildCompendiumGearInventoryEntry(
+  item: CompendiumItemModel,
+  quantity?: number
+): ActorInventoryItem {
+  const resolvedQty = Math.max(
+    1,
+    Math.round(quantity ?? item.default_quantity ?? 1)
+  );
+  return {
+    id: makeLocalInventoryId(),
+    category: 'item',
+    compendium_id: item.id,
+    subcategory: item.subcategory || 'Adventuring Gear',
+    name: item.name,
+    quantity: resolvedQty,
+    description: item.description || '',
+  };
+}
+
+export function mergeInventoryEntry(
+  existing: ActorInventoryItem[],
+  incoming: ActorInventoryItem,
+  stackable = true
+): ActorInventoryItem[] {
+  const list = normalizeInventoryItems(existing);
+  const cat = getInventoryItemCategory(incoming);
+  if (stackable && incoming.compendium_id) {
+    const matchIdx = list.findIndex(
+      (it) =>
+        getInventoryItemCategory(it) === cat &&
+        it.compendium_id === incoming.compendium_id &&
+        !it.equipped
+    );
+    if (matchIdx >= 0) {
+      return list.map((it, idx) =>
+        idx === matchIdx
+          ? { ...it, quantity: Math.max(1, it.quantity + incoming.quantity) }
+          : it
+      );
+    }
+  }
+  return [...list, incoming];
+}
+
+export interface ResolvedEquippedArmor {
+  item: ActorInventoryItem;
+  label: string;
+  weightClass: ArmorWeightClass;
+  armorSp: number;
+  armorDr: number;
+  allowsDodge: boolean;
+  speedPenaltyTiles: number;
+}
+
+export function resolveEquippedInventoryArmor(
+  inventory: ActorInventoryItem[] | undefined,
+  armors: ArmorModel[] = DEFAULT_COMPENDIUM_ARMORS
+): ResolvedEquippedArmor | null {
+  const list = normalizeInventoryItems(inventory);
+  const found = list.find(
+    (it) => getInventoryItemCategory(it) === 'armor' && it.equipped
+  );
+  if (!found) return null;
+
+  const compendiumMatch = found.compendium_id
+    ? (armors.find((a) => a.id === found.compendium_id) ?? null)
+    : null;
+
+  const weightClass: ArmorWeightClass =
+    found.armor_weight ?? compendiumMatch?.weight_class ?? 'Light';
+  const tierFallback = ARMOR_TIERS[weightClass];
+
+  const armorSp =
+    typeof found.armor_sp === 'number'
+      ? found.armor_sp
+      : (compendiumMatch?.armor_sp ?? tierFallback.armorSp);
+  const armorDr =
+    typeof found.armor_dr === 'number'
+      ? found.armor_dr
+      : (compendiumMatch?.armor_dr ?? tierFallback.hpDr);
+  const allowsDodge =
+    typeof found.allows_dodge === 'boolean'
+      ? found.allows_dodge
+      : (compendiumMatch?.allows_dodge ?? tierFallback.allowsDodge);
+  const speedPenaltyTiles =
+    compendiumMatch?.speed_penalty_tiles ?? tierFallback.speedPenaltyTiles;
+
+  return {
+    item: found,
+    label: found.name || compendiumMatch?.name || tierFallback.label,
+    weightClass,
+    armorSp,
+    armorDr,
+    allowsDodge,
+    speedPenaltyTiles,
+  };
+}
+
+export interface CharacterWeaponFormulaSummary {
+  govAttribute: AttributeName;
+  govSkill: CombatSkillName;
+  attackMod: number;
+  rollFormula: string;
+  rollBreakdown: string;
+  flatDamage: number;
+  damageFormula: string;
+  damageBreakdown: string;
+  apCost: number;
+  reachFeet: number;
+  twoHanded: boolean;
+  categoryLabel: string;
+}
+
+export function computeCharacterWeaponFormula(
+  char: Pick<CharacterModel, 'attributes' | 'combat_skills'>,
+  target: WeaponModel | ActorInventoryItem,
+  unlockedPerks: PerkNodeModel[] = [],
+  allWeapons: WeaponModel[] = []
+): CharacterWeaponFormulaSummary {
+  const isWeaponModel = 'gov_attribute' in target && 'reach_tiles' in target;
+  const matchedCompendiumWeapon = isWeaponModel
+    ? (target as WeaponModel)
+    : (target as ActorInventoryItem).compendium_id
+      ? (allWeapons.find(
+          (w) => w.id === (target as ActorInventoryItem).compendium_id
+        ) ?? null)
+      : null;
+
+  const itemEntry = isWeaponModel ? null : (target as ActorInventoryItem);
+
+  const govAttribute: AttributeName =
+    matchedCompendiumWeapon?.gov_attribute ??
+    itemEntry?.gov_attribute ??
+    'Brawn';
+  const govSkill: CombatSkillName =
+    matchedCompendiumWeapon?.gov_skill ?? itemEntry?.gov_skill ?? 'Strike';
+  const baseDamage =
+    matchedCompendiumWeapon?.base_damage ?? itemEntry?.base_damage ?? 3;
+  const itemAttackBonus = itemEntry?.attack_bonus ?? 0;
+  const apCost = matchedCompendiumWeapon?.ap_cost ?? itemEntry?.ap_cost ?? 1;
+  const reachFeet = matchedCompendiumWeapon
+    ? Math.max(5, Math.round((matchedCompendiumWeapon.reach_tiles || 1) * 5))
+    : Math.max(5, itemEntry?.reach_feet ?? 5);
+  const twoHanded = matchedCompendiumWeapon
+    ? isWeaponTwoHanded(matchedCompendiumWeapon)
+    : Boolean(itemEntry?.two_handed);
+  const categoryLabel =
+    matchedCompendiumWeapon?.category ?? itemEntry?.subcategory ?? 'Martial';
+
+  const attrVal = char.attributes[govAttribute] ?? 0;
+  const skillVal = char.combat_skills[govSkill] ?? 0;
+
+  let perkAttackBonus = 0;
+  let perkDamageBonus = 0;
+  for (const p of unlockedPerks) {
+    if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+      perkAttackBonus += Number(p.rule_hooks?.bonus_attack_mod ?? 0);
+      perkDamageBonus += Number(p.rule_hooks?.bonus_flat_damage ?? 0);
+    }
+  }
+
+  const attackMod = attrVal + skillVal + perkAttackBonus + itemAttackBonus;
+  const flatDamage = baseDamage + attrVal + perkDamageBonus;
+
+  const modSign =
+    attackMod >= 0 ? `+ ${attackMod}` : `− ${Math.abs(attackMod)}`;
+  const rollFormula = `2d10 ${modSign}`;
+
+  const rollParts = [
+    `2d10`,
+    `${govAttribute} (${attrVal >= 0 ? '+' : ''}${attrVal})`,
+    `${govSkill} (${skillVal >= 0 ? '+' : ''}${skillVal})`,
+  ];
+  if (perkAttackBonus !== 0) {
+    rollParts.push(
+      `Perks (${perkAttackBonus > 0 ? '+' : ''}${perkAttackBonus})`
+    );
+  }
+  if (itemAttackBonus !== 0) {
+    rollParts.push(`Bonus (${itemAttackBonus > 0 ? '+' : ''}${itemAttackBonus})`);
+  }
+
+  const damageParts = [
+    `${baseDamage} Base`,
+    `${govAttribute} (${attrVal >= 0 ? '+' : ''}${attrVal})`,
+  ];
+  if (perkDamageBonus !== 0) {
+    damageParts.push(
+      `Perks (${perkDamageBonus > 0 ? '+' : ''}${perkDamageBonus})`
+    );
+  }
+
+  return {
+    govAttribute,
+    govSkill,
+    attackMod,
+    rollFormula,
+    rollBreakdown: rollParts.join(' + '),
+    flatDamage,
+    damageFormula: `${flatDamage} DMG`,
+    damageBreakdown: damageParts.join(' + '),
+    apCost,
+    reachFeet,
+    twoHanded,
+    categoryLabel,
+  };
 }
 
 export interface CharacterModel {
@@ -378,6 +768,8 @@ export interface DerivedCharacterStats {
   maxSp: number;
   armorSp: number;
   armorDr: number;
+  equippedArmorLabel: string;
+  equippedInventoryArmorId: string | null;
   stanceRecoverySp: number;
   shieldBlockTotal: number;
   usesRaiseShield: boolean;
@@ -434,9 +826,11 @@ export function computeDerivedStats(
     | 'unlocked_perk_ids'
   > & {
     active_cooldowns?: Record<string, number | string>;
+    inventory?: ActorInventoryItem[];
   },
   weapons: WeaponModel[],
-  perkNodes: PerkNodeModel[]
+  perkNodes: PerkNodeModel[],
+  armors: ArmorModel[] = DEFAULT_COMPENDIUM_ARMORS
 ): DerivedCharacterStats {
   const brawn = char.attributes.Brawn ?? 0;
   const agility = char.attributes.Agility ?? 0;
@@ -676,19 +1070,40 @@ export function computeDerivedStats(
   const activeWeaponIsHeavy = isWeaponHeavy(activeWeapon);
   const shieldDisabledByTwoHanded = activeWeaponIsTwoHanded && char.equipped_shield !== 'None';
 
+  const equippedInvArmor =
+    char.equipped_armor !== 'None'
+      ? resolveEquippedInventoryArmor(char.inventory, armors)
+      : null;
+
   const armorSpec = ARMOR_TIERS[char.equipped_armor] ?? ARMOR_TIERS.None;
+  const effectiveArmorLabel = equippedInvArmor
+    ? equippedInvArmor.label
+    : armorSpec.label;
+  const effectiveArmorSp = equippedInvArmor
+    ? equippedInvArmor.armorSp
+    : armorSpec.armorSp;
+  const effectiveArmorBaseDr = equippedInvArmor
+    ? equippedInvArmor.armorDr
+    : armorSpec.hpDr;
+  const effectiveArmorAllowsDodge = equippedInvArmor
+    ? equippedInvArmor.allowsDodge
+    : armorSpec.allowsDodge;
+  const effectiveArmorSpeedPenalty = equippedInvArmor
+    ? equippedInvArmor.speedPenaltyTiles
+    : armorSpec.speedPenaltyTiles;
+
   const effectiveShieldTier: ShieldTier = activeWeaponIsTwoHanded
     ? 'None'
     : char.equipped_shield;
   const shieldSpec = SHIELD_TIERS[effectiveShieldTier] ?? SHIELD_TIERS.None;
 
   const stanceRecoverySp = 2 + iron + perkBonusStanceRecovery;
-  const armorSp = armorSpec.armorSp;
+  const armorSp = effectiveArmorSp;
   const maxSp = 2 + iron + armorSp + perkBonusSp;
   const maxHp = 5 + iron * 2 + perkBonusHp;
-  const armorDr = armorSpec.hpDr + perkBonusArmorDr;
+  const armorDr = effectiveArmorBaseDr + perkBonusArmorDr;
 
-  const canDodge = armorSpec.allowsDodge && shieldSpec.allowsDodge;
+  const canDodge = effectiveArmorAllowsDodge && shieldSpec.allowsDodge;
   const enablesMartialParry = shieldSpec.enablesMartialParry;
 
   const canBlockWithHeavyWeapon = activeWeaponIsHeavy;
@@ -713,7 +1128,7 @@ export function computeDerivedStats(
   const moveFeet = Math.max(
     5,
     Math.round(
-      (4 - armorSpec.speedPenaltyTiles - shieldSpec.speedPenaltyTiles + perkBonusMoveTiles) * 5
+      (4 - effectiveArmorSpeedPenalty - shieldSpec.speedPenaltyTiles + perkBonusMoveTiles) * 5
     )
   );
   const moveTiles = Math.max(1, Math.round(moveFeet / 5));
@@ -779,6 +1194,8 @@ export function computeDerivedStats(
     maxSp,
     armorSp,
     armorDr,
+    equippedArmorLabel: effectiveArmorLabel,
+    equippedInventoryArmorId: equippedInvArmor?.item.id ?? null,
     stanceRecoverySp,
     shieldBlockTotal,
     usesRaiseShield,

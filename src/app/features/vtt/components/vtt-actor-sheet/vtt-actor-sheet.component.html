@@ -1,17 +1,78 @@
 @if (isOpen()) {
   @let mode = sheetMode();
-  @let char = vttStore.openSheetCharacter();
-  @let stats = vttStore.openSheetDerived();
-  @let actor = vttStore.openSheetRosterActor();
-  @let tok = vttStore.openSheetToken();
+  @let char = sheetCharacter();
+  @let stats = sheetDerived();
+  @let actor = sheetRosterActor();
+  @let tok = sheetToken();
   @let editable = canEdit();
+  @let vis = resolvedVisuals();
+  @let portrait = displayPortraitUrl();
+  @let srcCharId = sourceCharacterId();
+
+  <ng-template #tokenVisualSummaryCard let-displayName="displayName">
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#122220] p-3">
+      <div class="flex min-w-0 items-center gap-3">
+        @if (portrait) {
+          <div class="h-20 w-16 shrink-0 overflow-hidden rounded-xl border border-[#243B37] bg-[#09100F] shadow-sm">
+            <img
+              [src]="portrait"
+              [alt]="displayName + ' portrait'"
+              (error)="brokenPortraitUrl.set(portrait)"
+              class="h-full w-full object-cover object-top"
+            />
+          </div>
+        }
+        <div class="h-16 w-16 shrink-0 rounded-xl border border-[#243B37] bg-[#09100F] p-1.5">
+          <app-token-avatar
+            [tokenImageUrl]="vis.tokenImageUrl"
+            [appearance]="vis.tokenAppearance"
+            [icon]="getDisplayIcon()"
+            [color]="getDisplayColor()"
+            [faction]="getDisplayFaction()"
+            iconSizeClass="h-7 w-7"
+          />
+        </div>
+        <div class="min-w-0 space-y-0.5">
+          <div class="font-display text-xs font-bold text-white">
+            Portrait &amp; Battlemap Token
+          </div>
+          <div class="text-[11px] text-[#8AB0AB]">
+            {{ vis.tokenImageUrl ? 'Custom token art' : 'Emblem fallback' }} &middot; {{ activeFrameLabel() }}
+          </div>
+          <div class="text-[10px] text-[#648782]">
+            Opens the dedicated Tokenizer Studio window for full-size cropping and framing.
+          </div>
+        </div>
+      </div>
+
+      @if (editable) {
+        <button
+          type="button"
+          data-open-tokenizer-studio="true"
+          (click)="openTokenizerWindow()"
+          class="btn-copper shrink-0 rounded-lg px-3.5 py-2 text-xs font-bold"
+        >
+          Edit Token
+        </button>
+      }
+    </div>
+  </ng-template>
 
   <section
     aria-label="Actor Sheet"
     data-vtt-floating-window="true"
+    [attr.data-sheet-key]="sheetKeyInput() || ''"
+    [attr.data-actor-id]="actor?.id || ''"
     (pointerdown)="focusWindow()"
     (wheel)="$event.stopPropagation()"
-    class="fixed pointer-events-auto flex w-[min(94vw,680px)] flex-col overflow-hidden rounded-2xl border border-[#243B37] bg-[#0D1615]/98 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs select-text"
+    (dragover)="onSheetDragOver($event, 'sheet')"
+    (dragleave)="onSheetDragLeave($event)"
+    (drop)="onSheetDrop($event, 'sheet')"
+    class="fixed pointer-events-auto flex w-[min(94vw,680px)] flex-col overflow-hidden rounded-2xl border bg-[#0D1615]/98 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs select-text transition-colors"
+    [class.border-[#38B29A]]="activeDropZone() !== null"
+    [class.ring-2]="activeDropZone() !== null"
+    [class.ring-[#38B29A]/35]="activeDropZone() !== null"
+    [class.border-[#243B37]]="activeDropZone() === null"
     [class.max-h-[calc(100vh-84px)]]="!minimized()"
     [style.left.px]="windowX()"
     [style.top.px]="windowY()"
@@ -19,62 +80,105 @@
   >
     <div
       (pointerdown)="onHeaderPointerDown($event)"
-      class="flex shrink-0 cursor-move select-none items-center justify-between gap-2.5 border-b border-[#243B37] bg-[#122220] px-3.5 py-2.5"
+      class="flex shrink-0 cursor-move select-none items-center justify-between gap-3 border-b border-[#243B37] bg-[#122220] px-3.5 py-2.5"
     >
-      <div class="flex min-w-0 flex-1 items-center gap-2.5">
-        @let vis = resolvedVisuals();
-        @let portrait = displayPortraitUrl();
+      <div class="flex min-w-0 flex-1 items-center gap-3">
         <button
           type="button"
-          (click)="openTokenizerTab()"
-          title="Open Portrait &amp; Token Studio"
-          class="relative shrink-0 cursor-pointer"
+          data-header-portrait-avatar="true"
+          [disabled]="!editable"
+          (click)="openTokenizerWindow()"
+          [title]="editable ? 'Click to open Tokenizer Studio' : 'Actor Portrait & Token'"
+          class="group relative shrink-0"
+          [class.cursor-pointer]="editable"
         >
-          @if (portrait) {
-            <div class="h-10 w-9 overflow-hidden rounded-lg border border-[#243B37] bg-[#09100F]">
-              <img
-                [src]="portrait"
-                [alt]="(char?.name || getNpcName()) + ' portrait'"
-                class="h-full w-full object-cover"
-                (error)="brokenPortraitUrl.set(portrait)"
-              />
-            </div>
-            @if (hasCustomToken()) {
-              <div class="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-[#09100F] p-0.25 shadow-sm">
+          @if (minimized()) {
+            @if (portrait) {
+              <div class="h-9 w-8 overflow-hidden rounded-lg border border-[#243B37] bg-[#09100F]">
+                <img
+                  [src]="portrait"
+                  [alt]="(char?.name || getNpcName()) + ' portrait'"
+                  class="h-full w-full object-cover object-top"
+                  (error)="brokenPortraitUrl.set(portrait)"
+                />
+              </div>
+            } @else if (hasCustomToken()) {
+              <div class="h-9 w-9">
                 <app-token-avatar
                   [tokenImageUrl]="vis.tokenImageUrl"
                   [appearance]="vis.tokenAppearance"
                   [icon]="getDisplayIcon()"
                   [color]="getDisplayColor()"
                   [faction]="getDisplayFaction()"
-                  iconSizeClass="h-2 w-2"
+                  iconSizeClass="h-4 w-4"
+                />
+              </div>
+            } @else {
+              <div
+                class="flex h-9 w-9 items-center justify-center rounded-xl border-2 bg-[#09100F]"
+                [class.border-[#38B29A]]="getDisplayFaction() === 'ally'"
+                [class.border-[#F43F5E]]="getDisplayFaction() === 'enemy'"
+                [class.border-[#F59E0B]]="getDisplayFaction() === 'neutral'"
+              >
+                <app-compendium-icon
+                  [icon]="getDisplayIcon()"
+                  [color]="getDisplayColor()"
+                  sizeClass="h-5 w-5"
                 />
               </div>
             }
-          } @else if (hasCustomToken()) {
-            <div class="h-9 w-9">
-              <app-token-avatar
-                [tokenImageUrl]="vis.tokenImageUrl"
-                [appearance]="vis.tokenAppearance"
-                [icon]="getDisplayIcon()"
-                [color]="getDisplayColor()"
-                [faction]="getDisplayFaction()"
-                iconSizeClass="h-4 w-4"
-              />
-            </div>
           } @else {
-            <div
-              class="flex h-9 w-9 items-center justify-center rounded-xl border-2 bg-[#09100F]"
-              [class.border-[#38B29A]]="getDisplayFaction() === 'ally'"
-              [class.border-[#F43F5E]]="getDisplayFaction() === 'enemy'"
-              [class.border-[#F59E0B]]="getDisplayFaction() === 'neutral'"
-            >
-              <app-compendium-icon
-                [icon]="getDisplayIcon()"
-                [color]="getDisplayColor()"
-                sizeClass="h-5 w-5"
-              />
-            </div>
+            @if (portrait) {
+              <div class="h-20 w-16 overflow-hidden rounded-xl border border-[#243B37] bg-[#09100F] shadow-md transition-colors group-hover:border-[#38B29A]">
+                <img
+                  [src]="portrait"
+                  [alt]="(char?.name || getNpcName()) + ' portrait'"
+                  class="h-full w-full object-cover object-top"
+                  (error)="brokenPortraitUrl.set(portrait)"
+                />
+              </div>
+              @if (hasCustomToken()) {
+                <div class="absolute -bottom-1.5 -right-1.5 h-8 w-8 rounded-full border border-[#243B37] bg-[#09100F] p-0.5 shadow-md">
+                  <app-token-avatar
+                    [tokenImageUrl]="vis.tokenImageUrl"
+                    [appearance]="vis.tokenAppearance"
+                    [icon]="getDisplayIcon()"
+                    [color]="getDisplayColor()"
+                    [faction]="getDisplayFaction()"
+                    iconSizeClass="h-3.5 w-3.5"
+                  />
+                </div>
+              }
+            } @else if (hasCustomToken()) {
+              <div class="h-16 w-16 rounded-xl border border-[#243B37] bg-[#09100F] p-1 shadow-md transition-colors group-hover:border-[#38B29A]">
+                <app-token-avatar
+                  [tokenImageUrl]="vis.tokenImageUrl"
+                  [appearance]="vis.tokenAppearance"
+                  [icon]="getDisplayIcon()"
+                  [color]="getDisplayColor()"
+                  [faction]="getDisplayFaction()"
+                  iconSizeClass="h-7 w-7"
+                />
+              </div>
+            } @else {
+              <div
+                class="flex h-16 w-16 items-center justify-center rounded-xl border-2 bg-[#09100F] shadow-md transition-colors group-hover:border-[#38B29A]"
+                [class.border-[#38B29A]]="getDisplayFaction() === 'ally'"
+                [class.border-[#F43F5E]]="getDisplayFaction() === 'enemy'"
+                [class.border-[#F59E0B]]="getDisplayFaction() === 'neutral'"
+              >
+                <app-compendium-icon
+                  [icon]="getDisplayIcon()"
+                  [color]="getDisplayColor()"
+                  sizeClass="h-8 w-8"
+                />
+              </div>
+            }
+            @if (editable) {
+              <span class="pointer-events-none absolute top-1 left-1 rounded bg-[#09100F]/90 px-1.5 py-0.25 text-[9px] font-bold text-[#5EEAD4] opacity-0 shadow transition-opacity group-hover:opacity-100">
+                Token
+              </span>
+            }
           }
         </button>
 
@@ -128,11 +232,23 @@
       </div>
 
       <div class="flex shrink-0 items-center gap-1.5">
-        @if (char) {
+        @if (canReimportFromSource()) {
+          <button
+            type="button"
+            data-reimport-character="true"
+            [disabled]="isReimporting()"
+            (click)="reimportFromOriginalSheet()"
+            title="Overwrite this VTT actor with the latest details from its source sheet or Collection template"
+            class="rounded-lg border border-[#38B29A]/60 bg-[#0D1E1B] px-2 py-1 text-[10px] font-bold text-[#5EEAD4] transition-colors hover:bg-[#15312C] disabled:opacity-45"
+          >
+            {{ isReimporting() ? 'Syncing...' : 'Re-import' }}
+          </button>
+        }
+        @if (srcCharId) {
           <a
-            [routerLink]="['/characters', char.id]"
+            [routerLink]="['/characters', srcCharId]"
             target="_blank"
-            title="Open Full Page Sheet in New Tab"
+            title="Open Original Character Sheet in New Tab"
             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] no-underline hover:border-[#C4491A] hover:text-white"
           >
             Full Page &#8599;
@@ -156,6 +272,12 @@
         </button>
       </div>
     </div>
+
+    @if (activeDropZone() !== null) {
+      <div class="flex shrink-0 items-center justify-center gap-2 border-b border-[#38B29A]/40 bg-[#102B26] px-3.5 py-1.5 text-[11px] font-bold text-[#5EEAD4]">
+        <span>&#10022; {{ getCompendiumDropHint() }}</span>
+      </div>
+    }
 
     @if (!minimized()) {
       <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#243B37] bg-[#09100F] px-3.5 py-2 tabular-nums">
@@ -315,36 +437,6 @@
 
           <div class="flex-1 overflow-y-auto p-3.5 space-y-4 tabular-nums">
             @if (pcTab() === 'character') {
-              @if (displayPortraitUrl(); as portraitBanner) {
-                <div class="flex items-center gap-3 rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
-                  <div class="h-24 w-20 shrink-0 overflow-hidden rounded-lg border border-[#243B37] bg-[#09100F] shadow">
-                    <img
-                      [src]="portraitBanner"
-                      [alt]="char.name + ' portrait'"
-                      class="h-full w-full object-cover"
-                      (error)="brokenPortraitUrl.set(portraitBanner)"
-                    />
-                  </div>
-                  <div class="min-w-0 flex-1 space-y-1">
-                    <div class="font-display text-sm font-bold text-white">
-                      {{ char.name }}
-                    </div>
-                    <p class="text-[11px] text-[#8AB0AB]">
-                      Level {{ char.level }} Warden &middot; {{ armorMeta[char.equipped_armor].label }} &middot; {{ shieldMeta[char.equipped_shield].label }}
-                    </p>
-                    @if (editable) {
-                      <button
-                        type="button"
-                        (click)="pcTab.set('token')"
-                        class="mt-1 inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#5EEAD4] hover:border-[#38B29A]"
-                      >
-                        Edit Portrait &amp; Token
-                      </button>
-                    }
-                  </div>
-                </div>
-              }
-
               <div class="flex flex-wrap items-center gap-1.5 text-[10px] font-mono-num">
                 <span class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[#EBF5F3]">
                   Attributes: <strong>{{ stats.attributeSpent }}/{{ stats.attributeBudget }}</strong>
@@ -521,24 +613,59 @@
 
             @if (pcTab() === 'loadout') {
               <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                <label class="block space-y-1">
-                  <span class="font-semibold text-[#EBF5F3]">Equipped Armor</span>
+                <div class="rounded-xl border border-[#243B37] bg-[#122220] p-3 space-y-1.5">
+                  <div class="flex flex-wrap items-center justify-between gap-1.5">
+                    <span class="font-semibold text-[#EBF5F3]">Equipped Armor</span>
+                    <div class="flex items-center gap-1 font-mono-num text-[10px] font-bold">
+                      <span class="rounded border border-[#F59E0B]/40 bg-[#2B1D0E] px-1.5 py-[1px] text-[#FBBF24]">
+                        +{{ stats.armorSp }} SP
+                      </span>
+                      <span class="rounded border border-[#38B29A]/40 bg-[#102B26] px-1.5 py-[1px] text-[#5EEAD4]">
+                        +{{ stats.armorDr }} DR
+                      </span>
+                    </div>
+                  </div>
                   <select
-                    [ngModel]="char.equipped_armor"
-                    (ngModelChange)="changeEquippedArmor(char, $event)"
+                    data-vtt-pc-armor-select="true"
+                    [ngModel]="getLoadoutArmorSelectValue(char, stats)"
+                    (ngModelChange)="selectLoadoutArmorChoice(char, $event)"
                     [disabled]="!editable"
                     class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
                   >
-                    @for (tier of armorTiers; track tier) {
-                      <option [ngValue]="tier">
-                        {{ armorMeta[tier].label }} (DR {{ armorMeta[tier].hpDr }})
-                      </option>
+                    <option value="None">Unarmored (0 SP · 0 DR)</option>
+                    @if (getPcInventoryArmors(char).length > 0) {
+                      <optgroup label="Carried Armors">
+                        @for (invArm of getPcInventoryArmors(char); track invArm.id) {
+                          <option [value]="'inv:' + invArm.id">
+                            {{ invArm.name }} (+{{ getArmorItemSp(invArm) }} SP · +{{ getArmorItemDr(invArm) }} DR)
+                          </option>
+                        }
+                      </optgroup>
                     }
+                    <optgroup label="Compendium Armors">
+                      @for (cArm of getActiveCompendiumArmors(); track cArm.id) {
+                        <option [value]="'comp:' + cArm.id">
+                          {{ cArm.name }} (+{{ cArm.armor_sp }} SP · +{{ cArm.armor_dr }} DR · {{ cArm.weight_class }})
+                        </option>
+                      }
+                    </optgroup>
+                    <optgroup label="Standard Armor Tiers">
+                      @for (tier of armorWeights; track tier) {
+                        <option [value]="'tier:' + tier">
+                          {{ armorMeta[tier].label }} (+{{ armorMeta[tier].armorSp }} SP · +{{ armorMeta[tier].hpDr }} DR)
+                        </option>
+                      }
+                    </optgroup>
                   </select>
-                </label>
+                </div>
 
-                <label class="block space-y-1">
-                  <span class="font-semibold text-[#EBF5F3]">Equipped Shield</span>
+                <div class="rounded-xl border border-[#243B37] bg-[#122220] p-3 space-y-1.5">
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span class="font-semibold text-[#EBF5F3]">Equipped Shield</span>
+                    <span class="font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+                      {{ shieldMeta[char.equipped_shield].blockValue > 0 ? 'Block ' + shieldMeta[char.equipped_shield].blockValue : (shieldMeta[char.equipped_shield].enablesMartialParry ? 'Martial Parry' : 'Off-Hand Free') }}
+                    </span>
+                  </div>
                   <select
                     [ngModel]="char.equipped_shield"
                     (ngModelChange)="changeEquippedShield(char, $event)"
@@ -556,32 +683,49 @@
                       Two-handed weapon active (shield stowed).
                     </span>
                   }
-                </label>
+                </div>
               </div>
 
               <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 <div
-                  class="rounded-xl border p-3 space-y-2"
-                  [class.border-[#C4491A]]="char.active_weapon_slot === 1"
-                  [class.bg-[#122220]]="char.active_weapon_slot === 1"
-                  [class.border-[#243B37]]="char.active_weapon_slot !== 1"
-                  [class.bg-[#09100F]]="char.active_weapon_slot !== 1"
+                  data-drop-zone="slot-1"
+                  (dragover)="onSheetDragOver($event, 'slot-1')"
+                  (drop)="onSheetDrop($event, 'slot-1')"
+                  class="rounded-xl border p-3 space-y-2 transition-colors"
+                  [class.border-[#38B29A]]="activeDropZone() === 'slot-1'"
+                  [class.bg-[#102B26]]="activeDropZone() === 'slot-1'"
+                  [class.border-[#C4491A]]="activeDropZone() !== 'slot-1' && char.active_weapon_slot === 1"
+                  [class.bg-[#122220]]="activeDropZone() !== 'slot-1' && char.active_weapon_slot === 1"
+                  [class.border-[#243B37]]="activeDropZone() !== 'slot-1' && char.active_weapon_slot !== 1"
+                  [class.bg-[#09100F]]="activeDropZone() !== 'slot-1' && char.active_weapon_slot !== 1"
                 >
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-bold text-white">Weapon Slot 1</span>
-                    @if (char.active_weapon_slot === 1) {
-                      <span class="rounded border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-0.25 text-[9px] font-bold text-[#FDBA74]">
-                        ACTIVE
-                      </span>
-                    } @else if (editable) {
-                      <button
-                        type="button"
-                        (click)="setActiveWeaponSlot(char, 1)"
-                        class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
-                      >
-                        Equip Active
-                      </button>
-                    }
+                    <div class="flex items-center gap-1">
+                      @if (char.active_weapon_slot === 1) {
+                        <span class="rounded border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-0.25 text-[9px] font-bold text-[#FDBA74]">
+                          ACTIVE
+                        </span>
+                      } @else if (editable) {
+                        <button
+                          type="button"
+                          (click)="setActiveWeaponSlot(char, 1)"
+                          class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
+                        >
+                          Equip Active
+                        </button>
+                      }
+                      @if (editable && stats.weaponSlot1) {
+                        <button
+                          type="button"
+                          (click)="stowCharacterSlotWeapon(char, 1)"
+                          class="rounded border border-[#243B37] bg-[#122220] px-1.5 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                          title="Stow weapon into Inventory"
+                        >
+                          Stow
+                        </button>
+                      }
+                    </div>
                   </div>
                   <select
                     [ngModel]="char.weapon_slot_1_id ?? ''"
@@ -590,36 +734,68 @@
                     class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
                   >
                     <option value="">Unarmed</option>
-                    @for (wep of compendiumStore.allWeapons(); track wep.id) {
+                    @for (wep of getAllCompendiumWeapons(); track wep.id) {
                       <option [value]="wep.id">
                         {{ wep.name }} ({{ wep.base_damage }} DMG &middot; {{ wep.category }})
                       </option>
                     }
                   </select>
+                  @if (stats.weaponSlot1; as w1) {
+                    @let wf1 = getWeaponFormula(char, w1, stats);
+                    <div class="grid grid-cols-2 gap-1.5 pt-0.5 font-mono-num text-[10px]">
+                      <div class="rounded-lg border border-[#C4491A]/35 bg-[#27160E]/60 px-2 py-1">
+                        <div class="text-[9px] uppercase text-[#FDBA74]">Roll</div>
+                        <div class="font-bold text-white">{{ wf1.rollFormula }}</div>
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ wf1.rollBreakdown }}</div>
+                      </div>
+                      <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1">
+                        <div class="text-[9px] uppercase text-[#8AB0AB]">Damage</div>
+                        <div class="font-bold text-white">{{ wf1.damageFormula }}</div>
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ wf1.damageBreakdown }}</div>
+                      </div>
+                    </div>
+                  }
                 </div>
 
                 <div
-                  class="rounded-xl border p-3 space-y-2"
-                  [class.border-[#C4491A]]="char.active_weapon_slot === 2"
-                  [class.bg-[#122220]]="char.active_weapon_slot === 2"
-                  [class.border-[#243B37]]="char.active_weapon_slot !== 2"
-                  [class.bg-[#09100F]]="char.active_weapon_slot !== 2"
+                  data-drop-zone="slot-2"
+                  (dragover)="onSheetDragOver($event, 'slot-2')"
+                  (drop)="onSheetDrop($event, 'slot-2')"
+                  class="rounded-xl border p-3 space-y-2 transition-colors"
+                  [class.border-[#38B29A]]="activeDropZone() === 'slot-2'"
+                  [class.bg-[#102B26]]="activeDropZone() === 'slot-2'"
+                  [class.border-[#C4491A]]="activeDropZone() !== 'slot-2' && char.active_weapon_slot === 2"
+                  [class.bg-[#122220]]="activeDropZone() !== 'slot-2' && char.active_weapon_slot === 2"
+                  [class.border-[#243B37]]="activeDropZone() !== 'slot-2' && char.active_weapon_slot !== 2"
+                  [class.bg-[#09100F]]="activeDropZone() !== 'slot-2' && char.active_weapon_slot !== 2"
                 >
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-bold text-white">Weapon Slot 2</span>
-                    @if (char.active_weapon_slot === 2) {
-                      <span class="rounded border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-0.25 text-[9px] font-bold text-[#FDBA74]">
-                        ACTIVE
-                      </span>
-                    } @else if (editable) {
-                      <button
-                        type="button"
-                        (click)="setActiveWeaponSlot(char, 2)"
-                        class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
-                      >
-                        Equip Active
-                      </button>
-                    }
+                    <div class="flex items-center gap-1">
+                      @if (char.active_weapon_slot === 2) {
+                        <span class="rounded border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-0.25 text-[9px] font-bold text-[#FDBA74]">
+                          ACTIVE
+                        </span>
+                      } @else if (editable) {
+                        <button
+                          type="button"
+                          (click)="setActiveWeaponSlot(char, 2)"
+                          class="rounded border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:text-white"
+                        >
+                          Equip Active
+                        </button>
+                      }
+                      @if (editable && stats.weaponSlot2) {
+                        <button
+                          type="button"
+                          (click)="stowCharacterSlotWeapon(char, 2)"
+                          class="rounded border border-[#243B37] bg-[#122220] px-1.5 py-0.5 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                          title="Stow weapon into Inventory"
+                        >
+                          Stow
+                        </button>
+                      }
+                    </div>
                   </div>
                   <select
                     [ngModel]="char.weapon_slot_2_id ?? ''"
@@ -628,12 +804,27 @@
                     class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
                   >
                     <option value="">Unarmed</option>
-                    @for (wep of compendiumStore.allWeapons(); track wep.id) {
+                    @for (wep of getAllCompendiumWeapons(); track wep.id) {
                       <option [value]="wep.id">
                         {{ wep.name }} ({{ wep.base_damage }} DMG &middot; {{ wep.category }})
                       </option>
                     }
                   </select>
+                  @if (stats.weaponSlot2; as w2) {
+                    @let wf2 = getWeaponFormula(char, w2, stats);
+                    <div class="grid grid-cols-2 gap-1.5 pt-0.5 font-mono-num text-[10px]">
+                      <div class="rounded-lg border border-[#C4491A]/35 bg-[#27160E]/60 px-2 py-1">
+                        <div class="text-[9px] uppercase text-[#FDBA74]">Roll</div>
+                        <div class="font-bold text-white">{{ wf2.rollFormula }}</div>
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ wf2.rollBreakdown }}</div>
+                      </div>
+                      <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1">
+                        <div class="text-[9px] uppercase text-[#8AB0AB]">Damage</div>
+                        <div class="font-bold text-white">{{ wf2.damageFormula }}</div>
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ wf2.damageBreakdown }}</div>
+                      </div>
+                    </div>
+                  }
                 </div>
               </div>
 
@@ -643,7 +834,7 @@
                     Active Strike: {{ stats.activeWeapon?.name || 'Unarmed' }}
                   </div>
                   <div class="font-mono-num text-[10px] text-[#8AB0AB]">
-                    Attack 2d10+{{ stats.attackRollMod }} &middot; {{ stats.flatWeaponDamage }} Flat DMG
+                    Roll: 2d10 + {{ stats.attackRollMod }} &middot; Damage: {{ stats.flatWeaponDamage }} DMG
                   </div>
                 </div>
                 <div class="flex items-center gap-1.5">
@@ -666,93 +857,634 @@
                 </div>
               </div>
 
-              <div class="space-y-2 border-t border-[#243B37] pt-3">
-                <div class="flex items-center justify-between gap-2">
+              @let pTab = pcInventoryTab();
+              @let pcWeapons = getPcInventoryWeapons(char);
+              @let pcArmors = getPcInventoryArmors(char);
+              @let pcGear = getPcInventoryGearItems(char);
+              <div
+                data-drop-zone="inventory"
+                data-vtt-pc-inventory="true"
+                (dragover)="onSheetDragOver($event, 'inventory')"
+                (drop)="onSheetDrop($event, 'inventory')"
+                class="space-y-3 rounded-xl border-t pt-3 transition-colors"
+                [class.border-[#38B29A]]="activeDropZone() === 'inventory'"
+                [class.bg-[#102B26]/40]="activeDropZone() === 'inventory'"
+                [class.px-2.5]="activeDropZone() === 'inventory'"
+                [class.pb-2.5]="activeDropZone() === 'inventory'"
+                [class.border-[#243B37]]="activeDropZone() !== 'inventory'"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                      Inventory
+                      Categorized Inventory
                     </span>
                     <p class="text-[10px] text-[#8AB0AB]">
-                      Add consumables, loot, coins, or custom gear directly from the VTT.
+                      Drag from Compendium or add Weapons, Armors, and Adventuring Items directly.
                     </p>
                   </div>
                   @if (editable) {
-                    <button
-                      type="button"
-                      (click)="addCharacterInventoryItem(char)"
-                      class="btn-copper rounded-lg px-2.5 py-1 text-[11px] font-bold"
-                    >
-                      + Add Item
-                    </button>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <select
+                        data-vtt-pc-compendium-picker="true"
+                        #pcCompPick
+                        (change)="addCharacterFromCompendiumPicker(char, pcCompPick.value); pcCompPick.value = ''"
+                        class="max-w-[185px] rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+                      >
+                        <option value="">+ Add from Compendium...</option>
+                        <optgroup label="Weapons">
+                          @for (cw of getAllCompendiumWeapons(); track cw.id) {
+                            <option [value]="'weapon:' + cw.id">
+                              {{ cw.name }} ({{ cw.base_damage }} DMG)
+                            </option>
+                          }
+                        </optgroup>
+                        <optgroup label="Armors">
+                          @for (ca of getActiveCompendiumArmors(); track ca.id) {
+                            <option [value]="'armor:' + ca.id">
+                              {{ ca.name }} (+{{ ca.armor_sp }} SP · +{{ ca.armor_dr }} DR)
+                            </option>
+                          }
+                        </optgroup>
+                        <optgroup label="Items">
+                          @for (ci of getActiveCompendiumItems(); track ci.id) {
+                            <option [value]="'item:' + ci.id">
+                              {{ ci.name }} (&times;{{ ci.default_quantity }})
+                            </option>
+                          }
+                        </optgroup>
+                      </select>
+
+                      <button
+                        type="button"
+                        (click)="addCustomCharacterInventoryEntry(char, 'weapon')"
+                        class="rounded-lg border border-[#243B37] bg-[#122220] px-2 py-1 text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                      >
+                        + Weapon
+                      </button>
+                      <button
+                        type="button"
+                        (click)="addCustomCharacterInventoryEntry(char, 'armor')"
+                        class="rounded-lg border border-[#243B37] bg-[#122220] px-2 py-1 text-[10px] font-bold text-[#FBBF24] hover:border-[#F59E0B]"
+                      >
+                        + Armor
+                      </button>
+                      <button
+                        type="button"
+                        (click)="addCustomCharacterInventoryEntry(char, 'item')"
+                        class="btn-copper rounded-lg px-2.5 py-1 text-[10px] font-bold"
+                      >
+                        + Item
+                      </button>
+                    </div>
                   }
                 </div>
 
-                @let pcItems = getCharacterInventory(char);
-                @if (pcItems.length === 0) {
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    data-vtt-pc-inv-tab="all"
+                    (click)="pcInventoryTab.set('all')"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                    [class.border-[#C4491A]]="pTab === 'all'"
+                    [class.bg-[#27160E]]="pTab === 'all'"
+                    [class.text-white]="pTab === 'all'"
+                    [class.border-[#243B37]]="pTab !== 'all'"
+                    [class.bg-[#09100F]]="pTab !== 'all'"
+                    [class.text-[#8AB0AB]]="pTab !== 'all'"
+                  >
+                    All ({{ getPcTotalCategorizedCount(char, stats) }})
+                  </button>
+                  <button
+                    type="button"
+                    data-vtt-pc-inv-tab="weapon"
+                    (click)="pcInventoryTab.set('weapon')"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                    [class.border-[#C4491A]]="pTab === 'weapon'"
+                    [class.bg-[#27160E]]="pTab === 'weapon'"
+                    [class.text-white]="pTab === 'weapon'"
+                    [class.border-[#243B37]]="pTab !== 'weapon'"
+                    [class.bg-[#09100F]]="pTab !== 'weapon'"
+                    [class.text-[#8AB0AB]]="pTab !== 'weapon'"
+                  >
+                    Weapons ({{ getPcWeaponsCount(char, stats) }})
+                  </button>
+                  <button
+                    type="button"
+                    data-vtt-pc-inv-tab="armor"
+                    (click)="pcInventoryTab.set('armor')"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                    [class.border-[#C4491A]]="pTab === 'armor'"
+                    [class.bg-[#27160E]]="pTab === 'armor'"
+                    [class.text-white]="pTab === 'armor'"
+                    [class.border-[#243B37]]="pTab !== 'armor'"
+                    [class.bg-[#09100F]]="pTab !== 'armor'"
+                    [class.text-[#8AB0AB]]="pTab !== 'armor'"
+                  >
+                    Armors ({{ getPcArmorsCount(char, stats) }})
+                  </button>
+                  <button
+                    type="button"
+                    data-vtt-pc-inv-tab="item"
+                    (click)="pcInventoryTab.set('item')"
+                    class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                    [class.border-[#C4491A]]="pTab === 'item'"
+                    [class.bg-[#27160E]]="pTab === 'item'"
+                    [class.text-white]="pTab === 'item'"
+                    [class.border-[#243B37]]="pTab !== 'item'"
+                    [class.bg-[#09100F]]="pTab !== 'item'"
+                    [class.text-[#8AB0AB]]="pTab !== 'item'"
+                  >
+                    Items ({{ getPcItemsCount(char) }})
+                  </button>
+                </div>
+
+                @if (getPcTotalCategorizedCount(char, stats) === 0) {
                   <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-4 text-center text-[11px] text-[#8AB0AB]">
-                    Inventory is empty.
+                    No weapons, armors, or items carried yet.
                   </div>
                 } @else {
-                  <div class="space-y-1.5">
-                    @for (item of pcItems; track item.id) {
-                      <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
-                        <div class="flex items-center gap-2">
-                          @if (editable) {
-                            <input
-                              type="text"
-                              [value]="item.name"
-                              (change)="updateCharacterInventoryField(char, item.id, 'name', $any($event.target).value)"
-                              placeholder="Item"
-                              class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                            />
-                            <div class="flex shrink-0 items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
-                              <button
-                                type="button"
-                                (click)="adjustCharacterInventoryQty(char, item.id, -1)"
-                                class="px-1 font-bold text-[#8AB0AB] hover:text-white"
-                              >
-                                &minus;
-                              </button>
-                              <span class="min-w-[1.4rem] text-center font-bold text-white">
-                                {{ item.quantity }}
-                              </span>
-                              <button
-                                type="button"
-                                (click)="adjustCharacterInventoryQty(char, item.id, 1)"
-                                class="px-1 font-bold text-[#8AB0AB] hover:text-white"
-                              >
-                                +
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              (click)="removeCharacterInventoryItem(char, item.id)"
-                              title="Remove Item"
-                              class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
-                            >
-                              &times;
-                            </button>
-                          } @else {
-                            <span class="flex-1 font-bold text-white">{{ item.name || 'Item' }}</span>
-                            <span class="rounded border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[11px] font-bold text-white">
-                              &times;{{ item.quantity }}
-                            </span>
-                          }
-                        </div>
-                        @if (editable) {
-                          <input
-                            type="text"
-                            [value]="item.description"
-                            (change)="updateCharacterInventoryField(char, item.id, 'description', $any($event.target).value)"
-                            placeholder="Description"
-                            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
-                          />
-                        } @else if (item.description) {
-                          <p class="text-[11px] text-[#8AB0AB]">{{ item.description }}</p>
-                        }
+                  @if (pTab === 'all' || pTab === 'weapon') {
+                    <div class="space-y-1.5">
+                      <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                        Weapons ({{ getPcWeaponsCount(char, stats) }})
                       </div>
-                    }
-                  </div>
+                      @if (getPcWeaponsCount(char, stats) === 0) {
+                        <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                          No weapons equipped or carried.
+                        </div>
+                      } @else {
+                        @if (stats.weaponSlot1; as sw1) {
+                          @let swf1 = getWeaponFormula(char, sw1, stats);
+                          @let swVis1 = getWeaponVisuals(sw1);
+                          <div class="rounded-xl border border-[#C4491A]/50 bg-[#122220] p-2.5 space-y-1.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                  <app-compendium-icon [icon]="swVis1.icon" [color]="swVis1.color" sizeClass="h-3.5 w-3.5" />
+                                </span>
+                                <div class="min-w-0">
+                                  <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="font-bold text-white">{{ sw1.name }}</span>
+                                    <span class="rounded bg-[#27160E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                                      SLOT 1{{ char.active_weapon_slot === 1 ? ' · ACTIVE' : '' }}
+                                    </span>
+                                  </div>
+                                  <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+                                    Roll: <strong class="text-[#FDBA74]">{{ swf1.rollFormula }}</strong> ({{ swf1.rollBreakdown }}) &middot; Damage: <strong class="text-white">{{ swf1.damageFormula }}</strong> ({{ swf1.damageBreakdown }})
+                                  </div>
+                                </div>
+                              </div>
+                              <div class="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  (click)="rollSheetCheck(char.name, sw1.name + ' Attack', swf1.attackMod, swf1.flatDamage + ' DMG')"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                                >
+                                  Roll
+                                </button>
+                                @if (editable) {
+                                  <button
+                                    type="button"
+                                    (click)="stowCharacterSlotWeapon(char, 1)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Stow
+                                  </button>
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        }
+
+                        @if (stats.weaponSlot2; as sw2) {
+                          @let swf2 = getWeaponFormula(char, sw2, stats);
+                          @let swVis2 = getWeaponVisuals(sw2);
+                          <div class="rounded-xl border border-[#C4491A]/50 bg-[#122220] p-2.5 space-y-1.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                  <app-compendium-icon [icon]="swVis2.icon" [color]="swVis2.color" sizeClass="h-3.5 w-3.5" />
+                                </span>
+                                <div class="min-w-0">
+                                  <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="font-bold text-white">{{ sw2.name }}</span>
+                                    <span class="rounded bg-[#27160E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                                      SLOT 2{{ char.active_weapon_slot === 2 ? ' · ACTIVE' : '' }}
+                                    </span>
+                                  </div>
+                                  <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+                                    Roll: <strong class="text-[#FDBA74]">{{ swf2.rollFormula }}</strong> ({{ swf2.rollBreakdown }}) &middot; Damage: <strong class="text-white">{{ swf2.damageFormula }}</strong> ({{ swf2.damageBreakdown }})
+                                  </div>
+                                </div>
+                              </div>
+                              <div class="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  (click)="rollSheetCheck(char.name, sw2.name + ' Attack', swf2.attackMod, swf2.flatDamage + ' DMG')"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                                >
+                                  Roll
+                                </button>
+                                @if (editable) {
+                                  <button
+                                    type="button"
+                                    (click)="stowCharacterSlotWeapon(char, 2)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Stow
+                                  </button>
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        }
+
+                        @for (wItem of pcWeapons; track wItem.id) {
+                          @let iwf = getWeaponFormula(char, wItem, stats);
+                          @let iwVis = getInventoryWeaponVisuals(wItem);
+                          <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-2">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div class="flex min-w-0 flex-1 items-center gap-2">
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                  <app-compendium-icon [icon]="iwVis.icon" [color]="iwVis.color" sizeClass="h-3.5 w-3.5" />
+                                </span>
+                                @if (editable && !wItem.compendium_id) {
+                                  <input
+                                    type="text"
+                                    [value]="wItem.name"
+                                    (change)="updateCharacterInventoryField(char, wItem.id, 'name', $any($event.target).value)"
+                                    placeholder="Weapon Name"
+                                    class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                                  />
+                                } @else {
+                                  <span class="truncate font-bold text-white">{{ wItem.name }}</span>
+                                }
+                                <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
+                                  {{ wItem.subcategory || 'Weapon' }}
+                                </span>
+                              </div>
+
+                              <div class="flex flex-wrap items-center gap-1">
+                                <button
+                                  type="button"
+                                  (click)="rollSheetCheck(char.name, (wItem.name || 'Weapon') + ' Attack', iwf.attackMod, iwf.flatDamage + ' DMG')"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                                >
+                                  Roll
+                                </button>
+                                @if (editable && wItem.compendium_id) {
+                                  <button
+                                    type="button"
+                                    (click)="equipCharacterInventoryWeapon(char, wItem, 1)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Equip S1
+                                  </button>
+                                  <button
+                                    type="button"
+                                    (click)="equipCharacterInventoryWeapon(char, wItem, 2)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Equip S2
+                                  </button>
+                                }
+                                @if (editable) {
+                                  <div class="flex items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                                    <button type="button" (click)="adjustCharacterInventoryQty(char, wItem.id, -1)" class="px-1 font-bold text-[#8AB0AB] hover:text-white">&minus;</button>
+                                    <span class="min-w-[1.2rem] text-center font-bold text-white">{{ wItem.quantity }}</span>
+                                    <button type="button" (click)="adjustCharacterInventoryQty(char, wItem.id, 1)" class="px-1 font-bold text-[#8AB0AB] hover:text-white">+</button>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    (click)="removeCharacterInventoryItem(char, wItem.id)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                    title="Remove Weapon"
+                                  >
+                                    &times;
+                                  </button>
+                                }
+                              </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-1.5 font-mono-num text-[10px]">
+                              <div class="rounded-lg border border-[#C4491A]/35 bg-[#27160E]/60 px-2 py-1">
+                                <span class="text-[#FDBA74]">Roll:</span>
+                                <strong class="ml-1 text-white">{{ iwf.rollFormula }}</strong>
+                                <span class="ml-1 text-[9px] text-[#8AB0AB]">({{ iwf.rollBreakdown }})</span>
+                              </div>
+                              <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1">
+                                <span class="text-[#8AB0AB]">Damage:</span>
+                                <strong class="ml-1 text-white">{{ iwf.damageFormula }}</strong>
+                                <span class="ml-1 text-[9px] text-[#8AB0AB]">({{ iwf.damageBreakdown }})</span>
+                              </div>
+                            </div>
+
+                            @if (editable && !wItem.compendium_id) {
+                              <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  Attribute
+                                  <select
+                                    [ngModel]="wItem.gov_attribute || 'Brawn'"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, wItem.id, { gov_attribute: $event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                  >
+                                    @for (at of attributeList; track at) {
+                                      <option [ngValue]="at">{{ at }}</option>
+                                    }
+                                  </select>
+                                </label>
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  Skill
+                                  <select
+                                    [ngModel]="wItem.gov_skill || 'Strike'"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, wItem.id, { gov_skill: $event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                  >
+                                    @for (sk of combatSkillList; track sk) {
+                                      <option [ngValue]="sk">{{ sk }}</option>
+                                    }
+                                  </select>
+                                </label>
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  Base DMG
+                                  <input
+                                    type="number"
+                                    [ngModel]="wItem.base_damage ?? 4"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, wItem.id, { base_damage: +$event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                  />
+                                </label>
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  Atk Bonus
+                                  <input
+                                    type="number"
+                                    [ngModel]="wItem.attack_bonus ?? 0"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, wItem.id, { attack_bonus: +$event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                  />
+                                </label>
+                              </div>
+                            }
+                          </div>
+                        }
+                      }
+                    </div>
+                  }
+
+                  @if (pTab === 'all' || pTab === 'armor') {
+                    <div class="space-y-1.5">
+                      <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#FBBF24]">
+                        Armors ({{ getPcArmorsCount(char, stats) }})
+                      </div>
+                      @if (getPcArmorsCount(char, stats) === 0) {
+                        <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                          No armors equipped or carried.
+                        </div>
+                      } @else {
+                        @if (hasStandardTierArmorEquipped(char, stats)) {
+                          <div class="rounded-xl border border-[#F59E0B]/50 bg-[#122220] p-2.5 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex min-w-0 items-center gap-2">
+                              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#F59E0B]/50 bg-[#09100F]">
+                                <app-compendium-icon icon="breastplate" color="#F59E0B" sizeClass="h-3.5 w-3.5" />
+                              </span>
+                              <div>
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                  <span class="font-bold text-white">{{ stats.equippedArmorLabel }}</span>
+                                  <span class="rounded bg-[#2B1D0E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FBBF24]">
+                                    EQUIPPED
+                                  </span>
+                                </div>
+                                <div class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono-num text-[10px]">
+                                  <span class="rounded border border-[#F59E0B]/40 bg-[#2B1D0E] px-1.5 py-[1px] font-bold text-[#FBBF24]">+{{ stats.armorSp }} SP</span>
+                                  <span class="rounded border border-[#38B29A]/40 bg-[#102B26] px-1.5 py-[1px] font-bold text-[#5EEAD4]">+{{ stats.armorDr }} DR</span>
+                                  <span class="text-[#8AB0AB]">{{ armorMeta[char.equipped_armor].allowsDodge ? 'Allows Dodge' : 'Disables Dodge' }}</span>
+                                </div>
+                              </div>
+                            </div>
+                            @if (editable) {
+                              <button
+                                type="button"
+                                (click)="unequipCharacterArmor(char)"
+                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                              >
+                                Unequip
+                              </button>
+                            }
+                          </div>
+                        }
+
+                        @for (aItem of pcArmors; track aItem.id) {
+                          @let aVis = getArmorItemVisuals(aItem);
+                          @let isArmEquipped = !!(aItem.equipped && stats.equippedInventoryArmorId === aItem.id);
+                          <div
+                            class="rounded-xl border bg-[#122220] p-2.5 space-y-2"
+                            [class.border-[#F59E0B]]="isArmEquipped"
+                            [class.border-[#243B37]]="!isArmEquipped"
+                          >
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div class="flex min-w-0 flex-1 items-center gap-2">
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                  <app-compendium-icon [icon]="aVis.icon" [color]="aVis.color" sizeClass="h-3.5 w-3.5" />
+                                </span>
+                                @if (editable && !aItem.compendium_id) {
+                                  <input
+                                    type="text"
+                                    [value]="aItem.name"
+                                    (change)="updateCharacterInventoryField(char, aItem.id, 'name', $any($event.target).value)"
+                                    placeholder="Armor Name"
+                                    class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                                  />
+                                } @else {
+                                  <span class="truncate font-bold text-white">{{ aItem.name }}</span>
+                                }
+                                @if (isArmEquipped) {
+                                  <span class="rounded bg-[#2B1D0E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FBBF24]">
+                                    EQUIPPED
+                                  </span>
+                                }
+                              </div>
+
+                              <div class="flex items-center gap-1">
+                                @if (editable) {
+                                  @if (isArmEquipped) {
+                                    <button
+                                      type="button"
+                                      (click)="unequipCharacterArmor(char)"
+                                      class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                    >
+                                      Unequip
+                                    </button>
+                                  } @else {
+                                    <button
+                                      type="button"
+                                      (click)="equipCharacterInventoryArmor(char, aItem.id)"
+                                      class="rounded-lg border border-[#F59E0B]/50 bg-[#2B1D0E] px-2.5 py-1 text-[10px] font-bold text-[#FBBF24] hover:border-[#F59E0B]"
+                                    >
+                                      Equip
+                                    </button>
+                                  }
+                                  <button
+                                    type="button"
+                                    (click)="removeCharacterInventoryItem(char, aItem.id)"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                    title="Remove Armor"
+                                  >
+                                    &times;
+                                  </button>
+                                }
+                              </div>
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-[10px]">
+                              <span class="rounded border border-[#F59E0B]/40 bg-[#2B1D0E] px-2 py-0.5 font-bold text-[#FBBF24]">
+                                +{{ getArmorItemSp(aItem) }} SP
+                              </span>
+                              <span class="rounded border border-[#38B29A]/40 bg-[#102B26] px-2 py-0.5 font-bold text-[#5EEAD4]">
+                                +{{ getArmorItemDr(aItem) }} DR
+                              </span>
+                              <span class="rounded bg-[#09100F] px-1.5 py-0.5 text-[#8AB0AB]">
+                                {{ aItem.armor_weight || 'Light' }}
+                              </span>
+                              <span class="text-[#8AB0AB]">
+                                {{ getArmorItemAllowsDodge(aItem) ? 'Allows Dodge' : 'Disables Dodge' }}
+                              </span>
+                            </div>
+
+                            @if (editable && !aItem.compendium_id) {
+                              <div class="grid grid-cols-3 gap-1.5">
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  Weight
+                                  <select
+                                    [ngModel]="aItem.armor_weight || 'Light'"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, aItem.id, { armor_weight: $event, subcategory: $event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                  >
+                                    @for (wt of armorWeights; track wt) {
+                                      <option [ngValue]="wt">{{ wt }}</option>
+                                    }
+                                  </select>
+                                </label>
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  +SP
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    [ngModel]="getArmorItemSp(aItem)"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, aItem.id, { armor_sp: +$event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                  />
+                                </label>
+                                <label class="block text-[10px] text-[#8AB0AB]">
+                                  +DR
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    [ngModel]="getArmorItemDr(aItem)"
+                                    (ngModelChange)="patchCharacterInventoryItem(char, aItem.id, { armor_dr: +$event })"
+                                    class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                  />
+                                </label>
+                              </div>
+                            }
+
+                            @if (aItem.description) {
+                              <p class="text-[11px] text-[#8AB0AB]">{{ aItem.description }}</p>
+                            }
+                          </div>
+                        }
+                      }
+                    </div>
+                  }
+
+                  @if (pTab === 'all' || pTab === 'item') {
+                    <div class="space-y-1.5">
+                      <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#7DD3FC]">
+                        Items ({{ pcGear.length }})
+                      </div>
+                      @if (pcGear.length === 0) {
+                        <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                          No general gear, ammunition, or supplies carried.
+                        </div>
+                      } @else {
+                        @for (item of pcGear; track item.id) {
+                          @let gVis = getGearItemVisuals(item);
+                          <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                <app-compendium-icon [icon]="gVis.icon" [color]="gVis.color" sizeClass="h-3.5 w-3.5" />
+                              </span>
+                              @if (editable) {
+                                <input
+                                  type="text"
+                                  [value]="item.name"
+                                  (change)="updateCharacterInventoryField(char, item.id, 'name', $any($event.target).value)"
+                                  placeholder="Item"
+                                  class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                                />
+                                <select
+                                  [ngModel]="item.subcategory || 'Adventuring Gear'"
+                                  (ngModelChange)="patchCharacterInventoryItem(char, item.id, { subcategory: $event })"
+                                  class="hidden sm:block rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB]"
+                                >
+                                  @for (sub of itemSubcategories; track sub) {
+                                    <option [ngValue]="sub">{{ sub }}</option>
+                                  }
+                                </select>
+                                <div class="flex shrink-0 items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                                  <button
+                                    type="button"
+                                    (click)="adjustCharacterInventoryQty(char, item.id, -1)"
+                                    class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                                  >
+                                    &minus;
+                                  </button>
+                                  <span class="min-w-[1.4rem] text-center font-bold text-white">
+                                    {{ item.quantity }}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    (click)="adjustCharacterInventoryQty(char, item.id, 1)"
+                                    class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  (click)="removeCharacterInventoryItem(char, item.id)"
+                                  title="Remove Item"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                >
+                                  &times;
+                                </button>
+                              } @else {
+                                <span class="flex-1 font-bold text-white">{{ item.name || 'Item' }}</span>
+                                @if (item.subcategory) {
+                                  <span class="rounded bg-[#09100F] px-1.5 py-0.5 text-[10px] text-[#8AB0AB]">
+                                    {{ item.subcategory }}
+                                  </span>
+                                }
+                                <span class="rounded border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[11px] font-bold text-white">
+                                  &times;{{ item.quantity }}
+                                </span>
+                              }
+                            </div>
+                            @if (editable) {
+                              <input
+                                type="text"
+                                [value]="item.description"
+                                (change)="updateCharacterInventoryField(char, item.id, 'description', $any($event.target).value)"
+                                placeholder="Description"
+                                class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
+                              />
+                            } @else if (item.description) {
+                              <p class="text-[11px] text-[#8AB0AB]">{{ item.description }}</p>
+                            }
+                          </div>
+                        }
+                      }
+                    </div>
+                  }
                 }
               </div>
             }
@@ -776,7 +1508,7 @@
               @if (perkPickerOpen() && editable) {
                 <div class="rounded-xl border border-[#243B37] bg-[#09100F] p-3 space-y-2.5">
                   <div class="flex flex-wrap items-center gap-1.5">
-                    @for (tree of compendiumStore.skillTrees(); track tree.id) {
+                    @for (tree of getSkillTrees(); track tree.id) {
                       <button
                         type="button"
                         (click)="perkPickerTab.set(tree.id)"
@@ -792,7 +1524,7 @@
                         <span class="font-mono-num text-[10px]">({{ countUnlockedInTree(char, tree.id) }})</span>
                       </button>
                     }
-                    @if (canGrantStandalone() && compendiumStore.standaloneNodes().length > 0) {
+                    @if (canGrantStandalone() && getStandaloneOptions().length > 0) {
                       <button
                         type="button"
                         (click)="perkPickerTab.set('__standalone__')"
@@ -813,7 +1545,7 @@
                     <div class="max-h-[340px] overflow-auto rounded-xl border border-[#243B37]">
                       <app-skill-tree-canvas
                         [tree]="tree"
-                        [allNodes]="compendiumStore.perkNodes()"
+                        [allNodes]="getPerkNodes()"
                         mode="character"
                         [unlockedIds]="char.unlocked_perk_ids"
                         [perkSpent]="stats.perkSpent"
@@ -821,9 +1553,9 @@
                         (toggleUnlock)="toggleCharacterPerk(char, $event)"
                       />
                     </div>
-                  } @else if (canGrantStandalone() && compendiumStore.standaloneNodes().length > 0) {
+                  } @else if (canGrantStandalone() && getStandaloneOptions().length > 0) {
                     <div class="space-y-1.5">
-                      @for (node of compendiumStore.standaloneNodes(); track node.id) {
+                      @for (node of getStandaloneOptions(); track node.id) {
                         <div class="flex items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
                           <div class="min-w-0">
                             <div class="font-bold text-white">{{ node.name }}</div>
@@ -917,6 +1649,16 @@
                               Target
                             </button>
                           }
+                          @if (editable && canGrantStandalone() && isStandaloneNode(art.baseNode)) {
+                            <button
+                              type="button"
+                              (click)="toggleCharacterPerk(char, art.baseNode)"
+                              title="Revoke Granted Standalone Art"
+                              class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                            >
+                              &times;
+                            </button>
+                          }
                         </div>
                       </div>
 
@@ -935,11 +1677,28 @@
 
                   @for (perk of stats.displayPassivePerks; track perk.id) {
                     <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
-                      <div class="flex items-center gap-1.5">
-                        <span class="badge-jade rounded border px-1.5 py-0.25 font-mono-num text-[9px] font-bold">
-                          Passive
-                        </span>
-                        <span class="font-bold text-white">{{ perk.name }}</span>
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          @if (isStandaloneNode(perk)) {
+                            <span class="rounded bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                              GRANTED
+                            </span>
+                          }
+                          <span class="badge-jade rounded border px-1.5 py-0.25 font-mono-num text-[9px] font-bold">
+                            Passive
+                          </span>
+                          <span class="font-bold text-white">{{ perk.name }}</span>
+                        </div>
+                        @if (editable && canGrantStandalone() && isStandaloneNode(perk)) {
+                          <button
+                            type="button"
+                            (click)="toggleCharacterPerk(char, perk)"
+                            title="Revoke Granted Standalone Passive"
+                            class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[10px] font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                          >
+                            &times;
+                          </button>
+                        }
                       </div>
                       <p class="mt-1 text-[11px] text-[#8AB0AB]">{{ perk.description }}</p>
                     </div>
@@ -949,18 +1708,8 @@
             }
 
             @if (pcTab() === 'token') {
-              <app-tokenizer-editor
-                [portraitUrl]="vis.portraitUrl"
-                [tokenImageUrl]="vis.tokenImageUrl"
-                [tokenAppearance]="vis.tokenAppearance"
-                [fallbackIcon]="getDisplayIcon()"
-                [fallbackColor]="getDisplayColor()"
-                [faction]="getDisplayFaction()"
-                [actorName]="char.name"
-                [editable]="editable"
-                [externalAssetPicker]="true"
-                (requestAssetPicker)="openTokenizerAssetPicker($event)"
-                (visualsChange)="onTokenizerVisualsChange($event)"
+              <ng-container
+                *ngTemplateOutlet="tokenVisualSummaryCard; context: { displayName: char.name }"
               />
 
               @if (actor || tok) {
@@ -1088,18 +1837,8 @@
               }
             </div>
 
-            <app-tokenizer-editor
-              [portraitUrl]="vis.portraitUrl"
-              [tokenImageUrl]="vis.tokenImageUrl"
-              [tokenAppearance]="vis.tokenAppearance"
-              [fallbackIcon]="getDisplayIcon()"
-              [fallbackColor]="getDisplayColor()"
-              [faction]="getDisplayFaction()"
-              [actorName]="getNpcName()"
-              [editable]="editable"
-              [externalAssetPicker]="true"
-              (requestAssetPicker)="openTokenizerAssetPicker($event)"
-              (visualsChange)="onTokenizerVisualsChange($event)"
+            <ng-container
+              *ngTemplateOutlet="tokenVisualSummaryCard; context: { displayName: getNpcName() }"
             />
 
             <div class="grid grid-cols-2 gap-2.5 border-t border-[#243B37] pt-3">
@@ -1170,36 +1909,6 @@
 
         <div class="flex-1 overflow-y-auto p-3.5 space-y-4 tabular-nums">
           @if (npcTab() === 'statblock') {
-            @if (displayPortraitUrl(); as npcPortrait) {
-              <div class="flex items-center gap-3 rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
-                <div class="h-24 w-20 shrink-0 overflow-hidden rounded-lg border border-[#243B37] bg-[#09100F] shadow">
-                  <img
-                    [src]="npcPortrait"
-                    [alt]="getNpcName() + ' portrait'"
-                    class="h-full w-full object-cover"
-                    (error)="brokenPortraitUrl.set(npcPortrait)"
-                  />
-                </div>
-                <div class="min-w-0 flex-1 space-y-1">
-                  <div class="font-display text-sm font-bold text-white">
-                    {{ getNpcName() }}
-                  </div>
-                  <p class="text-[11px] text-[#8AB0AB]">
-                    <span class="uppercase">{{ getDisplayFaction() }}</span> NPC &middot; {{ npcStats.weapon_name || 'Unarmed' }}
-                  </p>
-                  @if (editable) {
-                    <button
-                      type="button"
-                      (click)="npcTab.set('token')"
-                      class="mt-1 inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#5EEAD4] hover:border-[#38B29A]"
-                    >
-                      Edit Portrait &amp; Token
-                    </button>
-                  }
-                </div>
-              </div>
-            }
-
             <div class="space-y-2">
               <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
                 Vitals &amp; Defense
@@ -1285,14 +1994,14 @@
                 <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
                   Attack &amp; Reactions
                 </span>
-                @if (editable && compendiumStore.allWeapons().length > 0) {
+                @if (editable && getAllCompendiumWeapons().length > 0) {
                   <select
                     [ngModel]="''"
                     (ngModelChange)="applyCompendiumWeaponToNpc($event)"
                     class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
                   >
                     <option value="">Quick-Fill from Compendium Weapon...</option>
-                    @for (wep of compendiumStore.allWeapons(); track wep.id) {
+                    @for (wep of getAllCompendiumWeapons(); track wep.id) {
                       <option [value]="wep.id">{{ wep.name }} ({{ wep.base_damage }} DMG)</option>
                     }
                   </select>
@@ -1456,96 +2165,661 @@
                 </div>
               </div>
             </div>
+
+            @let npcStandaloneNodes = getNpcStandaloneNodes();
+            @if (npcStandaloneNodes.length > 0 || (editable && canGrantStandalone())) {
+              <div
+                data-npc-standalone-section="true"
+                class="space-y-2 border-t border-[#243B37] pt-3"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Standalone Skills &amp; Arts
+                  </span>
+                  @if (editable && canGrantStandalone() && getStandaloneOptions().length > 0) {
+                    <select
+                      [ngModel]="''"
+                      (ngModelChange)="grantNpcStandaloneSkill($event)"
+                      class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
+                    >
+                      <option value="">+ Grant Standalone Skill...</option>
+                      @for (nodeOpt of getStandaloneOptions(); track nodeOpt.id) {
+                        <option [value]="nodeOpt.id">
+                          {{ nodeOpt.name }} ({{ nodeOpt.node_type === 'combat_art' ? 'Art' : 'Passive' }})
+                        </option>
+                      }
+                    </select>
+                  }
+                </div>
+
+                @if (npcStandaloneNodes.length === 0) {
+                  <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-3 text-center text-[11px] text-[#8AB0AB]">
+                    Drag skills from the Compendium Skills window onto this sheet to grant special arts &amp; passives.
+                  </div>
+                } @else {
+                  <div class="space-y-2">
+                    @for (node of npcStandaloneNodes; track node.id) {
+                      <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
+                        <div class="flex flex-wrap items-start justify-between gap-2">
+                          <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                              @if (node.node_type === 'combat_art') {
+                                <span class="rounded bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                                  Combat Art
+                                </span>
+                                <span class="font-mono-num text-[10px] text-[#8AB0AB]">
+                                  {{ node.ap_cost ?? 1 }} AP &middot; {{ node.cooldown_rounds ?? 0 }}R CD
+                                </span>
+                                @if (node.combat_tag && node.combat_tag !== 'None') {
+                                  <span
+                                    class="rounded border px-1.5 py-0.25 text-[9px] font-bold"
+                                    [class]="getCombatTagBadgeClass(node.combat_tag)"
+                                  >
+                                    {{ node.combat_tag }}
+                                  </span>
+                                }
+                              } @else {
+                                <span class="badge-jade rounded border px-1.5 py-0.25 font-mono-num text-[9px] font-bold">
+                                  Passive
+                                </span>
+                              }
+                              <span class="font-display text-xs font-bold text-white">
+                                {{ node.name }}
+                              </span>
+                            </div>
+                            <p class="mt-1 text-[11px] text-[#8AB0AB]">
+                              {{ node.description }}
+                            </p>
+                            @let hookBadges = getHookBadges(node);
+                            @if (hookBadges.length > 0) {
+                              <div class="mt-1 flex flex-wrap gap-1">
+                                @for (badge of hookBadges; track badge) {
+                                  <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] text-[#A7F3D0]">
+                                    {{ badge }}
+                                  </span>
+                                }
+                              </div>
+                            }
+                          </div>
+
+                          <div class="flex shrink-0 items-center gap-1.5">
+                            @if (node.node_type === 'combat_art') {
+                              <button
+                                type="button"
+                                (click)="rollSheetCheck(getNpcName(), node.name, (npcStats.attack_mod ?? 2) + getNodeBonusAttack(node), ((npcStats.flat_damage ?? 3) + getNodeBonusDamage(node)) + ' DMG')"
+                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                              >
+                                Roll (+{{ (npcStats.attack_mod ?? 2) + getNodeBonusAttack(node) }})
+                              </button>
+                              @if (tok && vttStore.canControlToken(tok)) {
+                                <button
+                                  type="button"
+                                  [disabled]="tok.current_ap < (node.ap_cost ?? 1)"
+                                  (click)="targetNpcStandaloneArtOnMap(node)"
+                                  class="btn-copper rounded-lg px-2 py-1 text-[10px] font-bold disabled:opacity-40"
+                                >
+                                  Target
+                                </button>
+                              }
+                            }
+                            @if (editable) {
+                              <button
+                                type="button"
+                                (click)="removeNpcStandaloneSkill(node.id)"
+                                title="Remove Standalone Skill"
+                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                              >
+                                &times;
+                              </button>
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
           }
 
           @if (npcTab() === 'inventory') {
-            <div class="space-y-2">
-              <div class="flex items-center justify-between gap-2">
+            @let nTab = npcInventoryTab();
+            @let npcWeapons = getNpcInventoryWeapons();
+            @let npcArmors = getNpcInventoryArmors();
+            @let npcGear = getNpcInventoryGearItems();
+            @let npcTotal = npcWeapons.length + npcArmors.length + npcGear.length;
+            @let eqNpcArm = getEquippedNpcArmor();
+
+            <div
+              data-npc-active-loadout="true"
+              class="grid grid-cols-1 gap-2 rounded-xl border border-[#243B37] bg-[#122220] p-2.5 sm:grid-cols-2"
+            >
+              <div class="rounded-lg border border-[#C4491A]/40 bg-[#09100F] px-2.5 py-2 space-y-0.5">
+                <div class="flex items-center justify-between gap-1.5">
+                  <span class="text-[9px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Equipped Weapon
+                  </span>
+                  <span class="font-mono-num text-[9px] text-[#8AB0AB]">
+                    {{ npcStats.attack_ap ?? 1 }} AP &middot; {{ npcStats.reach_feet ?? 5 }} ft
+                  </span>
+                </div>
+                <div class="truncate font-bold text-white">
+                  {{ npcStats.weapon_name || 'Unarmed' }}
+                </div>
+                <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+                  Roll: <strong class="text-[#FDBA74]">2d10 {{ (npcStats.attack_mod ?? 2) >= 0 ? '+ ' + (npcStats.attack_mod ?? 2) : '- ' + (-(npcStats.attack_mod ?? 2)) }}</strong>
+                  &middot; Damage: <strong class="text-white">{{ npcStats.flat_damage ?? 3 }} DMG</strong>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-[#F59E0B]/40 bg-[#09100F] px-2.5 py-2 space-y-0.5">
+                <div class="flex items-center justify-between gap-1.5">
+                  <span class="text-[9px] font-bold uppercase tracking-wider text-[#FBBF24]">
+                    Equipped Armor
+                  </span>
+                  <div class="flex items-center gap-1 font-mono-num text-[9px] font-bold">
+                    <span class="text-[#FBBF24]">+{{ eqNpcArm ? getArmorItemSp(eqNpcArm) : 0 }} SP</span>
+                    <span class="text-[#5EEAD4]">+{{ getNpcArmorOrMove('armor_dr') }} DR</span>
+                  </div>
+                </div>
+                <div class="truncate font-bold text-white">
+                  {{ eqNpcArm ? eqNpcArm.name : (getNpcArmorOrMove('armor_dr') > 0 ? 'Statblock Armor' : 'Unarmored') }}
+                </div>
+                <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+                  {{ npcStats.can_dodge !== false ? 'Allows Dodge' : 'Disables Dodge' }}
+                </div>
+              </div>
+            </div>
+
+            <div
+              data-drop-zone="inventory"
+              data-vtt-npc-inventory="true"
+              (dragover)="onSheetDragOver($event, 'inventory')"
+              (drop)="onSheetDrop($event, 'inventory')"
+              class="space-y-3 rounded-xl transition-colors"
+              [class.border]="activeDropZone() === 'inventory'"
+              [class.border-[#38B29A]]="activeDropZone() === 'inventory'"
+              [class.bg-[#102B26]/40]="activeDropZone() === 'inventory'"
+              [class.p-2.5]="activeDropZone() === 'inventory'"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                    NPC Inventory
+                    NPC Categorized Inventory
                   </span>
                   <p class="text-[10px] text-[#8AB0AB]">
-                    Track carried loot, keys, potions, or equipment on this NPC.
+                    Drag from Compendium or add Weapons, Armors, and Loot directly onto this NPC.
                   </p>
                 </div>
                 @if (editable) {
-                  <button
-                    type="button"
-                    (click)="addNpcInventoryItem()"
-                    class="btn-copper rounded-lg px-2.5 py-1 text-[11px] font-bold"
-                  >
-                    + Add Item
-                  </button>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <select
+                      data-vtt-npc-compendium-picker="true"
+                      #npcCompPick
+                      (change)="addNpcFromCompendiumPicker(npcCompPick.value); npcCompPick.value = ''"
+                      class="max-w-[185px] rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-white focus:border-[#C4491A] focus:outline-none"
+                    >
+                      <option value="">+ Add from Compendium...</option>
+                      <optgroup label="Weapons">
+                        @for (cw of getAllCompendiumWeapons(); track cw.id) {
+                          <option [value]="'weapon:' + cw.id">
+                            {{ cw.name }} ({{ cw.base_damage }} DMG)
+                          </option>
+                        }
+                      </optgroup>
+                      <optgroup label="Armors">
+                        @for (ca of getActiveCompendiumArmors(); track ca.id) {
+                          <option [value]="'armor:' + ca.id">
+                            {{ ca.name }} (+{{ ca.armor_sp }} SP · +{{ ca.armor_dr }} DR)
+                          </option>
+                        }
+                      </optgroup>
+                      <optgroup label="Items">
+                        @for (ci of getActiveCompendiumItems(); track ci.id) {
+                          <option [value]="'item:' + ci.id">
+                            {{ ci.name }} (&times;{{ ci.default_quantity }})
+                          </option>
+                        }
+                      </optgroup>
+                    </select>
+
+                    <button
+                      type="button"
+                      (click)="addCustomNpcInventoryEntry('weapon')"
+                      class="rounded-lg border border-[#243B37] bg-[#122220] px-2 py-1 text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                    >
+                      + Weapon
+                    </button>
+                    <button
+                      type="button"
+                      (click)="addCustomNpcInventoryEntry('armor')"
+                      class="rounded-lg border border-[#243B37] bg-[#122220] px-2 py-1 text-[10px] font-bold text-[#FBBF24] hover:border-[#F59E0B]"
+                    >
+                      + Armor
+                    </button>
+                    <button
+                      type="button"
+                      (click)="addCustomNpcInventoryEntry('item')"
+                      class="btn-copper rounded-lg px-2.5 py-1 text-[10px] font-bold"
+                    >
+                      + Item
+                    </button>
+                  </div>
                 }
               </div>
 
-              @let npcItems = getNpcInventory();
-              @if (npcItems.length === 0) {
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  data-vtt-npc-inv-tab="all"
+                  (click)="npcInventoryTab.set('all')"
+                  class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                  [class.border-[#C4491A]]="nTab === 'all'"
+                  [class.bg-[#27160E]]="nTab === 'all'"
+                  [class.text-white]="nTab === 'all'"
+                  [class.border-[#243B37]]="nTab !== 'all'"
+                  [class.bg-[#09100F]]="nTab !== 'all'"
+                  [class.text-[#8AB0AB]]="nTab !== 'all'"
+                >
+                  All ({{ npcTotal }})
+                </button>
+                <button
+                  type="button"
+                  data-vtt-npc-inv-tab="weapon"
+                  (click)="npcInventoryTab.set('weapon')"
+                  class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                  [class.border-[#C4491A]]="nTab === 'weapon'"
+                  [class.bg-[#27160E]]="nTab === 'weapon'"
+                  [class.text-white]="nTab === 'weapon'"
+                  [class.border-[#243B37]]="nTab !== 'weapon'"
+                  [class.bg-[#09100F]]="nTab !== 'weapon'"
+                  [class.text-[#8AB0AB]]="nTab !== 'weapon'"
+                >
+                  Weapons ({{ npcWeapons.length }})
+                </button>
+                <button
+                  type="button"
+                  data-vtt-npc-inv-tab="armor"
+                  (click)="npcInventoryTab.set('armor')"
+                  class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                  [class.border-[#C4491A]]="nTab === 'armor'"
+                  [class.bg-[#27160E]]="nTab === 'armor'"
+                  [class.text-white]="nTab === 'armor'"
+                  [class.border-[#243B37]]="nTab !== 'armor'"
+                  [class.bg-[#09100F]]="nTab !== 'armor'"
+                  [class.text-[#8AB0AB]]="nTab !== 'armor'"
+                >
+                  Armors ({{ npcArmors.length }})
+                </button>
+                <button
+                  type="button"
+                  data-vtt-npc-inv-tab="item"
+                  (click)="npcInventoryTab.set('item')"
+                  class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors"
+                  [class.border-[#C4491A]]="nTab === 'item'"
+                  [class.bg-[#27160E]]="nTab === 'item'"
+                  [class.text-white]="nTab === 'item'"
+                  [class.border-[#243B37]]="nTab !== 'item'"
+                  [class.bg-[#09100F]]="nTab !== 'item'"
+                  [class.text-[#8AB0AB]]="nTab !== 'item'"
+                >
+                  Items ({{ npcGear.length }})
+                </button>
+              </div>
+
+              @if (npcTotal === 0) {
                 <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-4 text-center text-[11px] text-[#8AB0AB]">
-                  No items carried.
+                  No weapons, armors, or items carried.
                 </div>
               } @else {
-                <div class="space-y-1.5">
-                  @for (item of npcItems; track item.id) {
-                    <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
-                      <div class="flex items-center gap-2">
-                        @if (editable) {
-                          <input
-                            type="text"
-                            [value]="item.name"
-                            (change)="updateNpcInventoryField(item.id, 'name', $any($event.target).value)"
-                            placeholder="Item"
-                            class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
-                          />
-                          <div class="flex shrink-0 items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
-                            <button
-                              type="button"
-                              (click)="adjustNpcInventoryQty(item.id, -1)"
-                              class="px-1 font-bold text-[#8AB0AB] hover:text-white"
-                            >
-                              &minus;
-                            </button>
-                            <span class="min-w-[1.4rem] text-center font-bold text-white">
-                              {{ item.quantity }}
-                            </span>
-                            <button
-                              type="button"
-                              (click)="adjustNpcInventoryQty(item.id, 1)"
-                              class="px-1 font-bold text-[#8AB0AB] hover:text-white"
-                            >
-                              +
-                            </button>
-                          </div>
-                          <button
-                            type="button"
-                            (click)="removeNpcInventoryItem(item.id)"
-                            title="Remove Item"
-                            class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
-                          >
-                            &times;
-                          </button>
-                        } @else {
-                          <span class="flex-1 font-bold text-white">{{ item.name || 'Item' }}</span>
-                          <span class="rounded border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[11px] font-bold text-white">
-                            &times;{{ item.quantity }}
-                          </span>
-                        }
-                      </div>
-                      @if (editable) {
-                        <input
-                          type="text"
-                          [value]="item.description"
-                          (change)="updateNpcInventoryField(item.id, 'description', $any($event.target).value)"
-                          placeholder="Description"
-                          class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
-                        />
-                      } @else if (item.description) {
-                        <p class="text-[11px] text-[#8AB0AB]">{{ item.description }}</p>
-                      }
+                @if (nTab === 'all' || nTab === 'weapon') {
+                  <div class="space-y-1.5">
+                    <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                      Weapons ({{ npcWeapons.length }})
                     </div>
-                  }
-                </div>
+                    @if (npcWeapons.length === 0) {
+                      <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                        No weapons carried in inventory.
+                      </div>
+                    } @else {
+                      @for (wItem of npcWeapons; track wItem.id) {
+                        @let nwVis = getInventoryWeaponVisuals(wItem);
+                        @let nwDmg = getNpcWeaponDamage(wItem);
+                        @let isNpcWepEq = isNpcWeaponEquipped(wItem);
+                        <div
+                          class="rounded-xl border bg-[#122220] p-2.5 space-y-2"
+                          [class.border-[#C4491A]]="isNpcWepEq"
+                          [class.border-[#243B37]]="!isNpcWepEq"
+                        >
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex min-w-0 flex-1 items-center gap-2">
+                              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                <app-compendium-icon [icon]="nwVis.icon" [color]="nwVis.color" sizeClass="h-3.5 w-3.5" />
+                              </span>
+                              @if (editable && !wItem.compendium_id) {
+                                <input
+                                  type="text"
+                                  [value]="wItem.name"
+                                  (change)="updateNpcInventoryField(wItem.id, 'name', $any($event.target).value)"
+                                  placeholder="Weapon Name"
+                                  class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                                />
+                              } @else {
+                                <span class="truncate font-bold text-white">{{ wItem.name }}</span>
+                              }
+                              @if (isNpcWepEq) {
+                                <span class="rounded bg-[#27160E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                                  EQUIPPED
+                                </span>
+                              }
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-1">
+                              <button
+                                type="button"
+                                (click)="rollSheetCheck(getNpcName(), (wItem.name || 'Weapon') + ' Attack', getNpcWeaponMod(wItem), nwDmg + ' DMG')"
+                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                              >
+                                Roll
+                              </button>
+                              @if (editable) {
+                                @if (isNpcWepEq) {
+                                  <button
+                                    type="button"
+                                    data-npc-unequip-weapon="true"
+                                    (click)="unequipNpcInventoryWeapon()"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Unequip
+                                  </button>
+                                } @else {
+                                  <button
+                                    type="button"
+                                    data-npc-equip-weapon="true"
+                                    (click)="equipNpcInventoryWeapon(wItem)"
+                                    class="rounded-lg border border-[#C4491A]/50 bg-[#27160E] px-2.5 py-1 text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                                  >
+                                    Equip
+                                  </button>
+                                }
+                                <div class="flex items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                                  <button type="button" (click)="adjustNpcInventoryQty(wItem.id, -1)" class="px-1 font-bold text-[#8AB0AB] hover:text-white">&minus;</button>
+                                  <span class="min-w-[1.2rem] text-center font-bold text-white">{{ wItem.quantity }}</span>
+                                  <button type="button" (click)="adjustNpcInventoryQty(wItem.id, 1)" class="px-1 font-bold text-[#8AB0AB] hover:text-white">+</button>
+                                </div>
+                                <button
+                                  type="button"
+                                  (click)="removeNpcInventoryItem(wItem.id)"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                  title="Remove Weapon"
+                                >
+                                  &times;
+                                </button>
+                              }
+                            </div>
+                          </div>
+
+                          <div class="grid grid-cols-2 gap-1.5 font-mono-num text-[10px]">
+                            <div class="rounded-lg border border-[#C4491A]/35 bg-[#27160E]/60 px-2 py-1">
+                              <span class="text-[#FDBA74]">Roll:</span>
+                              <strong class="ml-1 text-white">{{ getNpcWeaponRollFormula(wItem) }}</strong>
+                            </div>
+                            <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1">
+                              <span class="text-[#8AB0AB]">Damage:</span>
+                              <strong class="ml-1 text-white">{{ nwDmg }} DMG</strong>
+                            </div>
+                          </div>
+
+                          @if (editable && !wItem.compendium_id) {
+                            <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Base DMG
+                                <input
+                                  type="number"
+                                  [ngModel]="wItem.base_damage ?? 4"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { base_damage: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Atk Bonus
+                                <input
+                                  type="number"
+                                  [ngModel]="wItem.attack_bonus ?? 0"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { attack_bonus: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                AP
+                                <input
+                                  type="number"
+                                  min="1"
+                                  [ngModel]="wItem.ap_cost ?? 1"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { ap_cost: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Reach (ft)
+                                <input
+                                  type="number"
+                                  step="5"
+                                  min="5"
+                                  [ngModel]="wItem.reach_feet ?? 5"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { reach_feet: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                            </div>
+                          }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+
+                @if (nTab === 'all' || nTab === 'armor') {
+                  <div class="space-y-1.5">
+                    <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#FBBF24]">
+                      Armors ({{ npcArmors.length }})
+                    </div>
+                    @if (npcArmors.length === 0) {
+                      <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                        No armors carried in inventory.
+                      </div>
+                    } @else {
+                      @for (aItem of npcArmors; track aItem.id) {
+                        @let naVis = getArmorItemVisuals(aItem);
+                        @let isNpcArmEq = !!aItem.equipped;
+                        <div
+                          class="rounded-xl border bg-[#122220] p-2.5 space-y-2"
+                          [class.border-[#F59E0B]]="isNpcArmEq"
+                          [class.border-[#243B37]]="!isNpcArmEq"
+                        >
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex min-w-0 flex-1 items-center gap-2">
+                              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                                <app-compendium-icon [icon]="naVis.icon" [color]="naVis.color" sizeClass="h-3.5 w-3.5" />
+                              </span>
+                              @if (editable && !aItem.compendium_id) {
+                                <input
+                                  type="text"
+                                  [value]="aItem.name"
+                                  (change)="updateNpcInventoryField(aItem.id, 'name', $any($event.target).value)"
+                                  placeholder="Armor Name"
+                                  class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                                />
+                              } @else {
+                                <span class="truncate font-bold text-white">{{ aItem.name }}</span>
+                              }
+                              @if (isNpcArmEq) {
+                                <span class="rounded bg-[#2B1D0E] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FBBF24]">
+                                  EQUIPPED
+                                </span>
+                              }
+                            </div>
+
+                            @if (editable) {
+                              <div class="flex items-center gap-1">
+                                @if (isNpcArmEq) {
+                                  <button
+                                    type="button"
+                                    (click)="unequipNpcInventoryArmor()"
+                                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                                  >
+                                    Unequip
+                                  </button>
+                                } @else {
+                                  <button
+                                    type="button"
+                                    (click)="equipNpcInventoryArmor(aItem.id)"
+                                    class="rounded-lg border border-[#F59E0B]/50 bg-[#2B1D0E] px-2.5 py-1 text-[10px] font-bold text-[#FBBF24] hover:border-[#F59E0B]"
+                                  >
+                                    Equip
+                                  </button>
+                                }
+                                <button
+                                  type="button"
+                                  (click)="removeNpcInventoryItem(aItem.id)"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                  title="Remove Armor"
+                                >
+                                  &times;
+                                </button>
+                              </div>
+                            }
+                          </div>
+
+                          <div class="flex flex-wrap items-center gap-1.5 font-mono-num text-[10px]">
+                            <span class="rounded border border-[#F59E0B]/40 bg-[#2B1D0E] px-2 py-0.5 font-bold text-[#FBBF24]">
+                              +{{ getArmorItemSp(aItem) }} SP
+                            </span>
+                            <span class="rounded border border-[#38B29A]/40 bg-[#102B26] px-2 py-0.5 font-bold text-[#5EEAD4]">
+                              +{{ getArmorItemDr(aItem) }} DR
+                            </span>
+                            <span class="rounded bg-[#09100F] px-1.5 py-0.5 text-[#8AB0AB]">
+                              {{ aItem.armor_weight || 'Light' }}
+                            </span>
+                          </div>
+
+                          @if (editable && !aItem.compendium_id) {
+                            <div class="grid grid-cols-3 gap-1.5">
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Weight
+                                <select
+                                  [ngModel]="aItem.armor_weight || 'Light'"
+                                  (ngModelChange)="patchNpcInventoryItem(aItem.id, { armor_weight: $event, subcategory: $event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                >
+                                  @for (wt of armorWeights; track wt) {
+                                    <option [ngValue]="wt">{{ wt }}</option>
+                                  }
+                                </select>
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                +SP
+                                <input
+                                  type="number"
+                                  min="0"
+                                  [ngModel]="getArmorItemSp(aItem)"
+                                  (ngModelChange)="patchNpcInventoryItem(aItem.id, { armor_sp: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                +DR
+                                <input
+                                  type="number"
+                                  min="0"
+                                  [ngModel]="getArmorItemDr(aItem)"
+                                  (ngModelChange)="patchNpcInventoryItem(aItem.id, { armor_dr: +$event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 font-mono-num text-[11px] text-white"
+                                />
+                              </label>
+                            </div>
+                          }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+
+                @if (nTab === 'all' || nTab === 'item') {
+                  <div class="space-y-1.5">
+                    <div class="font-display text-[10px] font-bold uppercase tracking-wider text-[#7DD3FC]">
+                      Items ({{ npcGear.length }})
+                    </div>
+                    @if (npcGear.length === 0) {
+                      <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-2.5 text-center text-[11px] text-[#8AB0AB]">
+                        No general gear or loot carried.
+                      </div>
+                    } @else {
+                      @for (item of npcGear; track item.id) {
+                        @let ngVis = getGearItemVisuals(item);
+                        <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
+                          <div class="flex items-center gap-2">
+                            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                              <app-compendium-icon [icon]="ngVis.icon" [color]="ngVis.color" sizeClass="h-3.5 w-3.5" />
+                            </span>
+                            @if (editable) {
+                              <input
+                                type="text"
+                                [value]="item.name"
+                                (change)="updateNpcInventoryField(item.id, 'name', $any($event.target).value)"
+                                placeholder="Item"
+                                class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-xs font-bold text-white focus:border-[#C4491A] focus:outline-none"
+                              />
+                              <div class="flex shrink-0 items-center gap-0.5 rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                                <button
+                                  type="button"
+                                  (click)="adjustNpcInventoryQty(item.id, -1)"
+                                  class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                                >
+                                  &minus;
+                                </button>
+                                <span class="min-w-[1.4rem] text-center font-bold text-white">
+                                  {{ item.quantity }}
+                                </span>
+                                <button
+                                  type="button"
+                                  (click)="adjustNpcInventoryQty(item.id, 1)"
+                                  class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <button
+                                type="button"
+                                (click)="removeNpcInventoryItem(item.id)"
+                                title="Remove Item"
+                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                              >
+                                &times;
+                              </button>
+                            } @else {
+                              <span class="flex-1 font-bold text-white">{{ item.name || 'Item' }}</span>
+                              <span class="rounded border border-[#243B37] bg-[#09100F] px-2 py-0.5 font-mono-num text-[11px] font-bold text-white">
+                                &times;{{ item.quantity }}
+                              </span>
+                            }
+                          </div>
+                          @if (editable) {
+                            <input
+                              type="text"
+                              [value]="item.description"
+                              (change)="updateNpcInventoryField(item.id, 'description', $any($event.target).value)"
+                              placeholder="Description"
+                              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
+                            />
+                          } @else if (item.description) {
+                            <p class="text-[11px] text-[#8AB0AB]">{{ item.description }}</p>
+                          }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
               }
             </div>
 
@@ -1570,18 +2844,8 @@
           }
 
           @if (npcTab() === 'token') {
-            <app-tokenizer-editor
-              [portraitUrl]="vis.portraitUrl"
-              [tokenImageUrl]="vis.tokenImageUrl"
-              [tokenAppearance]="vis.tokenAppearance"
-              [fallbackIcon]="getDisplayIcon()"
-              [fallbackColor]="getDisplayColor()"
-              [faction]="getDisplayFaction()"
-              [actorName]="getNpcName()"
-              [editable]="editable"
-              [externalAssetPicker]="true"
-              (requestAssetPicker)="openTokenizerAssetPicker($event)"
-              (visualsChange)="onTokenizerVisualsChange($event)"
+            <ng-container
+              *ngTemplateOutlet="tokenVisualSummaryCard; context: { displayName: getNpcName() }"
             />
 
             <div class="grid grid-cols-2 gap-2.5 border-t border-[#243B37] pt-3 sm:grid-cols-4">
@@ -1699,16 +2963,4 @@
       }
     }
   </section>
-
-  @if (activeAssetPickerRequest(); as pickerReq) {
-    <app-asset-browser-modal
-      [open]="true"
-      [floating]="true"
-      mode="picker"
-      purpose="characters"
-      [currentUrl]="pickerReq.currentUrl"
-      (closed)="closeTokenizerAssetPicker()"
-      (assetSelected)="onTokenizerAssetSelected($event)"
-    />
-  }
 }

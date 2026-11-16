@@ -1,0 +1,55 @@
+@if (isOpen()) {
+  @let vis = resolvedVisuals();
+
+  <app-vtt-floating-window
+    eyebrow="Portrait &amp; Token Art"
+    [windowTitle]="targetName() + ' · Tokenizer Studio'"
+    subtitle="Keep a separate full-body Sheet Portrait and cropped circular Battlemap Token."
+    ariaLabel="Tokenizer Studio"
+    widthClass="w-[min(95vw,860px)]"
+    [estimatedWidth]="860"
+    [estimatedHeight]="560"
+    (closed)="closeStudio()"
+  >
+    <div class="min-h-0 flex-1 overflow-y-auto p-5">
+      <app-tokenizer-editor
+        [portraitUrl]="vis.portraitUrl"
+        [tokenImageUrl]="vis.tokenImageUrl"
+        [tokenAppearance]="vis.tokenAppearance"
+        [fallbackIcon]="fallbackIcon()"
+        [fallbackColor]="fallbackColor()"
+        [faction]="faction()"
+        [actorName]="targetName()"
+        [editable]="canEdit()"
+        [externalAssetPicker]="true"
+        (requestAssetPicker)="openAssetPicker($event)"
+        (visualsChange)="onVisualsChange($event)"
+      />
+    </div>
+
+    <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#243B37] bg-[#122220] px-5 py-3">
+      <span class="text-[11px] text-[#8AB0AB]">
+        Changes sync automatically across Actor Sheets, Battlemap Tokens, and Chat.
+      </span>
+      <button
+        type="button"
+        (click)="closeStudio()"
+        class="btn-copper rounded-lg px-4 py-1.5 text-xs font-bold"
+      >
+        Done
+      </button>
+    </div>
+  </app-vtt-floating-window>
+
+  @if (activeAssetPickerRequest(); as pickerReq) {
+    <app-asset-browser-modal
+      [open]="true"
+      [floating]="true"
+      mode="picker"
+      purpose="characters"
+      [currentUrl]="pickerReq.currentUrl"
+      (closed)="closeAssetPicker()"
+      (assetSelected)="onAssetSelected($event)"
+    />
+  }
+}

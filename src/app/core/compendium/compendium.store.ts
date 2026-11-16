@@ -2,6 +2,10 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { AuthStore } from '../auth/auth.store';
 import { NotificationStore } from '../notifications/notification.store';
 import {
+  ArmorModel,
+  CompendiumItemModel,
+  DEFAULT_COMPENDIUM_ARMORS,
+  DEFAULT_COMPENDIUM_ITEMS,
   DEFAULT_KEYWORDS,
   KeywordDefinition,
   PerkNodeModel,
@@ -26,6 +30,8 @@ import { CompendiumService, slugifyText } from './compendium.service';
 
 interface CompendiumState {
   weapons: WeaponModel[];
+  armors: ArmorModel[];
+  items: CompendiumItemModel[];
   skillTrees: SkillTreeModel[];
   perkNodes: PerkNodeModel[];
   keywords: KeywordDefinition[];
@@ -47,6 +53,8 @@ export class CompendiumStore {
 
   readonly #state = signal<CompendiumState>({
     weapons: [],
+    armors: DEFAULT_COMPENDIUM_ARMORS,
+    items: DEFAULT_COMPENDIUM_ITEMS,
     skillTrees: [],
     perkNodes: [],
     keywords: DEFAULT_KEYWORDS,
@@ -58,6 +66,12 @@ export class CompendiumStore {
 
   readonly weapons = computed(() =>
     this.#state().weapons.filter((w) => isCompendiumItemActive(w))
+  );
+  readonly armors = computed(() =>
+    this.#state().armors.filter((a) => isCompendiumItemActive(a))
+  );
+  readonly items = computed(() =>
+    this.#state().items.filter((i) => isCompendiumItemActive(i))
   );
   readonly skillTrees = computed(() =>
     this.#state().skillTrees.filter((t) => isCompendiumItemActive(t))
@@ -75,6 +89,8 @@ export class CompendiumStore {
   );
 
   readonly allWeapons = computed(() => this.#state().weapons);
+  readonly allArmors = computed(() => this.#state().armors);
+  readonly allItems = computed(() => this.#state().items);
   readonly allSkillTrees = computed(() => this.#state().skillTrees);
   readonly allPerkNodes = computed(() => this.#state().perkNodes);
   readonly allStandaloneNodes = computed(() =>
@@ -104,6 +120,8 @@ export class CompendiumStore {
         this.loadPromise = null;
         this.#state.set({
           weapons: [],
+          armors: DEFAULT_COMPENDIUM_ARMORS,
+          items: DEFAULT_COMPENDIUM_ITEMS,
           skillTrees: [],
           perkNodes: [],
           keywords: DEFAULT_KEYWORDS,
@@ -152,10 +170,18 @@ export class CompendiumStore {
           await this.compendiumService.fetchFullCompendium(includeInactive);
         this.#state.update((s) => ({
           ...s,
-          weapons: result.weapons,
-          skillTrees: result.skillTrees,
-          perkNodes: result.perkNodes,
-          keywords: result.keywords,
+          weapons: result.weapons ?? [],
+          armors:
+            result.armors && result.armors.length > 0
+              ? result.armors
+              : DEFAULT_COMPENDIUM_ARMORS,
+          items:
+            result.items && result.items.length > 0
+              ? result.items
+              : DEFAULT_COMPENDIUM_ITEMS,
+          skillTrees: result.skillTrees ?? [],
+          perkNodes: result.perkNodes ?? [],
+          keywords: result.keywords ?? DEFAULT_KEYWORDS,
           hasLoaded: true,
           isLoading: false,
         }));
@@ -1899,6 +1925,388 @@ export class CompendiumStore {
     this.notifications.info(
       `Updated "${existing.name}" Tags`,
       `Two-Handed: ${input.two_handed ? 'On' : 'Off'} · Heavy Block: ${input.heavy ? 'On' : 'Off'}`
+    );
+
+    return true;
+  }
+
+  async createArmor(
+    draft: Omit<ArmorModel, 'id' | 'slug'> & { slug?: string }
+  ): Promise<ArmorModel | null> {
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) return null;
+
+    const baseSlug = slugifyText(draft.slug || trimmedName) || 'armor';
+    const existingSlugs = new Set(this.#state().armors.map((a) => a.slug));
+    const slug = existingSlugs.has(baseSlug)
+      ? `${baseSlug}-${Math.floor(100 + Math.random() * 900)}`
+      : baseSlug;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    const payload = {
+      slug,
+      name: trimmedName,
+      weight_class: draft.weight_class || 'Light',
+      armor_sp: Math.max(0, Math.round(Number(draft.armor_sp) || 0)),
+      armor_dr: Math.max(0, Math.round(Number(draft.armor_dr) || 0)),
+      allows_dodge: Boolean(draft.allows_dodge),
+      speed_penalty_tiles: Math.max(
+        0,
+        Math.round(Number(draft.speed_penalty_tiles) || 0)
+      ),
+      description: draft.description.trim() || 'Protective armor harness.',
+      rule_hooks: draft.rule_hooks ?? {},
+      is_official: true,
+      created_by: this.authStore.user()?.id ?? null,
+    };
+
+    const { data, error } = await this.compendiumService.insertArmor(payload);
+
+    if (error || !data) {
+      this.#state.update((s) => ({
+        ...s,
+        isLoading: false,
+        error,
+      }));
+      if (error) this.notifications.error('Unable to Forge Armor', error);
+      return null;
+    }
+
+    this.#state.update((s) => ({
+      ...s,
+      armors: [...s.armors, data].sort((a, b) => a.name.localeCompare(b.name)),
+      isLoading: false,
+      statusMessage: `Forged armor "${data.name}".`,
+    }));
+
+    this.notifications.success(
+      'Armor Forged',
+      `"${data.name}" (+${data.armor_sp} SP · +${data.armor_dr} DR) added to Compendium.`
+    );
+
+    return data;
+  }
+
+  async updateArmor(
+    armorId: string,
+    draft: Omit<ArmorModel, 'id' | 'slug'>
+  ): Promise<boolean> {
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) return false;
+
+    const existing = this.#state().armors.find((a) => a.id === armorId);
+    if (!existing) return false;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    const nextPatch: Omit<ArmorModel, 'id' | 'slug'> = {
+      name: trimmedName,
+      weight_class: draft.weight_class || 'Light',
+      armor_sp: Math.max(0, Math.round(Number(draft.armor_sp) || 0)),
+      armor_dr: Math.max(0, Math.round(Number(draft.armor_dr) || 0)),
+      allows_dodge: Boolean(draft.allows_dodge),
+      speed_penalty_tiles: Math.max(
+        0,
+        Math.round(Number(draft.speed_penalty_tiles) || 0)
+      ),
+      description: draft.description.trim() || 'Protective armor harness.',
+      rule_hooks: {
+        ...(draft.rule_hooks ?? {}),
+        __is_active: existing.is_active ?? true,
+      },
+    };
+
+    void this.compendiumService.updateArmorRecord(armorId, nextPatch);
+
+    const updated: ArmorModel = {
+      ...existing,
+      ...nextPatch,
+      is_active: existing.is_active ?? true,
+    };
+
+    this.#state.update((s) => ({
+      ...s,
+      armors: s.armors
+        .map((a) => (a.id === armorId ? updated : a))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      isLoading: false,
+      statusMessage: `Updated armor "${updated.name}".`,
+    }));
+
+    this.notifications.success(
+      'Armor Updated',
+      `Saved changes to "${updated.name}".`
+    );
+
+    return true;
+  }
+
+  async setArmorActive(armorId: string, isActive: boolean): Promise<boolean> {
+    const existing = this.#state().armors.find((a) => a.id === armorId);
+    if (!existing) return false;
+
+    const nextHooks: Record<string, unknown> = {
+      ...(existing.rule_hooks ?? {}),
+      __is_active: isActive,
+    };
+
+    void this.compendiumService.updateArmorActiveStatus(
+      armorId,
+      nextHooks,
+      isActive
+    );
+
+    this.#state.update((s) => ({
+      ...s,
+      armors: s.armors.map((a) =>
+        a.id === armorId
+          ? { ...a, is_active: isActive, rule_hooks: nextHooks }
+          : a
+      ),
+      statusMessage: isActive
+        ? `Restored "${existing.name}" to active Armors.`
+        : `Archived "${existing.name}".`,
+    }));
+
+    return true;
+  }
+
+  async deleteArmor(armorId: string): Promise<boolean> {
+    const existing = this.#state().armors.find((a) => a.id === armorId);
+    if (!existing) return false;
+
+    const nextHooks: Record<string, unknown> = {
+      ...(existing.rule_hooks ?? {}),
+      __is_active: false,
+    };
+
+    void this.compendiumService.deleteArmorRecord(
+      armorId,
+      existing.slug,
+      nextHooks
+    );
+
+    this.#state.update((s) => ({
+      ...s,
+      armors: s.armors.map((a) =>
+        a.id === armorId
+          ? { ...a, is_active: false, rule_hooks: nextHooks }
+          : a
+      ),
+      statusMessage: `Deleted "${existing.name}" from Armors.`,
+    }));
+
+    this.notifications.info(
+      'Armor Deleted',
+      `Removed "${existing.name}" from active Armors.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setArmorActive(armorId, true);
+        },
+      }
+    );
+
+    return true;
+  }
+
+  async createCompendiumItem(
+    draft: Omit<CompendiumItemModel, 'id' | 'slug'> & { slug?: string }
+  ): Promise<CompendiumItemModel | null> {
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) return null;
+
+    const baseSlug = slugifyText(draft.slug || trimmedName) || 'item';
+    const existingSlugs = new Set(this.#state().items.map((i) => i.slug));
+    const slug = existingSlugs.has(baseSlug)
+      ? `${baseSlug}-${Math.floor(100 + Math.random() * 900)}`
+      : baseSlug;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    const payload = {
+      slug,
+      name: trimmedName,
+      subcategory: draft.subcategory.trim() || 'Adventuring Gear',
+      default_quantity: Math.max(
+        1,
+        Math.round(Number(draft.default_quantity) || 1)
+      ),
+      stackable: draft.stackable !== false,
+      description: draft.description.trim() || 'Adventuring gear.',
+      rule_hooks: draft.rule_hooks ?? {},
+      is_official: true,
+      created_by: this.authStore.user()?.id ?? null,
+    };
+
+    const { data, error } =
+      await this.compendiumService.insertCompendiumItem(payload);
+
+    if (error || !data) {
+      this.#state.update((s) => ({
+        ...s,
+        isLoading: false,
+        error,
+      }));
+      if (error) this.notifications.error('Unable to Create Item', error);
+      return null;
+    }
+
+    this.#state.update((s) => ({
+      ...s,
+      items: [...s.items, data].sort((a, b) => a.name.localeCompare(b.name)),
+      isLoading: false,
+      statusMessage: `Created item "${data.name}".`,
+    }));
+
+    this.notifications.success(
+      'Item Created',
+      `"${data.name}" (${data.subcategory}) added to Compendium.`
+    );
+
+    return data;
+  }
+
+  async updateCompendiumItem(
+    itemId: string,
+    draft: Omit<CompendiumItemModel, 'id' | 'slug'>
+  ): Promise<boolean> {
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) return false;
+
+    const existing = this.#state().items.find((i) => i.id === itemId);
+    if (!existing) return false;
+
+    this.#state.update((s) => ({
+      ...s,
+      isLoading: true,
+      error: null,
+      statusMessage: null,
+    }));
+
+    const nextPatch: Omit<CompendiumItemModel, 'id' | 'slug'> = {
+      name: trimmedName,
+      subcategory: draft.subcategory.trim() || 'Adventuring Gear',
+      default_quantity: Math.max(
+        1,
+        Math.round(Number(draft.default_quantity) || 1)
+      ),
+      stackable: draft.stackable !== false,
+      description: draft.description.trim() || 'Adventuring gear.',
+      rule_hooks: {
+        ...(draft.rule_hooks ?? {}),
+        __is_active: existing.is_active ?? true,
+      },
+    };
+
+    void this.compendiumService.updateCompendiumItemRecord(itemId, nextPatch);
+
+    const updated: CompendiumItemModel = {
+      ...existing,
+      ...nextPatch,
+      is_active: existing.is_active ?? true,
+    };
+
+    this.#state.update((s) => ({
+      ...s,
+      items: s.items
+        .map((i) => (i.id === itemId ? updated : i))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      isLoading: false,
+      statusMessage: `Updated item "${updated.name}".`,
+    }));
+
+    this.notifications.success(
+      'Item Updated',
+      `Saved changes to "${updated.name}".`
+    );
+
+    return true;
+  }
+
+  async setCompendiumItemActive(
+    itemId: string,
+    isActive: boolean
+  ): Promise<boolean> {
+    const existing = this.#state().items.find((i) => i.id === itemId);
+    if (!existing) return false;
+
+    const nextHooks: Record<string, unknown> = {
+      ...(existing.rule_hooks ?? {}),
+      __is_active: isActive,
+    };
+
+    void this.compendiumService.updateCompendiumItemActiveStatus(
+      itemId,
+      nextHooks,
+      isActive
+    );
+
+    this.#state.update((s) => ({
+      ...s,
+      items: s.items.map((i) =>
+        i.id === itemId
+          ? { ...i, is_active: isActive, rule_hooks: nextHooks }
+          : i
+      ),
+      statusMessage: isActive
+        ? `Restored "${existing.name}" to active Items.`
+        : `Archived "${existing.name}".`,
+    }));
+
+    return true;
+  }
+
+  async deleteCompendiumItem(itemId: string): Promise<boolean> {
+    const existing = this.#state().items.find((i) => i.id === itemId);
+    if (!existing) return false;
+
+    const nextHooks: Record<string, unknown> = {
+      ...(existing.rule_hooks ?? {}),
+      __is_active: false,
+    };
+
+    void this.compendiumService.deleteCompendiumItemRecord(
+      itemId,
+      existing.slug,
+      nextHooks
+    );
+
+    this.#state.update((s) => ({
+      ...s,
+      items: s.items.map((i) =>
+        i.id === itemId
+          ? { ...i, is_active: false, rule_hooks: nextHooks }
+          : i
+      ),
+      statusMessage: `Deleted "${existing.name}" from Items.`,
+    }));
+
+    this.notifications.info(
+      'Item Deleted',
+      `Removed "${existing.name}" from active Items.`,
+      {
+        label: 'Undo Delete',
+        callback: () => {
+          void this.setCompendiumItemActive(itemId, true);
+        },
+      }
     );
 
     return true;

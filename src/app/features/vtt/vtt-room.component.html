@@ -1201,6 +1201,16 @@
                       >
                         {{ tok.npc_stats.attack_ap ?? 1 }} AP: {{ tok.npc_stats.weapon_name || 'Melee Strike' }} (+{{ tok.npc_stats.attack_mod ?? 3 }} &middot; {{ tok.npc_stats.flat_damage ?? 4 }} DMG)
                       </button>
+                      @for (npcArt of vttStore.getNpcStandaloneCombatArts(tok); track npcArt.id) {
+                        <button
+                          type="button"
+                          [disabled]="tok.current_ap < (npcArt.ap_cost ?? 1)"
+                          (click)="vttStore.beginNpcStandaloneArtTargetSelection(tok, npcArt)"
+                          class="inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] transition-colors hover:border-[#C4491A] disabled:opacity-40"
+                        >
+                          <span>{{ npcArt.ap_cost ?? 1 }} AP: {{ npcArt.name }}</span>
+                        </button>
+                      }
                     }
                   </div>
 
@@ -1242,14 +1252,16 @@
           class="z-20 flex h-full w-84 sm:w-92 shrink-0 flex-col border-l border-[var(--mot-border)] bg-[var(--mot-surface)] text-[var(--mot-text)]"
         >
           <div
-            class="grid shrink-0 gap-1 border-b border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-[11px] font-bold"
-            [class.grid-cols-4]="vttStore.isGm()"
+            class="grid shrink-0 gap-1 border-b border-[var(--mot-border)] bg-[var(--mot-well)] p-1 font-bold"
+            [class.grid-cols-5]="vttStore.isGm()"
+            [class.text-[10px]]="vttStore.isGm()"
             [class.grid-cols-3]="!vttStore.isGm()"
+            [class.text-[11px]]="!vttStore.isGm()"
           >
             <button
               type="button"
               (click)="sidebarTab.set('log')"
-              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'log'"
               [class.text-[var(--mot-text)]]="sidebarTab() === 'log'"
               [class.shadow-xs]="sidebarTab() === 'log'"
@@ -1258,13 +1270,13 @@
               <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              <span>Log</span>
+              <span class="truncate">Log</span>
             </button>
 
             <button
               type="button"
               (click)="sidebarTab.set('actors')"
-              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'actors'"
               [class.text-[var(--mot-text)]]="sidebarTab() === 'actors'"
               [class.shadow-xs]="sidebarTab() === 'actors'"
@@ -1276,14 +1288,14 @@
                 <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span>Actors ({{ visibleCampaignRosterActors().length }})</span>
+              <span class="truncate">Actors ({{ visibleCampaignRosterActors().length }})</span>
             </button>
 
             @if (vttStore.isGm()) {
               <button
                 type="button"
                 (click)="sidebarTab.set('maps')"
-                class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
                 [class.bg-[var(--mot-surface)]]="sidebarTab() === 'maps'"
                 [class.text-[var(--mot-text)]]="sidebarTab() === 'maps'"
                 [class.shadow-xs]="sidebarTab() === 'maps'"
@@ -1294,14 +1306,31 @@
                   <line x1="8" y1="2" x2="8" y2="18" />
                   <line x1="16" y1="6" x2="16" y2="22" />
                 </svg>
-                <span>Scenes ({{ vttStore.scenes().length }})</span>
+                <span class="truncate">Scenes ({{ vttStore.scenes().length }})</span>
+              </button>
+
+              <button
+                type="button"
+                data-sidebar-tab="compendium"
+                (click)="openCompendiumTab()"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
+                [class.bg-[var(--mot-surface)]]="sidebarTab() === 'compendium'"
+                [class.text-[var(--mot-text)]]="sidebarTab() === 'compendium'"
+                [class.shadow-xs]="sidebarTab() === 'compendium'"
+                [class.text-[var(--mot-muted)]]="sidebarTab() !== 'compendium'"
+              >
+                <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <span class="truncate">Compendium</span>
               </button>
             }
 
             <button
               type="button"
               (click)="sidebarTab.set('settings')"
-              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition-colors"
+              class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'settings'"
               [class.text-[var(--mot-text)]]="sidebarTab() === 'settings'"
               [class.shadow-xs]="sidebarTab() === 'settings'"
@@ -1311,7 +1340,7 @@
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
-              <span>Settings</span>
+              <span class="truncate">Settings</span>
             </button>
           </div>
 
@@ -1854,10 +1883,9 @@
               @let actorVis = vttStore.resolveRosterActorVisuals(actorItem);
               <div
                 [attr.draggable]="vttStore.canDeployRosterActor(actorItem) || vttStore.isGm() ? 'true' : 'false'"
-                (click)="selectRosterActorRow(actorItem, primaryToken)"
+                (click)="vttStore.openActorSheet(actorItem.id)"
                 (dragstart)="onRosterActorDragStart($event, actorItem)"
                 (dragend)="onDirectoryDragEnd()"
-                (dblclick)="vttStore.openActorSheet(actorItem.id)"
                 (contextmenu)="openRosterActorContextMenu($event, actorItem.id)"
                 [style.marginLeft.px]="indent || 0"
                 class="group flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2 transition-colors select-none active:cursor-grabbing"
@@ -1866,7 +1894,7 @@
                 [class.border-[var(--mot-border)]]="!actorSelected"
                 [class.bg-[var(--mot-well)]]="!actorSelected"
                 [class.hover:border-[#C4491A]]="!actorSelected"
-                title="Click to select actor · Double-click or click Sheet to view &amp; edit · Drag onto battlemap to deploy"
+                title="Click to open sheet · Drag onto battlemap to deploy · Right-click for options"
               >
                 <div class="flex min-w-0 items-center gap-2.5">
                   @if (actorVis.portraitUrl && !isPortraitBroken(actorVis.portraitUrl)) {
@@ -1979,23 +2007,6 @@
                   class="flex shrink-0 items-center gap-1"
                   (click)="$event.stopPropagation()"
                 >
-                  <button
-                    type="button"
-                    (click)="vttStore.openActorSheet(actorItem.id)"
-                    class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
-                    title="Open Sheet in VTT"
-                  >
-                    Sheet
-                  </button>
-                  @if (primaryToken) {
-                    <button
-                      type="button"
-                      (click)="vttStore.selectedTokenId.set(primaryToken.id)"
-                      class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
-                    >
-                      Select
-                    </button>
-                  }
                   <button
                     type="button"
                     (click)="openRosterActorContextMenu($event, actorItem.id)"
@@ -2270,8 +2281,7 @@
                         @let chVis = getCharacterVisuals(ch);
                         <div
                           draggable="true"
-                          (click)="selectAvailableCharacterRow(ch, deployed)"
-                          (dblclick)="vttStore.openCharacterSheetInVtt(ch.id)"
+                          (click)="importAndOpenCharacterInRoster(ch)"
                           (dragstart)="onCharacterDragStart($event, ch)"
                           (dragend)="onDirectoryDragEnd()"
                           class="flex cursor-grab items-center justify-between gap-2 rounded-xl border px-2.5 py-2 select-none active:cursor-grabbing transition-colors"
@@ -2280,7 +2290,7 @@
                           [class.border-[var(--mot-border)]]="!charRowSelected"
                           [class.bg-[var(--mot-well)]]="!charRowSelected"
                           [class.hover:border-[#C4491A]]="!charRowSelected"
-                          title="Click to select · Double-click or click Sheet to view &amp; edit · Drag onto battlemap to deploy"
+                          title="Click to import copy & open sheet · Drag onto battlemap to deploy"
                         >
                           <div class="flex min-w-0 items-center gap-2">
                             @if (chVis.portraitUrl && !isPortraitBroken(chVis.portraitUrl)) {
@@ -2315,29 +2325,12 @@
                           <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
                             <button
                               type="button"
-                              (click)="vttStore.openCharacterSheetInVtt(ch.id)"
-                              class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
-                              title="Open Sheet in VTT"
-                            >
-                              Sheet
-                            </button>
-                            <button
-                              type="button"
                               (click)="importCharacterIntoRoster(ch)"
                               class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[10px] font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
                               title="Add to Actors Directory"
                             >
                               + Actors
                             </button>
-                            @if (deployed) {
-                              <button
-                                type="button"
-                                (click)="vttStore.selectedTokenId.set(deployed.id)"
-                                class="rounded-md border border-[#38B29A] bg-[var(--mot-jade-bg)] px-2 py-1 text-[10px] font-bold text-[var(--mot-jade-text)]"
-                              >
-                                Select
-                              </button>
-                            }
                           </div>
                         </div>
                       }
@@ -2366,11 +2359,13 @@
                           @let sTokVis = vttStore.resolveTokenVisuals(tok);
                           <div
                             (click)="onSceneTokenRowClick($event, tok)"
-                            class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors"
+                            (dblclick)="onSceneTokenRowDoubleClick(tok)"
+                            class="flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-2.5 py-2 transition-colors select-none"
                             [class.border-[#C4491A]]="vttStore.isTokenSelected(tok.id)"
                             [class.bg-[var(--mot-surface-raised)]]="vttStore.isTokenSelected(tok.id)"
                             [class.border-[var(--mot-border)]]="!vttStore.isTokenSelected(tok.id)"
                             [class.bg-[var(--mot-well)]]="!vttStore.isTokenSelected(tok.id)"
+                            title="Click to select token · Double-click to open sheet"
                           >
                             <div class="flex min-w-0 items-center gap-2">
                               <div class="h-7 w-7 shrink-0">
@@ -2413,17 +2408,8 @@
                               </div>
                             </div>
 
-                            <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
-                              @if (vttStore.isGm() || vttStore.canControlToken(tok)) {
-                                <button
-                                  type="button"
-                                  (click)="vttStore.openTokenSheet(tok.id)"
-                                  class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
-                                >
-                                  Sheet
-                                </button>
-                              }
-                              @if (vttStore.canControlToken(tok)) {
+                            @if (vttStore.canControlToken(tok)) {
+                              <div class="flex shrink-0 items-center gap-1" (click)="$event.stopPropagation()">
                                 @if (vttStore.isGm()) {
                                   <button
                                     type="button"
@@ -2442,8 +2428,8 @@
                                 >
                                   &times;
                                 </button>
-                              }
-                            </div>
+                              </div>
+                            }
                           </div>
                         }
                       </div>
@@ -2760,6 +2746,195 @@
                   />
                   <span>Auto-deduct AP when dragging tokens in Combat</span>
                 </label>
+              </div>
+            </div>
+          }
+
+          @if (sidebarTab() === 'compendium' && vttStore.isGm()) {
+            <div class="flex flex-1 min-h-0 flex-col justify-between text-xs">
+              <div class="overflow-y-auto p-3 space-y-4">
+                <div class="space-y-2">
+                  <div class="px-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                    Compendium Packs
+                  </div>
+
+                  <button
+                    type="button"
+                    data-open-compendium-pack="weapons"
+                    (click)="openCompendiumWindow('weapons')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    [class.border-[#C4491A]]="compendiumWeaponsWindowOpen()"
+                    [class.border-[var(--mot-border)]]="!compendiumWeaponsWindowOpen()"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#C4491A]/50 bg-[#0D1615]">
+                        <app-compendium-icon
+                          icon="riposte"
+                          color="#C4491A"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Weapons
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Roll &amp; damage formulas &middot; Drag onto Actor Sheets
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (compendiumWeaponsWindowOpen()) {
+                        <span class="rounded-md border border-[#C4491A]/60 bg-[#27160E] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                          Open
+                        </span>
+                      }
+                      <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                        {{ compendiumWeapons().length }}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-open-compendium-pack="armors"
+                    (click)="openCompendiumWindow('armors')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    [class.border-[#C4491A]]="compendiumArmorsWindowOpen()"
+                    [class.border-[var(--mot-border)]]="!compendiumArmorsWindowOpen()"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#F59E0B]/50 bg-[#0D1615]">
+                        <app-compendium-icon
+                          icon="breastplate"
+                          color="#F59E0B"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Armors
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          SP &amp; DR protection &middot; Drag onto Actor Sheets
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (compendiumArmorsWindowOpen()) {
+                        <span class="rounded-md border border-[#C4491A]/60 bg-[#27160E] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                          Open
+                        </span>
+                      }
+                      <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                        {{ compendiumArmors().length }}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-open-compendium-pack="items"
+                    (click)="openCompendiumWindow('items')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    [class.border-[#C4491A]]="compendiumItemsWindowOpen()"
+                    [class.border-[var(--mot-border)]]="!compendiumItemsWindowOpen()"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#38BDF8]/50 bg-[#0D1615]">
+                        <app-compendium-icon
+                          icon="pack"
+                          color="#38BDF8"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Items
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Ammunition, camp gear &amp; supplies &middot; Drag to Inventory
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (compendiumItemsWindowOpen()) {
+                        <span class="rounded-md border border-[#C4491A]/60 bg-[#27160E] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                          Open
+                        </span>
+                      }
+                      <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                        {{ compendiumItems().length }}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-open-compendium-pack="skills"
+                    (click)="openCompendiumWindow('skills')"
+                    class="flex w-full items-center justify-between gap-3 rounded-xl border bg-[var(--mot-well)] p-3 text-left transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    [class.border-[#C4491A]]="compendiumSkillsWindowOpen()"
+                    [class.border-[var(--mot-border)]]="!compendiumSkillsWindowOpen()"
+                  >
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#38B29A]/50 bg-[#0D1615]">
+                        <app-compendium-icon
+                          icon="gale-wind"
+                          color="#38B29A"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Skills
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Browse &amp; drag standalone Combat Arts &amp; Passives
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (compendiumSkillsWindowOpen()) {
+                        <span class="rounded-md border border-[#C4491A]/60 bg-[#27160E] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FDBA74]">
+                          Open
+                        </span>
+                      }
+                      <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                        {{ compendiumStandaloneNodes().length }}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
+                @if (authStore.isAdmin()) {
+                  <div class="space-y-2 border-t border-[var(--mot-border)] pt-3">
+                    <div class="px-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                      Authoring
+                    </div>
+                    <a
+                      routerLink="/content-manager/weapons"
+                      target="_blank"
+                      class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 text-left no-underline transition-colors hover:border-[#C4491A] hover:bg-[var(--mot-surface-raised)]"
+                    >
+                      <div class="min-w-0">
+                        <div class="font-display text-xs font-bold text-[var(--mot-text)]">
+                          Content Studio
+                        </div>
+                        <div class="truncate text-[11px] text-[var(--mot-muted)]">
+                          Create or edit Compendium weapons, armors, items &amp; skills
+                        </div>
+                      </div>
+                      <span class="shrink-0 rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 text-[10px] font-bold text-[var(--mot-accent-text)]">
+                        Open &#8599;
+                      </span>
+                    </a>
+                  </div>
+                }
+              </div>
+
+              <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] px-3 py-2 text-[11px] text-[var(--mot-muted)]">
+                Open a pack window to search and drag <strong class="text-[var(--mot-text)]">Weapons</strong>, <strong class="text-[var(--mot-text)]">Armors</strong>, <strong class="text-[var(--mot-text)]">Items</strong>, or <strong class="text-[var(--mot-text)]">Skills</strong> onto any open Player Character or NPC sheet.
               </div>
             </div>
           }
@@ -3170,6 +3345,25 @@
           >
             <span>Open Sheet</span>
           </button>
+          @if (vttStore.canManageRosterActor(menuActor)) {
+            <button
+              type="button"
+              (click)="editRosterActorTokenFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#5EEAD4] hover:bg-[#192B28]"
+            >
+              <span>Edit Token</span>
+            </button>
+          }
+          @if (canReimportRosterActor(menuActor)) {
+            <button
+              type="button"
+              data-context-reimport-actor="true"
+              (click)="reimportRosterActorFromMenu(menuActor.id)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FDBA74] hover:bg-[#192B28]"
+            >
+              <span>Re-import</span>
+            </button>
+          }
 
           @if (vttStore.isGm()) {
             <div class="my-1 border-t border-[#243B37] pt-1">
@@ -5128,13 +5322,38 @@
   @if (rosterImportModalOpen()) {
     <app-vtt-floating-window
       windowTitle="Import into Actors"
-      subtitle="Load characters you created, import reusable templates from Collections, or pull starter NPCs."
+      subtitle="Imports create detached copies so campaign edits never alter your original Character Sheet or Collection template."
       widthClass="w-[min(94vw,576px)]"
       [estimatedWidth]="576"
-      [estimatedHeight]="620"
+      [estimatedHeight]="660"
       (closed)="closeRosterImportModal()"
     >
       <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-5 py-3">
+          @if (vttStore.isGm()) {
+            <form
+              (submit)="$event.preventDefault(); submitRosterImportUrl()"
+              class="flex items-center gap-2 rounded-xl border border-[#243B37] bg-[#0B1413] p-2"
+            >
+              <input
+                type="text"
+                name="rosterImportUrlInput"
+                data-import-character-url-input="true"
+                [ngModel]="rosterImportUrlInput()"
+                (ngModelChange)="rosterImportUrlInput.set($event)"
+                placeholder="Paste Character Sheet or Collections URL, or ID"
+                class="min-w-0 flex-1 rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+              />
+              <button
+                type="submit"
+                data-import-character-url-submit="true"
+                [disabled]="!rosterImportUrlInput().trim() || isImportingCharacterUrl()"
+                class="btn-copper shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-45"
+              >
+                {{ isImportingCharacterUrl() ? 'Importing...' : 'Import URL' }}
+              </button>
+            </form>
+          }
+
           <div
             class="grid gap-1.5"
             [class.grid-cols-4]="vttStore.isGm()"
@@ -5272,9 +5491,18 @@
                   </div>
                   <div class="flex shrink-0 items-center gap-1.5">
                     @if (inRoster) {
-                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
+                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2 py-1 text-[10px] font-bold text-[#5EEAD4]">
                         In Actors
                       </span>
+                      <button
+                        type="button"
+                        data-import-modal-reimport="true"
+                        (click)="reimportCharacterIntoRoster(ch.id)"
+                        class="rounded-lg border border-[#38B29A]/60 bg-[#0D1E1B] px-2.5 py-1 text-xs font-bold text-[#5EEAD4] hover:bg-[#15312C]"
+                        title="Overwrite this VTT actor with the latest details from the Character Sheet"
+                      >
+                        Re-import
+                      </button>
                     } @else {
                       <button
                         type="button"
@@ -5358,6 +5586,15 @@
                       <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2 py-1 text-[10px] font-bold text-[#5EEAD4]">
                         Loaded
                       </span>
+                      <button
+                        type="button"
+                        data-import-modal-reimport="true"
+                        (click)="reimportCollectionActorIntoRoster(colActor.id)"
+                        class="rounded-lg border border-[#38B29A]/60 bg-[#0D1E1B] px-2.5 py-1 text-xs font-bold text-[#5EEAD4] hover:bg-[#15312C]"
+                        title="Overwrite imported VTT actor(s) with the latest details from this Collection template"
+                      >
+                        Re-import
+                      </button>
                     }
                     <button
                       type="button"
@@ -5409,11 +5646,20 @@
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div class="flex shrink-0 items-center gap-1.5">
                     @if (inRoster) {
-                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2.5 py-1 font-bold text-[#5EEAD4]">
+                      <span class="rounded-md border border-[#21423B] bg-[#0D1E1B] px-2 py-1 text-[10px] font-bold text-[#5EEAD4]">
                         In Actors
                       </span>
+                      <button
+                        type="button"
+                        data-import-modal-reimport="true"
+                        (click)="reimportCharacterIntoRoster(ch.id)"
+                        class="rounded-lg border border-[#38B29A]/60 bg-[#0D1E1B] px-2.5 py-1 text-xs font-bold text-[#5EEAD4] hover:bg-[#15312C]"
+                        title="Overwrite this VTT actor with the latest details from the Character Sheet"
+                      >
+                        Re-import
+                      </button>
                     } @else {
                       <button
                         type="button"
@@ -5479,7 +5725,776 @@
     </app-vtt-floating-window>
   }
 
-  <app-vtt-actor-sheet />
+  @if (compendiumWeaponsWindowOpen() && vttStore.isGm()) {
+    <app-vtt-floating-window
+      #compendiumWeaponsWin
+      eyebrow="Compendium"
+      windowTitle="Weapons"
+      subtitle="Search and drag weapons onto any open Player Character or NPC sheet."
+      ariaLabel="Compendium Weapons"
+      widthClass="w-[min(94vw,540px)]"
+      [estimatedWidth]="540"
+      [estimatedHeight]="580"
+      [initialX]="560"
+      [initialY]="68"
+      (closed)="closeCompendiumWindow('weapons')"
+    >
+      <span
+        headerPrefix
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#C4491A]/60 bg-[#09100F]"
+      >
+        <app-compendium-icon
+          icon="riposte"
+          color="#C4491A"
+          sizeClass="h-4 w-4"
+        />
+      </span>
+
+      @if (authStore.isAdmin()) {
+        <a
+          headerExtra
+          routerLink="/content-manager/weapons"
+          target="_blank"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-bold text-[#FDBA74] no-underline transition-colors hover:border-[#C4491A] hover:text-white"
+        >
+          Content Studio &#8599;
+        </a>
+      }
+
+      @let shownWeapons = filteredCompendiumWeapons();
+
+      <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-4 py-3">
+        <div class="relative">
+          <input
+            type="text"
+            data-compendium-weapons-search="true"
+            [ngModel]="compendiumWeaponsSearch()"
+            (ngModelChange)="compendiumWeaponsSearch.set($event)"
+            placeholder="Search"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 pr-8 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+          />
+          @if (compendiumWeaponsSearch()) {
+            <button
+              type="button"
+              (click)="compendiumWeaponsSearch.set('')"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-[#8AB0AB] hover:text-white"
+              title="Clear Search"
+            >
+              &times;
+            </button>
+          }
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap gap-1">
+            @for (cat of ['all', 'Light', 'Martial', 'Heavy', 'Ranged']; track cat) {
+              <button
+                type="button"
+                (click)="compendiumWeaponSubfilter.set($any(cat))"
+                class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                [class.border-[#C4491A]]="compendiumWeaponSubfilter() === cat"
+                [class.bg-[#27160E]]="compendiumWeaponSubfilter() === cat"
+                [class.text-white]="compendiumWeaponSubfilter() === cat"
+                [class.border-[#243B37]]="compendiumWeaponSubfilter() !== cat"
+                [class.bg-[#142220]]="compendiumWeaponSubfilter() !== cat"
+                [class.text-[#8AB0AB]]="compendiumWeaponSubfilter() !== cat"
+              >
+                {{ cat === 'all' ? 'All Categories' : cat }}
+              </button>
+            }
+          </div>
+
+          <span class="font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{ shownWeapons.length }} / {{ compendiumWeapons().length }}
+          </span>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+        @if (isCompendiumLoading() && compendiumWeapons().length === 0) {
+          <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            Loading Weapons...
+          </div>
+        } @else if (shownWeapons.length === 0) {
+          <div class="rounded-xl border border-dashed border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            @if (compendiumWeaponsSearch().trim()) {
+              No weapons match &ldquo;{{ compendiumWeaponsSearch() }}&rdquo;.
+            } @else {
+              No weapons available in this category yet.
+            }
+          </div>
+        } @else {
+          @for (wep of shownWeapons; track wep.id) {
+            @let wVis = getCompendiumWeaponVisuals(wep);
+            @let isWepExpanded = expandedCompendiumWeaponId() === wep.id;
+            <div
+              draggable="true"
+              data-compendium-drag-kind="weapon"
+              [attr.data-compendium-id]="wep.id"
+              (dragstart)="onCompendiumWeaponDragStart($event, wep)"
+              (dragend)="onCompendiumDragEnd()"
+              (click)="toggleCompendiumWeaponExpanded(wep.id)"
+              class="group cursor-grab rounded-xl border border-[#243B37] bg-[#142220] p-3 transition-colors select-none hover:border-[#C4491A] active:cursor-grabbing"
+              title="Drag onto an Actor Sheet to equip or add to inventory · Click for details"
+            >
+              <div class="flex items-start justify-between gap-2.5">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                    [style.borderColor]="wVis.color + '88'"
+                  >
+                    <app-compendium-icon
+                      [icon]="wVis.icon"
+                      [color]="wVis.color"
+                      sizeClass="h-4 w-4"
+                    />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-display text-xs font-bold text-white">
+                        {{ wep.name }}
+                      </span>
+                      <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
+                        {{ wep.category }}
+                      </span>
+                    </div>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono-num text-[10px]">
+                      <span class="rounded border border-[#C4491A]/40 bg-[#27160E] px-1.5 py-[1px] font-bold text-[#FDBA74]">
+                        Roll: 2d10 + {{ wep.gov_attribute }} + {{ wep.gov_skill }}
+                      </span>
+                      <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-[1px] font-bold text-[#EBF5F3]">
+                        Damage: {{ wep.base_damage }} + {{ wep.gov_attribute }} DMG
+                      </span>
+                      <span class="text-[#8AB0AB]">
+                        {{ wep.ap_cost }} AP &middot; {{ (wep.reach_tiles || 1) * 5 }} ft
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <span class="shrink-0 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[9px] font-bold text-[#8AB0AB] group-hover:border-[#C4491A] group-hover:text-white">
+                  Drag
+                </span>
+              </div>
+
+              @if (isWepExpanded) {
+                <div class="mt-2.5 space-y-1.5 border-t border-[#243B37] pt-2 text-[11px]">
+                  <div class="text-[10px] font-semibold text-[#8AB0AB]">
+                    Governing Skill: <span class="text-white">{{ wep.gov_attribute }} + {{ wep.gov_skill }}</span>
+                  </div>
+                  @if (wep.trait_name) {
+                    <div>
+                      <span class="font-bold text-[#FDBA74]">{{ wep.trait_name }}:</span>
+                      <span class="ml-1 text-[#8AB0AB]">{{ wep.trait_description }}</span>
+                    </div>
+                  }
+                  @let wTags = getCompendiumWeaponTags(wep);
+                  @if (wTags.length > 0) {
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      @for (tag of wTags; track tag) {
+                        <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-semibold text-[#EBF5F3]">
+                          {{ tag }}
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <div class="shrink-0 border-t border-[#243B37] bg-[#122220] px-4 py-2.5 text-[11px] text-[#8AB0AB]">
+        Drop onto <strong class="text-white">Primary</strong>, <strong class="text-white">Secondary</strong>, <strong class="text-white">Inventory</strong>, or anywhere on an open Actor Sheet. Click a card to inspect traits.
+      </div>
+    </app-vtt-floating-window>
+  }
+
+  @if (compendiumArmorsWindowOpen() && vttStore.isGm()) {
+    <app-vtt-floating-window
+      #compendiumArmorsWin
+      eyebrow="Compendium"
+      windowTitle="Armors"
+      subtitle="Search and drag armors onto any open Player Character or NPC sheet."
+      ariaLabel="Compendium Armors"
+      widthClass="w-[min(94vw,540px)]"
+      [estimatedWidth]="540"
+      [estimatedHeight]="580"
+      [initialX]="578"
+      [initialY]="82"
+      (closed)="closeCompendiumWindow('armors')"
+    >
+      <span
+        headerPrefix
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#F59E0B]/60 bg-[#09100F]"
+      >
+        <app-compendium-icon
+          icon="breastplate"
+          color="#F59E0B"
+          sizeClass="h-4 w-4"
+        />
+      </span>
+
+      @if (authStore.isAdmin()) {
+        <a
+          headerExtra
+          routerLink="/content-manager/armors"
+          target="_blank"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-bold text-[#FBBF24] no-underline transition-colors hover:border-[#F59E0B] hover:text-white"
+        >
+          Content Studio &#8599;
+        </a>
+      }
+
+      @let shownArmors = filteredCompendiumArmors();
+
+      <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-4 py-3">
+        <div class="relative">
+          <input
+            type="text"
+            data-compendium-armors-search="true"
+            [ngModel]="compendiumArmorsSearch()"
+            (ngModelChange)="compendiumArmorsSearch.set($event)"
+            placeholder="Search"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 pr-8 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+          />
+          @if (compendiumArmorsSearch()) {
+            <button
+              type="button"
+              (click)="compendiumArmorsSearch.set('')"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-[#8AB0AB] hover:text-white"
+              title="Clear Search"
+            >
+              &times;
+            </button>
+          }
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap gap-1">
+            @for (wt of ['all', 'Light', 'Medium', 'Heavy']; track wt) {
+              <button
+                type="button"
+                (click)="compendiumArmorSubfilter.set($any(wt))"
+                class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                [class.border-[#C4491A]]="compendiumArmorSubfilter() === wt"
+                [class.bg-[#27160E]]="compendiumArmorSubfilter() === wt"
+                [class.text-white]="compendiumArmorSubfilter() === wt"
+                [class.border-[#243B37]]="compendiumArmorSubfilter() !== wt"
+                [class.bg-[#142220]]="compendiumArmorSubfilter() !== wt"
+                [class.text-[#8AB0AB]]="compendiumArmorSubfilter() !== wt"
+              >
+                {{ wt === 'all' ? 'All Weights' : wt }}
+              </button>
+            }
+          </div>
+
+          <span class="font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{ shownArmors.length }} / {{ compendiumArmors().length }}
+          </span>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+        @if (isCompendiumLoading() && compendiumArmors().length === 0) {
+          <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            Loading Armors...
+          </div>
+        } @else if (shownArmors.length === 0) {
+          <div class="rounded-xl border border-dashed border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            @if (compendiumArmorsSearch().trim()) {
+              No armors match &ldquo;{{ compendiumArmorsSearch() }}&rdquo;.
+            } @else {
+              No armors available in this weight class yet.
+            }
+          </div>
+        } @else {
+          @for (arm of shownArmors; track arm.id) {
+            @let aVis = getCompendiumArmorVisuals(arm);
+            @let isArmExpanded = expandedCompendiumArmorId() === arm.id;
+            <div
+              draggable="true"
+              data-compendium-drag-kind="armor"
+              [attr.data-compendium-id]="arm.id"
+              (dragstart)="onCompendiumArmorDragStart($event, arm)"
+              (dragend)="onCompendiumDragEnd()"
+              (click)="toggleCompendiumArmorExpanded(arm.id)"
+              class="group cursor-grab rounded-xl border border-[#243B37] bg-[#142220] p-3 transition-colors select-none hover:border-[#C4491A] active:cursor-grabbing"
+              title="Drag onto an Actor Sheet to equip or carry in inventory · Click for details"
+            >
+              <div class="flex items-start justify-between gap-2.5">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                    [style.borderColor]="aVis.color + '88'"
+                  >
+                    <app-compendium-icon
+                      [icon]="aVis.icon"
+                      [color]="aVis.color"
+                      sizeClass="h-4 w-4"
+                    />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-display text-xs font-bold text-white">
+                        {{ arm.name }}
+                      </span>
+                      <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
+                        {{ arm.weight_class }}
+                      </span>
+                    </div>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono-num text-[10px]">
+                      <span class="rounded border border-[#F59E0B]/40 bg-[#2B1D0E] px-1.5 py-[1px] font-bold text-[#FBBF24]">
+                        +{{ arm.armor_sp }} SP
+                      </span>
+                      <span class="rounded border border-[#38B29A]/40 bg-[#102B26] px-1.5 py-[1px] font-bold text-[#5EEAD4]">
+                        +{{ arm.armor_dr }} DR
+                      </span>
+                      <span class="text-[#8AB0AB]">
+                        {{ arm.allows_dodge ? 'Allows Dodge' : 'Disables Dodge' }}
+                      </span>
+                      @if (arm.speed_penalty_tiles > 0) {
+                        <span class="text-[#FDA4AF]">
+                          &middot; -{{ arm.speed_penalty_tiles * 5 }} ft Speed
+                        </span>
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <span class="shrink-0 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[9px] font-bold text-[#8AB0AB] group-hover:border-[#C4491A] group-hover:text-white">
+                  Drag
+                </span>
+              </div>
+
+              @if (isArmExpanded) {
+                <div class="mt-2.5 space-y-1.5 border-t border-[#243B37] pt-2 text-[11px]">
+                  @if (arm.description) {
+                    <div class="text-[#8AB0AB]">
+                      {{ arm.description }}
+                    </div>
+                  } @else {
+                    <div class="text-[#8AB0AB]">
+                      {{ arm.weight_class }} armor granting +{{ arm.armor_sp }} Max SP and +{{ arm.armor_dr }} Damage Reduction.
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <div class="shrink-0 border-t border-[#243B37] bg-[#122220] px-4 py-2.5 text-[11px] text-[#8AB0AB]">
+        Drop onto an open Actor Sheet to <strong class="text-white">equip immediately</strong>, or drop directly onto the <strong class="text-white">Inventory</strong> section to carry stowed.
+      </div>
+    </app-vtt-floating-window>
+  }
+
+  @if (compendiumItemsWindowOpen() && vttStore.isGm()) {
+    <app-vtt-floating-window
+      #compendiumItemsWin
+      eyebrow="Compendium"
+      windowTitle="Items"
+      subtitle="Search and drag ammunition, camp gear, tools, and supplies onto any open Actor Sheet."
+      ariaLabel="Compendium Items"
+      widthClass="w-[min(94vw,540px)]"
+      [estimatedWidth]="540"
+      [estimatedHeight]="580"
+      [initialX]="588"
+      [initialY]="90"
+      (closed)="closeCompendiumWindow('items')"
+    >
+      <span
+        headerPrefix
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#38BDF8]/60 bg-[#09100F]"
+      >
+        <app-compendium-icon
+          icon="pack"
+          color="#38BDF8"
+          sizeClass="h-4 w-4"
+        />
+      </span>
+
+      @if (authStore.isAdmin()) {
+        <a
+          headerExtra
+          routerLink="/content-manager/items"
+          target="_blank"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-bold text-[#7DD3FC] no-underline transition-colors hover:border-[#38BDF8] hover:text-white"
+        >
+          Content Studio &#8599;
+        </a>
+      }
+
+      @let shownItems = filteredCompendiumItems();
+
+      <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-4 py-3">
+        <div class="relative">
+          <input
+            type="text"
+            data-compendium-items-search="true"
+            [ngModel]="compendiumItemsSearch()"
+            (ngModelChange)="compendiumItemsSearch.set($event)"
+            placeholder="Search"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 pr-8 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+          />
+          @if (compendiumItemsSearch()) {
+            <button
+              type="button"
+              (click)="compendiumItemsSearch.set('')"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-[#8AB0AB] hover:text-white"
+              title="Clear Search"
+            >
+              &times;
+            </button>
+          }
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap gap-1">
+            <button
+              type="button"
+              (click)="compendiumItemSubfilter.set('all')"
+              class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+              [class.border-[#C4491A]]="compendiumItemSubfilter() === 'all'"
+              [class.bg-[#27160E]]="compendiumItemSubfilter() === 'all'"
+              [class.text-white]="compendiumItemSubfilter() === 'all'"
+              [class.border-[#243B37]]="compendiumItemSubfilter() !== 'all'"
+              [class.bg-[#142220]]="compendiumItemSubfilter() !== 'all'"
+              [class.text-[#8AB0AB]]="compendiumItemSubfilter() !== 'all'"
+            >
+              All Items
+            </button>
+            @for (sub of itemSubcategories; track sub) {
+              <button
+                type="button"
+                (click)="compendiumItemSubfilter.set(sub)"
+                class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                [class.border-[#C4491A]]="compendiumItemSubfilter() === sub"
+                [class.bg-[#27160E]]="compendiumItemSubfilter() === sub"
+                [class.text-white]="compendiumItemSubfilter() === sub"
+                [class.border-[#243B37]]="compendiumItemSubfilter() !== sub"
+                [class.bg-[#142220]]="compendiumItemSubfilter() !== sub"
+                [class.text-[#8AB0AB]]="compendiumItemSubfilter() !== sub"
+              >
+                {{ sub }}
+              </button>
+            }
+          </div>
+
+          <span class="font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{ shownItems.length }} / {{ compendiumItems().length }}
+          </span>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+        @if (isCompendiumLoading() && compendiumItems().length === 0) {
+          <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            Loading Items...
+          </div>
+        } @else if (shownItems.length === 0) {
+          <div class="rounded-xl border border-dashed border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            @if (compendiumItemsSearch().trim()) {
+              No items match &ldquo;{{ compendiumItemsSearch() }}&rdquo;.
+            } @else {
+              No items available in this category yet.
+            }
+          </div>
+        } @else {
+          @for (it of shownItems; track it.id) {
+            @let iVis = getCompendiumItemVisuals(it);
+            @let isItemExpanded = expandedCompendiumItemId() === it.id;
+            <div
+              draggable="true"
+              data-compendium-drag-kind="item"
+              [attr.data-compendium-id]="it.id"
+              (dragstart)="onCompendiumItemDragStart($event, it)"
+              (dragend)="onCompendiumDragEnd()"
+              (click)="toggleCompendiumItemExpanded(it.id)"
+              class="group cursor-grab rounded-xl border border-[#243B37] bg-[#142220] p-3 transition-colors select-none hover:border-[#C4491A] active:cursor-grabbing"
+              title="Drag onto an Actor Sheet to add to inventory · Click for details"
+            >
+              <div class="flex items-start justify-between gap-2.5">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                    [style.borderColor]="iVis.color + '88'"
+                  >
+                    <app-compendium-icon
+                      [icon]="iVis.icon"
+                      [color]="iVis.color"
+                      sizeClass="h-4 w-4"
+                    />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-display text-xs font-bold text-white">
+                        {{ it.name }}
+                      </span>
+                      <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold uppercase text-[#8AB0AB]">
+                        {{ it.subcategory }}
+                      </span>
+                      <span class="rounded border border-[#38BDF8]/40 bg-[#0C2538] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#7DD3FC]">
+                        &times;{{ it.default_quantity }}
+                      </span>
+                    </div>
+                    <div class="truncate text-[10px] text-[#8AB0AB]">
+                      {{ it.description || 'Adventuring gear' }}
+                    </div>
+                  </div>
+                </div>
+
+                <span class="shrink-0 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[9px] font-bold text-[#8AB0AB] group-hover:border-[#C4491A] group-hover:text-white">
+                  Drag
+                </span>
+              </div>
+
+              @if (isItemExpanded && it.description) {
+                <div class="mt-2.5 border-t border-[#243B37] pt-2 text-[11px] text-[#8AB0AB]">
+                  {{ it.description }}
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <div class="shrink-0 border-t border-[#243B37] bg-[#122220] px-4 py-2.5 text-[11px] text-[#8AB0AB]">
+        Drop onto any open <strong class="text-white">Player Character</strong> or <strong class="text-white">NPC</strong> sheet to add (&times;{{ shownItems[0]?.default_quantity || 1 }} stack) to their Inventory.
+      </div>
+    </app-vtt-floating-window>
+  }
+
+  @if (compendiumSkillsWindowOpen() && vttStore.isGm()) {
+    <app-vtt-floating-window
+      #compendiumSkillsWin
+      eyebrow="Compendium"
+      windowTitle="Skills"
+      subtitle="Search and drag standalone Combat Arts & Passives onto any open Actor Sheet."
+      ariaLabel="Compendium Skills"
+      widthClass="w-[min(94vw,540px)]"
+      [estimatedWidth]="540"
+      [estimatedHeight]="580"
+      [initialX]="596"
+      [initialY]="96"
+      (closed)="closeCompendiumWindow('skills')"
+    >
+      <span
+        headerPrefix
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#38B29A]/60 bg-[#09100F]"
+      >
+        <app-compendium-icon
+          icon="gale-wind"
+          color="#38B29A"
+          sizeClass="h-4 w-4"
+        />
+      </span>
+
+      @if (authStore.isAdmin()) {
+        <a
+          headerExtra
+          routerLink="/content-manager/standalone"
+          target="_blank"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[10px] font-bold text-[#5EEAD4] no-underline transition-colors hover:border-[#38B29A] hover:text-white"
+        >
+          Content Studio &#8599;
+        </a>
+      }
+
+      @let shownStandalone = filteredCompendiumStandaloneNodes();
+
+      <div class="shrink-0 space-y-2.5 border-b border-[#243B37] bg-[#101C1A] px-4 py-3">
+        <div class="relative">
+          <input
+            type="text"
+            data-compendium-skills-search="true"
+            [ngModel]="compendiumSkillsSearch()"
+            (ngModelChange)="compendiumSkillsSearch.set($event)"
+            placeholder="Search"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-1.5 pr-8 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+          />
+          @if (compendiumSkillsSearch()) {
+            <button
+              type="button"
+              (click)="compendiumSkillsSearch.set('')"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-[#8AB0AB] hover:text-white"
+              title="Clear Search"
+            >
+              &times;
+            </button>
+          }
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap gap-1">
+            <button
+              type="button"
+              (click)="compendiumSkillSubfilter.set('all')"
+              class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+              [class.border-[#C4491A]]="compendiumSkillSubfilter() === 'all'"
+              [class.bg-[#27160E]]="compendiumSkillSubfilter() === 'all'"
+              [class.text-white]="compendiumSkillSubfilter() === 'all'"
+              [class.border-[#243B37]]="compendiumSkillSubfilter() !== 'all'"
+              [class.bg-[#142220]]="compendiumSkillSubfilter() !== 'all'"
+              [class.text-[#8AB0AB]]="compendiumSkillSubfilter() !== 'all'"
+            >
+              All Skills
+            </button>
+            <button
+              type="button"
+              (click)="compendiumSkillSubfilter.set('combat_art')"
+              class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+              [class.border-[#C4491A]]="compendiumSkillSubfilter() === 'combat_art'"
+              [class.bg-[#27160E]]="compendiumSkillSubfilter() === 'combat_art'"
+              [class.text-white]="compendiumSkillSubfilter() === 'combat_art'"
+              [class.border-[#243B37]]="compendiumSkillSubfilter() !== 'combat_art'"
+              [class.bg-[#142220]]="compendiumSkillSubfilter() !== 'combat_art'"
+              [class.text-[#8AB0AB]]="compendiumSkillSubfilter() !== 'combat_art'"
+            >
+              Combat Arts
+            </button>
+            <button
+              type="button"
+              (click)="compendiumSkillSubfilter.set('passive_upgrade')"
+              class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+              [class.border-[#C4491A]]="compendiumSkillSubfilter() === 'passive_upgrade'"
+              [class.bg-[#27160E]]="compendiumSkillSubfilter() === 'passive_upgrade'"
+              [class.text-white]="compendiumSkillSubfilter() === 'passive_upgrade'"
+              [class.border-[#243B37]]="compendiumSkillSubfilter() !== 'passive_upgrade'"
+              [class.bg-[#142220]]="compendiumSkillSubfilter() !== 'passive_upgrade'"
+              [class.text-[#8AB0AB]]="compendiumSkillSubfilter() !== 'passive_upgrade'"
+            >
+              Passives
+            </button>
+          </div>
+
+          <span class="font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{ shownStandalone.length }} / {{ compendiumStandaloneNodes().length }}
+          </span>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+        @if (isCompendiumLoading() && compendiumStandaloneNodes().length === 0) {
+          <div class="rounded-xl border border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            Loading Skills...
+          </div>
+        } @else if (shownStandalone.length === 0) {
+          <div class="rounded-xl border border-dashed border-[#243B37] bg-[#142220] p-4 text-center text-[#8AB0AB]">
+            @if (compendiumSkillsSearch().trim()) {
+              No skills match &ldquo;{{ compendiumSkillsSearch() }}&rdquo;.
+            } @else {
+              No standalone skills available yet.
+            }
+          </div>
+        } @else {
+          @for (node of shownStandalone; track node.id) {
+            @let nVis = getCompendiumNodeVisuals(node);
+            @let isNodeExpanded = expandedCompendiumSkillId() === node.id;
+            <div
+              draggable="true"
+              data-compendium-drag-kind="standalone"
+              [attr.data-compendium-id]="node.id"
+              (dragstart)="onCompendiumStandaloneDragStart($event, node)"
+              (dragend)="onCompendiumDragEnd()"
+              (click)="toggleCompendiumSkillExpanded(node.id)"
+              class="group cursor-grab rounded-xl border border-[#243B37] bg-[#142220] p-3 transition-colors select-none hover:border-[#C4491A] active:cursor-grabbing"
+              title="Drag onto an Actor Sheet to grant this standalone skill · Click for details"
+            >
+              <div class="flex items-start justify-between gap-2.5">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                    [style.borderColor]="nVis.color + '88'"
+                  >
+                    <app-compendium-icon
+                      [icon]="nVis.icon"
+                      [color]="nVis.color"
+                      sizeClass="h-4 w-4"
+                    />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="truncate font-display text-xs font-bold text-white">
+                        {{ node.name }}
+                      </span>
+                      @if (node.node_type === 'combat_art') {
+                        <span class="rounded bg-[#09100F] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                          Art
+                        </span>
+                        @if (node.combat_tag && node.combat_tag !== 'None') {
+                          <span
+                            class="rounded border px-1 py-[1px] text-[9px] font-bold"
+                            [class]="getCombatTagBadge(node.combat_tag)"
+                          >
+                            {{ node.combat_tag }}
+                          </span>
+                        }
+                      } @else {
+                        <span class="badge-jade rounded border px-1.5 py-[1px] font-mono-num text-[9px] font-bold">
+                          Passive
+                        </span>
+                      }
+                    </div>
+                    <div class="truncate text-[10px] text-[#8AB0AB]">
+                      @if (node.node_type === 'combat_art') {
+                        <span class="font-mono-num">{{ node.ap_cost ?? 1 }} AP &middot; {{ node.cooldown_rounds ?? 0 }}R CD</span>
+                        @if (node.description) {
+                          <span> &middot; {{ node.description }}</span>
+                        }
+                      } @else {
+                        {{ node.description }}
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <span class="shrink-0 rounded-md border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[9px] font-bold text-[#8AB0AB] group-hover:border-[#C4491A] group-hover:text-white">
+                  Drag
+                </span>
+              </div>
+
+              @if (isNodeExpanded) {
+                <div class="mt-2.5 space-y-1.5 border-t border-[#243B37] pt-2 text-[11px]">
+                  <p class="text-[#8AB0AB]">
+                    {{ node.description }}
+                  </p>
+                  @let nBadges = getCompendiumNodeHookBadges(node);
+                  @if (nBadges.length > 0) {
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      @for (badge of nBadges; track badge) {
+                        <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-semibold text-[#A7F3D0]">
+                          {{ badge }}
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <div class="shrink-0 border-t border-[#243B37] bg-[#122220] px-4 py-2.5 text-[11px] text-[#8AB0AB]">
+        Drop onto any open <strong class="text-white">Player Character</strong> or <strong class="text-white">NPC</strong> sheet to grant the skill immediately. Click a card for details.
+      </div>
+    </app-vtt-floating-window>
+  }
+
+  @for (sheetWin of vttStore.openSheetWindows(); track sheetWin.key; let idx = $index) {
+    <app-vtt-actor-sheet
+      [target]="sheetWin.target"
+      [sheetKey]="sheetWin.key"
+      [focusTick]="sheetWin.focusTick"
+      [windowIndex]="idx"
+      [windowId]="sheetWin.windowId"
+    />
+  }
+  <app-vtt-tokenizer-window />
 
   @let abm = assetBrowserModal();
   <app-asset-browser-modal

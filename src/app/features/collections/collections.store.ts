@@ -1,6 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthStore } from '../../core/auth/auth.store';
 import {
+  ArmorModel,
+  DEFAULT_COMPENDIUM_ARMORS,
   PerkNodeModel,
   WeaponModel,
   resolveWeaponVisuals,
@@ -28,6 +30,8 @@ import {
   VttFolderModel,
   VttNpcPreset,
   VttNpcStats,
+  cloneDetachedNpcStats,
+  cloneDetachedVttCharacterSheet,
   enrichNpcStatsWithVisuals,
   normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
@@ -70,9 +74,10 @@ export function buildActorTemplateFromCharacter(
   character: CharacterModel,
   weapons: WeaponModel[],
   perkNodes: PerkNodeModel[],
-  folderId: string | null = null
+  folderId: string | null = null,
+  armors: ArmorModel[] = DEFAULT_COMPENDIUM_ARMORS
 ): ActorTemplateDraft {
-  const stats = computeDerivedStats(character, weapons, perkNodes);
+  const stats = computeDerivedStats(character, weapons, perkNodes, armors);
   const wepVis = stats.activeWeapon
     ? resolveWeaponVisuals(stats.activeWeapon)
     : { icon: 'greatsword', color: '#38B29A' };
@@ -82,6 +87,12 @@ export function buildActorTemplateFromCharacter(
   const portraitUrl = sanitizeOptionalImageUrl(character.portrait_url);
   const tokenImageUrl = sanitizeOptionalImageUrl(character.token_image_url);
   const tokenAppearance = normalizeTokenAppearance(character.token_appearance);
+  const sheetCopy = cloneDetachedVttCharacterSheet({
+    ...character,
+    current_hp: Math.min(character.current_hp ?? stats.maxHp, stats.maxHp),
+    current_sp: Math.min(character.current_sp ?? stats.maxSp, stats.maxSp),
+    current_ap: character.current_ap ?? 4,
+  });
 
   return {
     folder_id: folderId,
@@ -107,7 +118,7 @@ export function buildActorTemplateFromCharacter(
     npc_stats: enrichNpcStatsWithVisuals(
       {
         weapon_name: stats.activeWeapon?.name ?? 'Unarmed',
-        attack_ap: 1,
+        attack_ap: stats.activeWeapon?.ap_cost ?? 1,
         attack_mod: stats.attackRollMod,
         flat_damage: stats.flatWeaponDamage,
         reach_feet: reachFeet,
@@ -117,6 +128,8 @@ export function buildActorTemplateFromCharacter(
         can_dodge: stats.canDodge,
         enables_martial_parry: stats.enablesMartialParry,
         __inventory: normalizeInventoryItems(character.inventory),
+        __source_character_id: character.id,
+        __character_sheet: sheetCopy,
       },
       portraitUrl,
       tokenImageUrl,
@@ -160,7 +173,10 @@ export function buildActorTemplateFromNpcPreset(
     light_bright_feet: 0,
     light_dim_feet: 0,
     light_color: '#F59E0B',
-    npc_stats: { ...preset.npc_stats },
+    npc_stats: {
+      ...cloneDetachedNpcStats(preset.npc_stats),
+      __source_preset_id: preset.id,
+    },
     portrait_url: null,
     token_image_url: null,
     token_appearance: normalizeTokenAppearance(null),

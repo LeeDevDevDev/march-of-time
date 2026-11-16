@@ -80,7 +80,7 @@
                 </span>
               </div>
               <p class="mt-1 text-xs text-[#8AB0AB] tabular-nums">
-                {{ armorTiers[char.equipped_armor].label }} ·
+                {{ stats.equippedArmorLabel }} (+{{ stats.armorSp }} SP · +{{ stats.armorDr }} DR) ·
                 {{ shieldTiers[char.equipped_shield].label }}{{ stats.shieldDisabledByTwoHanded ? ' (Stowed: Two-Handed Active)' : '' }} ·
                 Move {{ stats.moveFeet }} ft per 1 AP
               </p>
@@ -587,13 +587,16 @@
                           sizeClass="h-5 w-5"
                         />
                       </div>
+                      @let w1f = getWeaponFormula(char, w1, stats);
                       <div class="min-w-0 flex-1">
                         <div class="font-display text-base font-bold text-[var(--mot-text)]">
                           {{ w1.name }}
                         </div>
                         <div class="font-mono-num text-xs font-semibold text-[var(--mot-accent-text)]">
-                          {{ w1.ap_cost }} AP · 2d10 + {{ getWeaponAttackMod(char, w1, stats) }} ·
-                          {{ getWeaponFlatDamage(char, w1, stats) }} Flat DMG
+                          {{ w1.ap_cost }} AP · Roll {{ w1f.rollFormula }} · {{ w1f.damageFormula }}
+                        </div>
+                        <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                          {{ w1f.rollBreakdown }} · {{ w1f.damageBreakdown }}
                         </div>
                       </div>
                     </div>
@@ -673,6 +676,7 @@
                     }
                   </div>
                   @if (stats.weaponSlot2; as w2) {
+                    @let w2f = getWeaponFormula(char, w2, stats);
                     <div class="mt-2.5 flex items-center gap-3">
                       <div
                         class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 bg-[#122220]"
@@ -690,8 +694,10 @@
                           {{ w2.name }}
                         </div>
                         <div class="font-mono-num text-xs font-semibold text-[var(--mot-accent-text)]">
-                          {{ w2.ap_cost }} AP · 2d10 + {{ getWeaponAttackMod(char, w2, stats) }} ·
-                          {{ getWeaponFlatDamage(char, w2, stats) }} Flat DMG
+                          {{ w2.ap_cost }} AP · Roll {{ w2f.rollFormula }} · {{ w2f.damageFormula }}
+                        </div>
+                        <div class="font-mono-num text-[11px] text-[var(--mot-muted)]">
+                          {{ w2f.rollBreakdown }} · {{ w2f.damageBreakdown }}
                         </div>
                       </div>
                     </div>
@@ -747,6 +753,88 @@
                         {{ w2.ap_cost }} AP: Attack
                       </button>
                     }
+                  </div>
+                }
+              </div>
+            </div>
+
+            <div class="mt-3 grid grid-cols-1 gap-3 border-t border-[var(--mot-border)] pt-3.5 sm:grid-cols-2">
+              <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="text-xs font-bold text-[var(--mot-muted)]">Equipped Armor</span>
+                  <div class="flex items-center gap-1.5 font-mono-num text-xs font-bold">
+                    <span class="rounded border border-[#38BDF8]/40 bg-[#38BDF8]/15 px-2 py-0.5 text-[#38BDF8]">
+                      +{{ stats.armorSp }} SP
+                    </span>
+                    <span class="rounded border border-[#FF8C5A]/40 bg-[#C4491A]/15 px-2 py-0.5 text-[#FF8C5A]">
+                      +{{ stats.armorDr }} DR
+                    </span>
+                  </div>
+                </div>
+                @if (canEditCharacter(char)) {
+                  <select
+                    [ngModel]="getLoadoutArmorSelectValue(char, stats)"
+                    (ngModelChange)="selectLoadoutArmorChoice(char, $event)"
+                    class="mot-input w-full px-2.5 py-1.5 text-xs font-bold"
+                  >
+                    <option value="None">Unarmored (+0 SP · +0 DR)</option>
+                    <optgroup label="Standard Armor Tiers">
+                      <option value="tier:Light">Light Armor (+2 SP · +1 DR)</option>
+                      <option value="tier:Medium">Medium Armor (+1 SP · +2 DR)</option>
+                      <option value="tier:Heavy">Heavy Armor (+3 SP · +3 DR · No Dodge)</option>
+                    </optgroup>
+                    @let invArmorsForSelect = getInventoryArmors(char);
+                    @if (invArmorsForSelect.length > 0) {
+                      <optgroup label="In Character Inventory">
+                        @for (ia of invArmorsForSelect; track ia.id) {
+                          <option [value]="'inv:' + ia.id">
+                            {{ ia.name || 'Custom Armor' }} (+{{ getArmorItemSp(ia) }} SP · +{{ getArmorItemDr(ia) }} DR)
+                          </option>
+                        }
+                      </optgroup>
+                    }
+                    <optgroup label="Equip from Compendium">
+                      @for (ca of getActiveCompendiumArmors(); track ca.id) {
+                        <option [value]="'comp:' + ca.id">
+                          {{ ca.name }} (+{{ ca.armor_sp }} SP · +{{ ca.armor_dr }} DR · {{ ca.weight_class }})
+                        </option>
+                      }
+                    </optgroup>
+                  </select>
+                } @else {
+                  <div class="font-display text-sm font-bold text-[var(--mot-text)]">
+                    {{ stats.equippedArmorLabel }}
+                  </div>
+                }
+              </div>
+
+              <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="text-xs font-bold text-[var(--mot-muted)]">Off-Hand Shield</span>
+                  @if (stats.shieldDisabledByTwoHanded) {
+                    <span class="badge-warn rounded border px-2 py-0.5 font-mono-num text-[11px] font-bold">
+                      Stowed (Two-Handed)
+                    </span>
+                  } @else if (char.equipped_shield !== 'None') {
+                    <span class="badge-jade rounded border px-2 py-0.5 font-mono-num text-[11px] font-bold">
+                      {{ char.equipped_shield === 'Buckler' ? 'Martial Parry' : 'Block ' + stats.shieldBlockTotal }}
+                    </span>
+                  }
+                </div>
+                @if (canEditCharacter(char)) {
+                  <select
+                    [ngModel]="char.equipped_shield"
+                    (ngModelChange)="changeCharacterShield(char, $event)"
+                    [disabled]="stats.activeWeaponIsTwoHanded"
+                    class="mot-input w-full px-2.5 py-1.5 text-xs font-bold disabled:opacity-50"
+                  >
+                    @for (stKey of shieldTierKeys; track stKey) {
+                      <option [ngValue]="stKey">{{ shieldTiers[stKey].label }}</option>
+                    }
+                  </select>
+                } @else {
+                  <div class="font-display text-sm font-bold text-[var(--mot-text)]">
+                    {{ shieldTiers[char.equipped_shield].label }}
                   </div>
                 }
               </div>
@@ -1124,92 +1212,763 @@
           </section>
 
           <section
+            data-sheet-inventory="true"
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums space-y-4"
           >
-            <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
-                  Inventory &amp; Notes
+                  Equipment, Inventory &amp; Notes
                 </h2>
                 <p class="text-xs text-[var(--mot-muted)]">
-                  Carried gear, consumables, quest items, and character notes synced with the VTT sheet.
+                  Organized by Weapons, Armors, and Items — synced live with VTT campaigns.
                 </p>
               </div>
+
               @if (canEditCharacter(char)) {
-                <button
-                  type="button"
-                  (click)="addInventoryItem(char)"
-                  class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold"
-                >
-                  + Add Item
-                </button>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-add-custom-category="weapon"
+                    (click)="addCustomInventoryEntry(char, 'weapon')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    + Weapon
+                  </button>
+                  <button
+                    type="button"
+                    data-add-custom-category="armor"
+                    (click)="addCustomInventoryEntry(char, 'armor')"
+                    class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] px-2.5 py-1.5 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                  >
+                    + Armor
+                  </button>
+                  <button
+                    type="button"
+                    data-add-custom-category="item"
+                    (click)="addCustomInventoryEntry(char, 'item')"
+                    class="btn-copper rounded-lg px-3 py-1.5 text-xs font-semibold"
+                  >
+                    + Item
+                  </button>
+                </div>
               }
             </div>
 
-            @let items = getInventoryItems(char);
-            @if (items.length === 0) {
+            <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div class="grid grid-cols-4 gap-1 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-xs font-bold">
+                <button
+                  type="button"
+                  data-inventory-tab="all"
+                  (click)="inventoryTab.set('all')"
+                  class="rounded-lg px-2.5 py-1.5 transition-colors"
+                  [class.bg-[var(--mot-surface)]]="inventoryTab() === 'all'"
+                  [class.text-[var(--mot-text)]]="inventoryTab() === 'all'"
+                  [class.text-[var(--mot-muted)]]="inventoryTab() !== 'all'"
+                >
+                  All ({{ getTotalCategorizedCount(char, stats) }})
+                </button>
+                <button
+                  type="button"
+                  data-inventory-tab="weapon"
+                  (click)="inventoryTab.set('weapon')"
+                  class="rounded-lg px-2.5 py-1.5 transition-colors"
+                  [class.bg-[var(--mot-surface)]]="inventoryTab() === 'weapon'"
+                  [class.text-[var(--mot-text)]]="inventoryTab() === 'weapon'"
+                  [class.text-[var(--mot-muted)]]="inventoryTab() !== 'weapon'"
+                >
+                  Weapons ({{ getWeaponsCategoryCount(char, stats) }})
+                </button>
+                <button
+                  type="button"
+                  data-inventory-tab="armor"
+                  (click)="inventoryTab.set('armor')"
+                  class="rounded-lg px-2.5 py-1.5 transition-colors"
+                  [class.bg-[var(--mot-surface)]]="inventoryTab() === 'armor'"
+                  [class.text-[var(--mot-text)]]="inventoryTab() === 'armor'"
+                  [class.text-[var(--mot-muted)]]="inventoryTab() !== 'armor'"
+                >
+                  Armors ({{ getArmorsCategoryCount(char, stats) }})
+                </button>
+                <button
+                  type="button"
+                  data-inventory-tab="item"
+                  (click)="inventoryTab.set('item')"
+                  class="rounded-lg px-2.5 py-1.5 transition-colors"
+                  [class.bg-[var(--mot-surface)]]="inventoryTab() === 'item'"
+                  [class.text-[var(--mot-text)]]="inventoryTab() === 'item'"
+                  [class.text-[var(--mot-muted)]]="inventoryTab() !== 'item'"
+                >
+                  Items ({{ getItemsCategoryCount(char) }})
+                </button>
+              </div>
+
+              @if (canEditCharacter(char)) {
+                <select
+                  data-compendium-add-select="true"
+                  [ngModel]="''"
+                  (ngModelChange)="addFromCompendiumPicker(char, $event)"
+                  class="mot-input w-full px-3 py-1.5 text-xs font-semibold sm:w-64"
+                >
+                  <option value="">+ Add from Compendium...</option>
+                  @if (inventoryTab() === 'all' || inventoryTab() === 'weapon') {
+                    <optgroup label="Weapons">
+                      @for (cw of characterStore.weapons(); track cw.id) {
+                        <option [value]="'weapon:' + cw.id">
+                          {{ cw.name }} (2d10+{{ cw.gov_attribute }}+{{ cw.gov_skill }} · {{ cw.base_damage }}+{{ cw.gov_attribute }} DMG)
+                        </option>
+                      }
+                    </optgroup>
+                  }
+                  @if (inventoryTab() === 'all' || inventoryTab() === 'armor') {
+                    <optgroup label="Armors">
+                      @for (ca of getActiveCompendiumArmors(); track ca.id) {
+                        <option [value]="'armor:' + ca.id">
+                          {{ ca.name }} (+{{ ca.armor_sp }} SP · +{{ ca.armor_dr }} DR · {{ ca.weight_class }})
+                        </option>
+                      }
+                    </optgroup>
+                  }
+                  @if (inventoryTab() === 'all' || inventoryTab() === 'item') {
+                    <optgroup label="Items &amp; Gear">
+                      @for (ci of getActiveCompendiumItems(); track ci.id) {
+                        <option [value]="'item:' + ci.id">
+                          {{ ci.name }} (&times;{{ ci.default_quantity }} · {{ ci.subcategory }})
+                        </option>
+                      }
+                    </optgroup>
+                  }
+                </select>
+              }
+            </div>
+
+            @let invWeapons = getInventoryWeapons(char);
+            @let invArmors = getInventoryArmors(char);
+            @let invGear = getInventoryGearItems(char);
+            @let showWeapons = inventoryTab() === 'all' || inventoryTab() === 'weapon';
+            @let showArmors = inventoryTab() === 'all' || inventoryTab() === 'armor';
+            @let showItems = inventoryTab() === 'all' || inventoryTab() === 'item';
+
+            @if (getTotalCategorizedCount(char, stats) === 0) {
               <div class="rounded-xl border border-dashed border-[var(--mot-border)] bg-[var(--mot-well)] px-4 py-5 text-center text-xs text-[var(--mot-muted)]">
-                No items in inventory yet.
+                No weapons, armors, or items carried yet. Add from the Compendium or create custom gear above.
               </div>
             } @else {
-              <div class="space-y-2">
-                @for (item of items; track item.id) {
-                  <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 space-y-2">
-                    <div class="flex items-center gap-2">
-                      @if (canEditCharacter(char)) {
-                        <input
-                          type="text"
-                          [value]="item.name"
-                          (change)="updateInventoryItemField(char, item.id, 'name', $any($event.target).value)"
-                          placeholder="Item"
-                          class="min-w-0 flex-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-bold text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
-                        />
-                        <div class="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs">
-                          <button
-                            type="button"
-                            (click)="adjustInventoryItemQuantity(char, item.id, -1)"
-                            class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
-                          >
-                            &minus;
-                          </button>
-                          <span class="min-w-[1.5rem] text-center font-bold text-[var(--mot-text)]">
-                            {{ item.quantity }}
-                          </span>
-                          <button
-                            type="button"
-                            (click)="adjustInventoryItemQuantity(char, item.id, 1)"
-                            class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
-                          >
-                            +
-                          </button>
+              <div class="space-y-4">
+                @if (showWeapons && getWeaponsCategoryCount(char, stats) > 0) {
+                  <div class="space-y-2" data-inventory-section="weapon">
+                    @if (inventoryTab() === 'all') {
+                      <div class="px-0.5 font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                        Weapons ({{ getWeaponsCategoryCount(char, stats) }})
+                      </div>
+                    }
+
+                    @if (stats.weaponSlot1; as sw1) {
+                      @let sw1f = getWeaponFormula(char, sw1, stats);
+                      <div class="rounded-xl border border-[#C4491A]/60 bg-[var(--mot-well)] p-3 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="flex min-w-0 items-center gap-2.5">
+                            <div
+                              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#122220]"
+                              [style.border-color]="getWeaponVisuals(sw1).color"
+                            >
+                              <app-compendium-icon
+                                [icon]="getWeaponVisuals(sw1).icon"
+                                [color]="getWeaponVisuals(sw1).color"
+                                [tintCustom]="getWeaponVisuals(sw1).tintCustom"
+                                sizeClass="h-4 w-4"
+                              />
+                            </div>
+                            <div class="min-w-0">
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                                  {{ sw1.name }}
+                                </span>
+                                <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white">
+                                  Slot 1{{ char.active_weapon_slot === 1 ? ' · Active' : '' }}
+                                </span>
+                                <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                  {{ sw1.category }}
+                                </span>
+                              </div>
+                              <div class="mt-0.5 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                                <span class="font-bold text-[var(--mot-accent-text)]">
+                                  Roll: {{ sw1f.rollFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ sw1f.rollBreakdown }})</span>
+                                <span class="text-[var(--mot-muted)]">&middot;</span>
+                                <span class="font-bold text-[var(--mot-text)]">
+                                  Damage: {{ sw1f.damageFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ sw1f.damageBreakdown }})</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              (click)="roll2d10(sw1.name + ' Check', sw1f.attackMod, sw1f.damageFormula)"
+                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-accent-text)] hover:border-[#C4491A]"
+                            >
+                              Roll {{ sw1f.rollFormula }}
+                            </button>
+                            @if (canEditCharacter(char)) {
+                              <button
+                                type="button"
+                                (click)="stowSlotWeaponToInventory(char, 1)"
+                                class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                              >
+                                Stow
+                              </button>
+                            }
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          (click)="removeInventoryItem(char, item.id)"
-                          title="Remove Item"
-                          class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
-                        >
-                          &times;
-                        </button>
-                      } @else {
-                        <span class="flex-1 text-xs font-bold text-[var(--mot-text)]">
-                          {{ item.name || 'Unnamed Item' }}
-                        </span>
-                        <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]">
-                          &times;{{ item.quantity }}
-                        </span>
-                      }
-                    </div>
-                    @if (canEditCharacter(char)) {
-                      <input
-                        type="text"
-                        [value]="item.description"
-                        (change)="updateInventoryItemField(char, item.id, 'description', $any($event.target).value)"
-                        placeholder="Description"
-                        class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs text-[var(--mot-muted)] focus:border-[#C4491A] focus:outline-none"
-                      />
-                    } @else if (item.description) {
-                      <p class="text-xs text-[var(--mot-muted)]">{{ item.description }}</p>
+                      </div>
+                    }
+
+                    @if (stats.weaponSlot2; as sw2) {
+                      @let sw2f = getWeaponFormula(char, sw2, stats);
+                      <div class="rounded-xl border border-[#C4491A]/60 bg-[var(--mot-well)] p-3 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="flex min-w-0 items-center gap-2.5">
+                            <div
+                              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#122220]"
+                              [style.border-color]="getWeaponVisuals(sw2).color"
+                            >
+                              <app-compendium-icon
+                                [icon]="getWeaponVisuals(sw2).icon"
+                                [color]="getWeaponVisuals(sw2).color"
+                                [tintCustom]="getWeaponVisuals(sw2).tintCustom"
+                                sizeClass="h-4 w-4"
+                              />
+                            </div>
+                            <div class="min-w-0">
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                                  {{ sw2.name }}
+                                </span>
+                                <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white">
+                                  Slot 2{{ char.active_weapon_slot === 2 ? ' · Active' : '' }}
+                                </span>
+                                <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                  {{ sw2.category }}
+                                </span>
+                              </div>
+                              <div class="mt-0.5 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                                <span class="font-bold text-[var(--mot-accent-text)]">
+                                  Roll: {{ sw2f.rollFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ sw2f.rollBreakdown }})</span>
+                                <span class="text-[var(--mot-muted)]">&middot;</span>
+                                <span class="font-bold text-[var(--mot-text)]">
+                                  Damage: {{ sw2f.damageFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ sw2f.damageBreakdown }})</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              (click)="roll2d10(sw2.name + ' Check', sw2f.attackMod, sw2f.damageFormula)"
+                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-accent-text)] hover:border-[#C4491A]"
+                            >
+                              Roll {{ sw2f.rollFormula }}
+                            </button>
+                            @if (canEditCharacter(char)) {
+                              <button
+                                type="button"
+                                (click)="stowSlotWeaponToInventory(char, 2)"
+                                class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                              >
+                                Stow
+                              </button>
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    }
+
+                    @for (wItem of invWeapons; track wItem.id) {
+                      @let wf = getWeaponFormula(char, wItem, stats);
+                      @let wVis = getInventoryWeaponVisuals(wItem);
+                      <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 space-y-2">
+                        <div class="flex flex-wrap items-start justify-between gap-2">
+                          <div class="flex min-w-0 flex-1 items-center gap-2.5">
+                            <div
+                              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#122220]"
+                              [style.border-color]="wVis.color"
+                            >
+                              <app-compendium-icon
+                                [icon]="wVis.icon"
+                                [color]="wVis.color"
+                                [tintCustom]="wVis.tintCustom"
+                                sizeClass="h-4 w-4"
+                              />
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              @if (canEditCharacter(char) && !wItem.compendium_id) {
+                                <input
+                                  type="text"
+                                  [value]="wItem.name"
+                                  (change)="updateInventoryItemField(char, wItem.id, 'name', $any($event.target).value)"
+                                  placeholder="Weapon Name"
+                                  class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-bold text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
+                                />
+                              } @else {
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                  <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                                    {{ wItem.name || 'Weapon' }}
+                                  </span>
+                                  <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                    {{ wf.categoryLabel }} &middot; {{ wf.apCost }} AP &middot; {{ wf.reachFeet }} ft
+                                  </span>
+                                </div>
+                              }
+                              <div class="mt-1 flex flex-wrap items-center gap-2 font-mono-num text-xs">
+                                <span class="font-bold text-[var(--mot-accent-text)]">
+                                  Roll: {{ wf.rollFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ wf.rollBreakdown }})</span>
+                                <span class="text-[var(--mot-muted)]">&middot;</span>
+                                <span class="font-bold text-[var(--mot-text)]">
+                                  Damage: {{ wf.damageFormula }}
+                                </span>
+                                <span class="text-[var(--mot-muted)]">({{ wf.damageBreakdown }})</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              (click)="roll2d10((wItem.name || 'Weapon') + ' Check', wf.attackMod, wf.damageFormula)"
+                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 font-mono-num text-xs font-bold text-[var(--mot-accent-text)] hover:border-[#C4491A]"
+                            >
+                              Roll {{ wf.rollFormula }}
+                            </button>
+                            @if (canEditCharacter(char)) {
+                              @if (wItem.compendium_id) {
+                                <button
+                                  type="button"
+                                  (click)="equipInventoryWeaponToSlot(char, wItem, 1)"
+                                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                                >
+                                  Equip S1
+                                </button>
+                                <button
+                                  type="button"
+                                  (click)="equipInventoryWeaponToSlot(char, wItem, 2)"
+                                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-semibold text-[var(--mot-text)] hover:border-[#C4491A]"
+                                >
+                                  Equip S2
+                                </button>
+                              }
+                              <div class="flex items-center gap-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs">
+                                <button
+                                  type="button"
+                                  (click)="adjustInventoryItemQuantity(char, wItem.id, -1)"
+                                  class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                                >
+                                  &minus;
+                                </button>
+                                <span class="min-w-[1.25rem] text-center font-bold text-[var(--mot-text)]">
+                                  {{ wItem.quantity }}
+                                </span>
+                                <button
+                                  type="button"
+                                  (click)="adjustInventoryItemQuantity(char, wItem.id, 1)"
+                                  class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <button
+                                type="button"
+                                (click)="removeInventoryItem(char, wItem.id)"
+                                title="Remove Weapon"
+                                class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                              >
+                                &times;
+                              </button>
+                            } @else {
+                              <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                                &times;{{ wItem.quantity }}
+                              </span>
+                            }
+                          </div>
+                        </div>
+
+                        @if (canEditCharacter(char) && !wItem.compendium_id) {
+                          <div class="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-4">
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[var(--mot-muted)]">Gov Attribute</span>
+                              <select
+                                [ngModel]="wItem.gov_attribute || 'Brawn'"
+                                (ngModelChange)="patchInventoryItem(char, wItem.id, { gov_attribute: $event })"
+                                class="mot-input w-full px-2 py-1 text-xs font-semibold"
+                              >
+                                @for (at of attributeList; track at.name) {
+                                  <option [value]="at.name">{{ at.name }}</option>
+                                }
+                              </select>
+                            </label>
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[var(--mot-muted)]">Skill</span>
+                              <select
+                                [ngModel]="wItem.gov_skill || 'Strike'"
+                                (ngModelChange)="patchInventoryItem(char, wItem.id, { gov_skill: $event })"
+                                class="mot-input w-full px-2 py-1 text-xs font-semibold"
+                              >
+                                <option value="Strike">Strike</option>
+                                <option value="Shoot">Shoot</option>
+                              </select>
+                            </label>
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[var(--mot-muted)]">Base DMG</span>
+                              <input
+                                type="number"
+                                min="0"
+                                [ngModel]="wItem.base_damage ?? 4"
+                                (ngModelChange)="patchInventoryItem(char, wItem.id, { base_damage: +$event || 0 })"
+                                class="mot-input w-full px-2 py-1 font-mono-num text-xs font-bold"
+                              />
+                            </label>
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[var(--mot-muted)]">Roll Bonus</span>
+                              <input
+                                type="number"
+                                [ngModel]="wItem.attack_bonus ?? 0"
+                                (ngModelChange)="patchInventoryItem(char, wItem.id, { attack_bonus: +$event || 0 })"
+                                class="mot-input w-full px-2 py-1 font-mono-num text-xs font-bold"
+                              />
+                            </label>
+                          </div>
+                        }
+
+                        @if (canEditCharacter(char)) {
+                          <input
+                            type="text"
+                            [value]="wItem.description"
+                            (change)="updateInventoryItemField(char, wItem.id, 'description', $any($event.target).value)"
+                            placeholder="Weapon trait or notes"
+                            class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs text-[var(--mot-muted)] focus:border-[#C4491A] focus:outline-none"
+                          />
+                        } @else if (wItem.description) {
+                          <p class="text-xs text-[var(--mot-muted)]">{{ wItem.description }}</p>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+
+                @if (showArmors && getArmorsCategoryCount(char, stats) > 0) {
+                  <div class="space-y-2" data-inventory-section="armor">
+                    @if (inventoryTab() === 'all') {
+                      <div class="px-0.5 font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                        Armors ({{ getArmorsCategoryCount(char, stats) }})
+                      </div>
+                    }
+
+                    @if (hasStandardTierArmorEquipped(char, stats)) {
+                      <div class="rounded-xl border border-[#C4491A]/60 bg-[var(--mot-well)] p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="flex min-w-0 items-center gap-2.5">
+                            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#38BDF8]/60 bg-[#122220]">
+                              <app-compendium-icon
+                                [icon]="char.equipped_armor === 'Heavy' ? 'iron-helm' : 'breastplate'"
+                                color="#38BDF8"
+                                sizeClass="h-4 w-4"
+                              />
+                            </div>
+                            <div class="min-w-0">
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                                  {{ armorTiers[char.equipped_armor].label }}
+                                </span>
+                                <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white">
+                                  Equipped
+                                </span>
+                              </div>
+                              <div class="mt-1 flex flex-wrap items-center gap-1.5 font-mono-num text-xs font-bold">
+                                <span class="rounded border border-[#38BDF8]/40 bg-[#38BDF8]/15 px-2 py-0.5 text-[#38BDF8]">
+                                  +{{ armorTiers[char.equipped_armor].armorSp }} SP
+                                </span>
+                                <span class="rounded border border-[#FF8C5A]/40 bg-[#C4491A]/15 px-2 py-0.5 text-[#FF8C5A]">
+                                  +{{ armorTiers[char.equipped_armor].hpDr }} DR
+                                </span>
+                                <span class="text-xs font-normal text-[var(--mot-muted)]">
+                                  {{ armorTiers[char.equipped_armor].allowsDodge ? 'Allows Dodge' : 'Disables Dodge' }}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          @if (canEditCharacter(char)) {
+                            <button
+                              type="button"
+                              (click)="unequipCharacterArmor(char)"
+                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                            >
+                              Unequip
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+
+                    @for (aItem of invArmors; track aItem.id) {
+                      @let aVis = getArmorItemVisuals(aItem);
+                      @let isEquippedArmor = !!(aItem.equipped && char.equipped_armor !== 'None');
+                      <div
+                        class="rounded-xl border bg-[var(--mot-well)] p-3 space-y-2"
+                        [class.border-[#C4491A]/60]="isEquippedArmor"
+                        [class.border-[var(--mot-border)]]="!isEquippedArmor"
+                      >
+                        <div class="flex flex-wrap items-start justify-between gap-2">
+                          <div class="flex min-w-0 flex-1 items-center gap-2.5">
+                            <div
+                              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-[#122220]"
+                              [style.border-color]="aVis.color"
+                            >
+                              <app-compendium-icon
+                                [icon]="aVis.icon"
+                                [color]="aVis.color"
+                                [tintCustom]="aVis.tintCustom"
+                                sizeClass="h-4 w-4"
+                              />
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              @if (canEditCharacter(char) && !aItem.compendium_id) {
+                                <input
+                                  type="text"
+                                  [value]="aItem.name"
+                                  (change)="updateInventoryItemField(char, aItem.id, 'name', $any($event.target).value)"
+                                  placeholder="Armor Name"
+                                  class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-bold text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
+                                />
+                              } @else {
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                  <span class="font-display text-sm font-bold text-[var(--mot-text)]">
+                                    {{ aItem.name || 'Armor' }}
+                                  </span>
+                                  @if (isEquippedArmor) {
+                                    <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white">
+                                      Equipped
+                                    </span>
+                                  }
+                                  <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                    {{ aItem.armor_weight || 'Light' }}
+                                  </span>
+                                </div>
+                              }
+
+                              <div class="mt-1 flex flex-wrap items-center gap-1.5 font-mono-num text-xs font-bold">
+                                <span class="rounded border border-[#38BDF8]/40 bg-[#38BDF8]/15 px-2 py-0.5 text-[#38BDF8]">
+                                  +{{ getArmorItemSp(aItem) }} SP
+                                </span>
+                                <span class="rounded border border-[#FF8C5A]/40 bg-[#C4491A]/15 px-2 py-0.5 text-[#FF8C5A]">
+                                  +{{ getArmorItemDr(aItem) }} DR
+                                </span>
+                                <span class="text-xs font-normal text-[var(--mot-muted)]">
+                                  {{ getArmorItemAllowsDodge(aItem) ? 'Allows Dodge' : 'Disables Dodge' }}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          @if (canEditCharacter(char)) {
+                            <div class="flex items-center gap-1.5">
+                              @if (isEquippedArmor) {
+                                <button
+                                  type="button"
+                                  (click)="unequipCharacterArmor(char)"
+                                  class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                                >
+                                  Unequip
+                                </button>
+                              } @else {
+                                <button
+                                  type="button"
+                                  (click)="equipInventoryArmor(char, aItem.id)"
+                                  class="btn-copper rounded-lg px-2.5 py-1 text-xs font-semibold"
+                                >
+                                  Equip
+                                </button>
+                              }
+                              <button
+                                type="button"
+                                (click)="removeInventoryItem(char, aItem.id)"
+                                title="Remove Armor"
+                                class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          }
+                        </div>
+
+                        @if (canEditCharacter(char) && !aItem.compendium_id) {
+                          <div class="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-4">
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[var(--mot-muted)]">Weight</span>
+                              <select
+                                [ngModel]="aItem.armor_weight || 'Light'"
+                                (ngModelChange)="patchInventoryItem(char, aItem.id, { armor_weight: $event, subcategory: $event })"
+                                class="mot-input w-full px-2 py-1 text-xs font-semibold"
+                              >
+                                @for (wc of armorWeightOptions; track wc) {
+                                  <option [value]="wc">{{ wc }}</option>
+                                }
+                              </select>
+                            </label>
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[#38BDF8]">Armor SP</span>
+                              <input
+                                type="number"
+                                min="0"
+                                [ngModel]="aItem.armor_sp ?? 2"
+                                (ngModelChange)="patchInventoryItem(char, aItem.id, { armor_sp: +$event || 0 })"
+                                class="mot-input w-full px-2 py-1 font-mono-num text-xs font-bold"
+                              />
+                            </label>
+                            <label class="block space-y-0.5">
+                              <span class="text-[10px] font-semibold text-[#FF8C5A]">Armor DR</span>
+                              <input
+                                type="number"
+                                min="0"
+                                [ngModel]="aItem.armor_dr ?? 1"
+                                (ngModelChange)="patchInventoryItem(char, aItem.id, { armor_dr: +$event || 0 })"
+                                class="mot-input w-full px-2 py-1 font-mono-num text-xs font-bold"
+                              />
+                            </label>
+                            <label class="flex items-center gap-2 pt-4 text-xs font-semibold text-[var(--mot-text)]">
+                              <input
+                                type="checkbox"
+                                [ngModel]="getArmorItemAllowsDodge(aItem)"
+                                (ngModelChange)="patchInventoryItem(char, aItem.id, { allows_dodge: $event })"
+                                class="accent-[#C4491A]"
+                              />
+                              <span>Allows Dodge</span>
+                            </label>
+                          </div>
+                        }
+
+                        @if (canEditCharacter(char)) {
+                          <input
+                            type="text"
+                            [value]="aItem.description"
+                            (change)="updateInventoryItemField(char, aItem.id, 'description', $any($event.target).value)"
+                            placeholder="Armor notes or description"
+                            class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs text-[var(--mot-muted)] focus:border-[#C4491A] focus:outline-none"
+                          />
+                        } @else if (aItem.description) {
+                          <p class="text-xs text-[var(--mot-muted)]">{{ aItem.description }}</p>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+
+                @if (showItems && invGear.length > 0) {
+                  <div class="space-y-2" data-inventory-section="item">
+                    @if (inventoryTab() === 'all') {
+                      <div class="px-0.5 font-display text-xs font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                        Items ({{ invGear.length }})
+                      </div>
+                    }
+
+                    @for (item of invGear; track item.id) {
+                      @let iVis = getGearItemVisuals(item);
+                      <div class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3 space-y-2">
+                        <div class="flex items-center gap-2.5">
+                          <div
+                            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-[#122220]"
+                            [style.border-color]="iVis.color"
+                          >
+                            <app-compendium-icon
+                              [icon]="iVis.icon"
+                              [color]="iVis.color"
+                              [tintCustom]="iVis.tintCustom"
+                              sizeClass="h-4 w-4"
+                            />
+                          </div>
+
+                          @if (canEditCharacter(char)) {
+                            <input
+                              type="text"
+                              [value]="item.name"
+                              (change)="updateInventoryItemField(char, item.id, 'name', $any($event.target).value)"
+                              placeholder="Item Name"
+                              class="min-w-0 flex-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs font-bold text-[var(--mot-text)] focus:border-[#C4491A] focus:outline-none"
+                            />
+                            <select
+                              [ngModel]="item.subcategory || 'Adventuring Gear'"
+                              (ngModelChange)="patchInventoryItem(char, item.id, { subcategory: $event })"
+                              class="hidden rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-[11px] font-semibold text-[var(--mot-muted)] sm:block"
+                            >
+                              @for (sub of itemSubcategoryOptions; track sub) {
+                                <option [value]="sub">{{ sub }}</option>
+                              }
+                            </select>
+                            <div class="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs">
+                              <button
+                                type="button"
+                                (click)="adjustInventoryItemQuantity(char, item.id, -1)"
+                                class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                              >
+                                &minus;
+                              </button>
+                              <span class="min-w-[1.5rem] text-center font-bold text-[var(--mot-text)]">
+                                {{ item.quantity }}
+                              </span>
+                              <button
+                                type="button"
+                                (click)="adjustInventoryItemQuantity(char, item.id, 1)"
+                                class="px-1 font-bold text-[var(--mot-muted)] hover:text-[var(--mot-text)]"
+                              >
+                                +
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              (click)="removeInventoryItem(char, item.id)"
+                              title="Remove Item"
+                              class="rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1 text-xs font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                            >
+                              &times;
+                            </button>
+                          } @else {
+                            <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+                              <span class="text-xs font-bold text-[var(--mot-text)]">
+                                {{ item.name || 'Unnamed Item' }}
+                              </span>
+                              @if (item.subcategory) {
+                                <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-1.5 py-0.5 font-mono-num text-[10px] text-[var(--mot-muted)]">
+                                  {{ item.subcategory }}
+                                </span>
+                              }
+                            </div>
+                            <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-xs font-bold text-[var(--mot-text)]">
+                              &times;{{ item.quantity }}
+                            </span>
+                          }
+                        </div>
+
+                        @if (canEditCharacter(char)) {
+                          <input
+                            type="text"
+                            [value]="item.description"
+                            (change)="updateInventoryItemField(char, item.id, 'description', $any($event.target).value)"
+                            placeholder="Description"
+                            class="w-full rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2.5 py-1 text-xs text-[var(--mot-muted)] focus:border-[#C4491A] focus:outline-none"
+                          />
+                        } @else if (item.description) {
+                          <p class="text-xs text-[var(--mot-muted)]">{{ item.description }}</p>
+                        }
+                      </div>
                     }
                   </div>
                 }

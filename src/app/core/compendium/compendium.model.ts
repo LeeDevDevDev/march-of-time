@@ -32,9 +32,6 @@ export interface KeywordDefinition {
   is_active?: boolean;
 }
 
-/**
- * Default starter March of Time Keywords (used as seed/fallback alongside `public.compendium_keywords`).
- */
 export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
   {
     id: 'kw-crushing',
@@ -173,9 +170,6 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Builds a case-insensitive keyword map from the active `keywordsList`, including common verb inflections.
- */
 export function buildKeywordLookupMap(
   keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
 ): Map<string, KeywordDefinition> {
@@ -241,10 +235,6 @@ export function tokenizeTextWithKeywords(
   return segments;
 }
 
-/**
- * Returns distinct keywords referenced inside `rootKeyword.summary` in order of appearance,
- * with cycle protection against self or mutual references.
- */
 export function resolveChainedKeywords(
   rootKeyword: KeywordDefinition | null,
   keywordsList: KeywordDefinition[] = DEFAULT_KEYWORDS
@@ -523,11 +513,6 @@ export interface WeaponModel {
   is_active?: boolean;
 }
 
-/**
- * Determines whether a weapon has the `Two-Handed` tag.
- * Reads `weapon.rule_hooks['two_handed']` if explicitly set; otherwise defaults
- * based on category/slug (`Heavy` and `Ranged` weapons like Greatsword, Warhammer, Shortbow).
- */
 export function isWeaponTwoHanded(weapon: WeaponModel | null | undefined): boolean {
   if (!weapon) return false;
   const hooks = weapon.rule_hooks ?? {};
@@ -545,11 +530,6 @@ export function isWeaponTwoHanded(weapon: WeaponModel | null | undefined): boole
   );
 }
 
-/**
- * Determines whether a weapon has the `Guard` property tag (can be braced to Block using `Block` Skill).
- * Reads `weapon.rule_hooks['guard']` or `weapon.rule_hooks['heavy']` if explicitly set; otherwise defaults to `true` for
- * `Heavy` category weapons (`greatsword`, `warhammer`).
- */
 export function isWeaponHeavy(weapon: WeaponModel | null | undefined): boolean {
   if (!weapon) return false;
   const hooks = weapon.rule_hooks ?? {};
@@ -564,10 +544,6 @@ export function isWeaponHeavy(weapon: WeaponModel | null | undefined): boolean {
   return cat === 'heavy' || slug === 'greatsword' || slug === 'warhammer';
 }
 
-/**
- * Base Block mitigation when bracing a `Guard` weapon to Block (`Raise Weapon Guard`, 1 AP).
- * Defaults to `2` (`2 + Block Skill`).
- */
 export function getHeavyWeaponBlockBase(weapon: WeaponModel | null | undefined): number {
   if (!weapon || !isWeaponHeavy(weapon)) return 0;
   const raw = Number(
@@ -578,9 +554,6 @@ export function getHeavyWeaponBlockBase(weapon: WeaponModel | null | undefined):
   return Number.isNaN(raw) || raw <= 0 ? 2 : raw;
 }
 
-/**
- * Returns the list of weapon property tags (`['Two-Handed', 'Guard']`, etc.) for display on cards and selectors.
- */
 export function getWeaponPropertyTags(weapon: WeaponModel | null | undefined): WeaponPropertyTag[] {
   if (!weapon) return [];
   const tags: WeaponPropertyTag[] = [];
@@ -588,6 +561,232 @@ export function getWeaponPropertyTags(weapon: WeaponModel | null | undefined): W
   if (isWeaponHeavy(weapon)) tags.push('Guard');
   return tags;
 }
+
+export const ARMOR_WEIGHT_OPTIONS = ['Light', 'Medium', 'Heavy'] as const;
+export type ArmorWeightClass = (typeof ARMOR_WEIGHT_OPTIONS)[number];
+
+export interface ArmorModel {
+  id: string;
+  slug: string;
+  name: string;
+  weight_class: ArmorWeightClass;
+  armor_sp: number;
+  armor_dr: number;
+  allows_dodge: boolean;
+  speed_penalty_tiles: number;
+  description: string;
+  rule_hooks: Record<string, unknown>;
+  is_active?: boolean;
+}
+
+export const DEFAULT_COMPENDIUM_ARMORS: ArmorModel[] = [
+  {
+    id: 'armor-padded-gambeson',
+    slug: 'padded-gambeson',
+    name: 'Padded Gambeson',
+    weight_class: 'Light',
+    armor_sp: 2,
+    armor_dr: 1,
+    allows_dodge: true,
+    speed_penalty_tiles: 0,
+    description:
+      'Quilted linen and boiled leather harness that cushions glancing blows while keeping full [Dodge] footwork.',
+    rule_hooks: { __icon: 'breastplate', __icon_color: '#38B29A' },
+    is_active: true,
+  },
+  {
+    id: 'armor-studded-brigandine',
+    slug: 'studded-brigandine',
+    name: 'Studded Brigandine',
+    weight_class: 'Light',
+    armor_sp: 4,
+    armor_dr: 2,
+    allows_dodge: true,
+    speed_penalty_tiles: 0,
+    description:
+      'Riveted steel lames beneath supple suede. Grants bolstered [SP] poise and [Armor DR] without restricting [Dodge].',
+    rule_hooks: { __icon: 'breastplate', __icon_color: '#38BDF8' },
+    is_active: true,
+  },
+  {
+    id: 'armor-scale-hauberk',
+    slug: 'scale-hauberk',
+    name: 'Scale Hauberk',
+    weight_class: 'Medium',
+    armor_sp: 2,
+    armor_dr: 2,
+    allows_dodge: true,
+    speed_penalty_tiles: 0,
+    description:
+      'Overlapping bronze and iron scales engineered to turn blade edges while preserving [Dodge] mobility.',
+    rule_hooks: { __icon: 'breastplate', __icon_color: '#F59E0B' },
+    is_active: true,
+  },
+  {
+    id: 'armor-rivet-coat-of-plates',
+    slug: 'rivet-coat-of-plates',
+    name: 'Rivet Coat of Plates',
+    weight_class: 'Medium',
+    armor_sp: 2,
+    armor_dr: 4,
+    allows_dodge: true,
+    speed_penalty_tiles: 0,
+    description:
+      'Reinforced cuirass plates over chain gussets for heavy [Armor DR] mitigation that still permits [Dodge].',
+    rule_hooks: { __icon: 'iron-helm', __icon_color: '#FF8C5A' },
+    is_active: true,
+  },
+  {
+    id: 'armor-vanguard-half-plate',
+    slug: 'vanguard-half-plate',
+    name: 'Vanguard Half-Plate',
+    weight_class: 'Heavy',
+    armor_sp: 3,
+    armor_dr: 3,
+    allows_dodge: false,
+    speed_penalty_tiles: 0,
+    description:
+      'Articulated breastplate, pauldrons, and greaves built for frontline clashes. Trades off [Dodge] for stout [SP] and [Armor DR].',
+    rule_hooks: { __icon: 'iron-helm', __icon_color: '#F26464' },
+    is_active: true,
+  },
+  {
+    id: 'armor-fortress-full-plate',
+    slug: 'fortress-full-plate',
+    name: 'Fortress Full Plate',
+    weight_class: 'Heavy',
+    armor_sp: 6,
+    armor_dr: 6,
+    allows_dodge: false,
+    speed_penalty_tiles: 0,
+    description:
+      'Masterwork interlocking steel harness. Massive [SP] and [Armor DR] protection; disables [Dodge].',
+    rule_hooks: { __icon: 'iron-helm', __icon_color: '#A78BFA' },
+    is_active: true,
+  },
+];
+
+export const ITEM_SUBCATEGORY_OPTIONS = [
+  'Ammunition',
+  'Camping & Survival',
+  'Consumable',
+  'Tool & Kit',
+  'Adventuring Gear',
+  'Quest & Loot',
+] as const;
+
+export type ItemSubcategoryOption = (typeof ITEM_SUBCATEGORY_OPTIONS)[number];
+
+export interface CompendiumItemModel {
+  id: string;
+  slug: string;
+  name: string;
+  subcategory: string;
+  default_quantity: number;
+  stackable: boolean;
+  description: string;
+  rule_hooks: Record<string, unknown>;
+  is_active?: boolean;
+}
+
+export const DEFAULT_COMPENDIUM_ITEMS: CompendiumItemModel[] = [
+  {
+    id: 'item-bodkin-arrows',
+    slug: 'bodkin-arrows',
+    name: 'Bodkin Arrows',
+    subcategory: 'Ammunition',
+    default_quantity: 20,
+    stackable: true,
+    description:
+      'Quiver of hardened iron-point shafts fletched for bows and ranged volleys.',
+    rule_hooks: { __icon: 'quiver', __icon_color: '#FF8C5A' },
+    is_active: true,
+  },
+  {
+    id: 'item-stone-and-flint',
+    slug: 'stone-and-flint',
+    name: 'Stone & Flint',
+    subcategory: 'Camping & Survival',
+    default_quantity: 1,
+    stackable: true,
+    description:
+      'High-carbon striker stone and sharp flint shard for sparking campfires, lanterns, and pitch torches.',
+    rule_hooks: { __icon: 'sunfire', __icon_color: '#F59E0B' },
+    is_active: true,
+  },
+  {
+    id: 'item-canvas-field-tent',
+    slug: 'canvas-field-tent',
+    name: 'Canvas Field Tent',
+    subcategory: 'Camping & Survival',
+    default_quantity: 1,
+    stackable: true,
+    description:
+      'Waxed two-person canvas shelter with stakes and guy-lines for camp rest in harsh weather.',
+    rule_hooks: { __icon: 'camp-tent', __icon_color: '#38B29A' },
+    is_active: true,
+  },
+  {
+    id: 'item-trail-rations',
+    slug: 'trail-rations',
+    name: 'Trail Rations',
+    subcategory: 'Camping & Survival',
+    default_quantity: 3,
+    stackable: true,
+    description:
+      'Wrapped smoked meat, hardtack, and dried fruit sustaining one march day per ration.',
+    rule_hooks: { __icon: 'pack', __icon_color: '#F59E0B' },
+    is_active: true,
+  },
+  {
+    id: 'item-pitch-torch',
+    slug: 'pitch-torch',
+    name: 'Pitch Torch',
+    subcategory: 'Camping & Survival',
+    default_quantity: 2,
+    stackable: true,
+    description:
+      'Resin-soaked timber brand that burns steadily to illuminate caverns and night camps.',
+    rule_hooks: { __icon: 'sunfire', __icon_color: '#FF8C5A' },
+    is_active: true,
+  },
+  {
+    id: 'item-hempen-rope-50ft',
+    slug: 'hempen-rope-50ft',
+    name: 'Hempen Rope (50 ft)',
+    subcategory: 'Adventuring Gear',
+    default_quantity: 1,
+    stackable: true,
+    description:
+      'Coiled 50-foot braided rope for scaling cliffs, rigging pulleys, or securing prisoners.',
+    rule_hooks: { __icon: 'pack', __icon_color: '#EBF5F3' },
+    is_active: true,
+  },
+  {
+    id: 'item-field-bandages',
+    slug: 'field-bandages',
+    name: 'Field Bandages',
+    subcategory: 'Consumable',
+    default_quantity: 2,
+    stackable: true,
+    description:
+      'Clean linen rolls and herbal poultice used to staunch [Bleeding] and dress wounds.',
+    rule_hooks: { __icon: 'crimson-drop', __icon_color: '#F26464' },
+    is_active: true,
+  },
+  {
+    id: 'item-thieves-picks-and-tools',
+    slug: 'thieves-picks-and-tools',
+    name: "Thieves' Picks & Tools",
+    subcategory: 'Tool & Kit',
+    default_quantity: 1,
+    stackable: true,
+    description:
+      'Roll of tension wrenches, fine hooks, and files for Tinkering checks on locks and traps.',
+    rule_hooks: { __icon: 'tactical-eye', __icon_color: '#38BDF8' },
+    is_active: true,
+  },
+];
 
 export interface SkillTreeModel {
   id: string;
@@ -620,10 +819,6 @@ export interface PerkNodeModel {
   is_active?: boolean;
 }
 
-/**
- * Returns `true` when a `PerkNodeModel` is a Standalone ("Solo") Combat Art or Passive
- * that does not belong to any Martial Skill Tree (`tree_id === null` or `rule_hooks.__is_standalone === true`).
- */
 export function isStandalonePerkNode(
   node: PerkNodeModel | null | undefined
 ): boolean {
@@ -631,10 +826,6 @@ export function isStandalonePerkNode(
   return !node.tree_id || node.rule_hooks?.__is_standalone === true;
 }
 
-/**
- * Returns `true` if a Compendium entry is active (`is_active !== false` and `rule_hooks.__is_active !== false`).
- * Archived (`is_active === false`) items are hidden from new character creation while remaining safe for existing characters.
- */
 export function isCompendiumItemActive(
   item:
     | {
@@ -654,7 +845,7 @@ export function isCompendiumItemActive(
 export interface CompendiumIconPreset {
   id: string;
   label: string;
-  category: 'Weapon' | 'Defense' | 'Element' | 'Mastery';
+  category: 'Weapon' | 'Defense' | 'Element' | 'Mastery' | 'Gear';
   paths: string[];
 }
 
@@ -813,6 +1004,48 @@ export const COMPENDIUM_ICON_PRESETS: CompendiumIconPreset[] = [
       'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
     ],
   },
+  {
+    id: 'breastplate',
+    label: 'Cuirass Breastplate',
+    category: 'Defense',
+    paths: [
+      'M8 3L4 6v4l2 2v8h12v-8l2-2V6l-4-3c-1.2 1.4-2.5 2-4 2s-2.8-.6-4-2z',
+      'M12 5v15',
+      'M7 13h10',
+    ],
+  },
+  {
+    id: 'quiver',
+    label: 'Arrow Quiver',
+    category: 'Gear',
+    paths: [
+      'M5 19l5-10 5 2-5 10-5-2z',
+      'M13 4l-2 5',
+      'M17 5l-3 5',
+      'M19 8l-4 4',
+    ],
+  },
+  {
+    id: 'camp-tent',
+    label: 'Field Tent',
+    category: 'Gear',
+    paths: [
+      'M3 20L12 4l9 16H3z',
+      'M12 4v16',
+      'M9 20l3-6 3 6',
+    ],
+  },
+  {
+    id: 'pack',
+    label: 'Traveler Pack',
+    category: 'Gear',
+    paths: [
+      'M6 8a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8z',
+      'M9 4V2h6v2',
+      'M6 12h12',
+      'M10 12v3h4v-3',
+    ],
+  },
 ];
 
 export interface CompendiumColorPreset {
@@ -849,9 +1082,6 @@ export function isCustomIconUrl(icon: string | null | undefined): boolean {
   );
 }
 
-/**
- * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Skill Tree.
- */
 export function resolveTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisuals {
   let defaultIcon = 'bastion-shield';
   let defaultColor = '#FF8C5A';
@@ -880,9 +1110,6 @@ export function resolveTreeVisuals(tree: SkillTreeModel): ResolvedCompendiumVisu
   };
 }
 
-/**
- * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Perk Node.
- */
 export function resolveNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisuals {
   const nKey = `${node.slug} ${node.name}`.toLowerCase();
 
@@ -941,9 +1168,6 @@ export function resolveNodeVisuals(node: PerkNodeModel): ResolvedCompendiumVisua
   };
 }
 
-/**
- * Resolves the effective icon (`preset` ID or uploaded URL) and accent color for a Weapon.
- */
 export function resolveWeaponVisuals(weapon: WeaponModel): ResolvedCompendiumVisuals {
   const key = `${weapon.slug} ${weapon.name} ${weapon.category}`.toLowerCase();
 
@@ -989,9 +1213,76 @@ export function resolveWeaponVisuals(weapon: WeaponModel): ResolvedCompendiumVis
   };
 }
 
-/**
- * Formats mechanical rule hook badges for a Weapon card in the Armory / Inspector.
- */
+export function resolveArmorVisuals(armor: ArmorModel): ResolvedCompendiumVisuals {
+  const key = `${armor.slug} ${armor.name} ${armor.weight_class}`.toLowerCase();
+  let defaultIcon = armor.weight_class === 'Heavy' ? 'iron-helm' : 'breastplate';
+  let defaultColor =
+    armor.weight_class === 'Heavy'
+      ? '#F26464'
+      : armor.weight_class === 'Medium'
+        ? '#F59E0B'
+        : '#38B29A';
+
+  if (key.includes('plate') || key.includes('helm') || key.includes('fortress')) {
+    defaultIcon = 'iron-helm';
+  }
+
+  const hooks = armor.rule_hooks ?? {};
+  const rawIcon = typeof hooks['__icon'] === 'string' ? hooks['__icon'].trim() : '';
+  const rawColor = typeof hooks['__icon_color'] === 'string' ? hooks['__icon_color'].trim() : '';
+  const rawTint = typeof hooks['__icon_tint_custom'] === 'boolean' ? hooks['__icon_tint_custom'] : true;
+
+  const icon = rawIcon || defaultIcon;
+  const color = rawColor || defaultColor;
+
+  return {
+    icon,
+    color,
+    tintCustom: rawTint,
+    isCustomUpload: isCustomIconUrl(icon),
+  };
+}
+
+export function resolveCompendiumItemVisuals(
+  item: CompendiumItemModel
+): ResolvedCompendiumVisuals {
+  const key = `${item.slug} ${item.name} ${item.subcategory}`.toLowerCase();
+  let defaultIcon = 'pack';
+  let defaultColor = '#38B29A';
+
+  if (key.includes('arrow') || key.includes('bolt') || key.includes('ammo') || key.includes('quiver')) {
+    defaultIcon = 'quiver';
+    defaultColor = '#FF8C5A';
+  } else if (key.includes('tent') || key.includes('camp')) {
+    defaultIcon = 'camp-tent';
+    defaultColor = '#38B29A';
+  } else if (key.includes('flint') || key.includes('torch') || key.includes('fire') || key.includes('lantern')) {
+    defaultIcon = 'sunfire';
+    defaultColor = '#F59E0B';
+  } else if (key.includes('bandage') || key.includes('salve') || key.includes('potion') || key.includes('consumable')) {
+    defaultIcon = 'crimson-drop';
+    defaultColor = '#F26464';
+  } else if (key.includes('pick') || key.includes('tool') || key.includes('kit')) {
+    defaultIcon = 'tactical-eye';
+    defaultColor = '#38BDF8';
+  }
+
+  const hooks = item.rule_hooks ?? {};
+  const rawIcon = typeof hooks['__icon'] === 'string' ? hooks['__icon'].trim() : '';
+  const rawColor = typeof hooks['__icon_color'] === 'string' ? hooks['__icon_color'].trim() : '';
+  const rawTint = typeof hooks['__icon_tint_custom'] === 'boolean' ? hooks['__icon_tint_custom'] : true;
+
+  const icon = rawIcon || defaultIcon;
+  const color = rawColor || defaultColor;
+
+  return {
+    icon,
+    color,
+    tintCustom: rawTint,
+    isCustomUpload: isCustomIconUrl(icon),
+  };
+}
+
 export function formatWeaponHookBadges(weapon: WeaponModel | null | undefined): string[] {
   if (!weapon) return [];
   const badges: string[] = [];
@@ -1499,9 +1790,6 @@ export function buildSkillTreeHierarchy(
   return roots.map((r) => buildBranch(r, 1));
 }
 
-/**
- * Determines an emblem archetype ('breaker' | 'veil' | 'gale' | 'sentinel') from a tree's slug or name.
- */
 export function getTreeArchetypeIcon(
   tree: Pick<SkillTreeModel, 'slug' | 'name'>
 ): 'breaker' | 'veil' | 'gale' | 'sentinel' {
@@ -1518,9 +1806,6 @@ export function getTreeArchetypeIcon(
   return 'sentinel';
 }
 
-/**
- * Converts a stored JSONB `PerkRuleHooks` object into composable UI rows for the Admin editor.
- */
 export function hooksObjectToRows(hooks: PerkRuleHooks | undefined | null): RuleHookRow[] {
   if (!hooks) return [];
   const rows: RuleHookRow[] = [];
@@ -1553,9 +1838,6 @@ export function hooksObjectToRows(hooks: PerkRuleHooks | undefined | null): Rule
   return rows;
 }
 
-/**
- * Compiles composable UI rows + Combat Tag into a clean `PerkRuleHooks` JSONB payload.
- */
 export function rowsToHooksObject(
   rows: RuleHookRow[],
   nodeType: 'combat_art' | 'passive_upgrade',
@@ -1778,9 +2060,6 @@ export function formatArtUpgradeBadges(
   return badges;
 }
 
-/**
- * Formats human-readable mechanical badges from a PerkNode's structured `rule_hooks`.
- */
 export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): string[] {
   if (!hooks) return [];
   const badges: string[] = [...formatArtUpgradeBadges(hooks.__art_upgrade)];
