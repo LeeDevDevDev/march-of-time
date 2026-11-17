@@ -42,8 +42,10 @@ export class VttFloatingWindowComponent implements OnInit {
   readonly accentBorder = input<boolean>(false);
   readonly allowOverflow = input<boolean>(false);
   readonly minimizable = input<boolean>(true);
+  readonly compactHeader = input<boolean>(false);
 
   readonly closed = output<void>();
+  readonly positionChange = output<{ x: number; y: number }>();
 
   readonly minimized = signal(false);
   readonly windowX = signal(88);
@@ -112,6 +114,7 @@ export class VttFloatingWindowComponent implements OnInit {
   onWindowPointerUp(): void {
     if (this.isDraggingWindow()) {
       this.isDraggingWindow.set(false);
+      this.positionChange.emit({ x: this.windowX(), y: this.windowY() });
     }
   }
 

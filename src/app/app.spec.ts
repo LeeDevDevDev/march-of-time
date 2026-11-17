@@ -11752,4 +11752,523 @@ describe('App', () => {
     expect(vttStore.tokens()[1].current_hp).toBe(7);
     expect(vttStore.tokens()[1].current_ap).toBe(3);
   });
+
+  it('should enroll anyone who rolls Initiative into the Combat Carousel lobby, start Round 1 with only enrolled combatants, allow mid-combat Initiative joins, and support GM tracker edits', async () => {
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'player-a',
+      email: 'playera@test.com',
+    });
+    let logSeq = 1;
+
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => activeUserSig().id === 'gm-init-1',
+            displayName: () => activeUserSig().id,
+            handle: () => activeUserSig().id,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-init-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-init-carousel',
+      gm_id: 'gm-init-1',
+      name: 'Initiative Carousel Campaign',
+      cover_image_url: null,
+      invite_code: 'INIT01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-init-1',
+        campaign_id: 'camp-init-carousel',
+        gm_id: 'gm-init-1',
+        folder_id: null,
+        name: 'Watchtower Courtyard',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: false,
+        round_number: 1,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-init-1');
+    vttStore.tokens.set([
+      {
+        id: 'tok-hero',
+        encounter_id: 'scene-init-1',
+        character_id: null,
+        owner_id: 'player-a',
+        name: 'Sera Swift',
+        faction: 'ally',
+        x: 2,
+        y: 2,
+        q: 2,
+        r: 2,
+        size: 1,
+        icon: 'bow',
+        color: '#38B29A',
+        current_hp: 10,
+        max_hp: 10,
+        current_sp: 4,
+        max_sp: 4,
+        current_ap: 2,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 0,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#F59E0B',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          attributes: {
+            Brawn: 1,
+            Agility: 4,
+            Technique: 2,
+            Iron: 1,
+            Cunning: 2,
+          },
+        },
+      },
+      {
+        id: 'tok-bandit',
+        encounter_id: 'scene-init-1',
+        character_id: null,
+        owner_id: null,
+        name: 'Ash Raider',
+        faction: 'enemy',
+        x: 4,
+        y: 2,
+        q: 4,
+        r: 2,
+        size: 1,
+        icon: 'greatsword',
+        color: '#EF4444',
+        current_hp: 12,
+        max_hp: 12,
+        current_sp: 4,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 0,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#F59E0B',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          attributes: {
+            Brawn: 2,
+            Agility: 1,
+            Technique: 1,
+            Iron: 2,
+            Cunning: 3,
+          },
+        },
+      },
+      {
+        id: 'tok-bystander',
+        encounter_id: 'scene-init-1',
+        character_id: null,
+        owner_id: 'player-b',
+        name: 'Late Ranger',
+        faction: 'ally',
+        x: 6,
+        y: 3,
+        q: 6,
+        r: 3,
+        size: 1,
+        icon: 'spear',
+        color: '#38BDF8',
+        current_hp: 10,
+        max_hp: 10,
+        current_sp: 4,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 0,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#F59E0B',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          attributes: {
+            Brawn: 1,
+            Agility: 2,
+            Technique: 2,
+            Iron: 1,
+            Cunning: 4,
+          },
+        },
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const topHeaderEl = rootEl.querySelector('header') as HTMLElement | null;
+    expect(topHeaderEl).toBeTruthy();
+    expect(topHeaderEl!.textContent).not.toContain('Start Combat');
+    expect(topHeaderEl!.textContent).not.toContain('Begin Combat');
+    expect(topHeaderEl!.textContent).not.toContain('Combat Tracker');
+    expect(
+      rootEl.querySelector('button[data-tool-combat-tracker="true"]')
+    ).toBeTruthy();
+    expect(
+      rootEl.querySelector('[data-vtt-combat-carousel="true"]')
+    ).toBeNull();
+    expect(
+      rootEl.querySelector('[data-vtt-combat-tracker-window="true"]')
+    ).toBeNull();
+
+    vttStore.manualRollOverride.set(14);
+    await vttStore.rollInitiativeForTokens(['tok-hero']);
+    fixture.detectChanges();
+
+    expect(vttStore.isCombatInitiationOpen()).toBe(false);
+    expect(vttStore.enrolledCombatTokens()).toEqual([]);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-hero')?.npc_stats
+        ?.__in_combat
+    ).toBeUndefined();
+    expect(
+      rootEl.querySelector('[data-vtt-combat-tracker-window="true"]')
+    ).toBeNull();
+    expect(
+      vttStore.logs().some((l) => l.title.includes('Sera Swift · Initiative'))
+    ).toBe(true);
+
+    const railTrackerBtn = rootEl.querySelector(
+      'button[data-tool-combat-tracker="true"]'
+    ) as HTMLButtonElement | null;
+    railTrackerBtn!.click();
+    fixture.detectChanges();
+    expect(
+      rootEl.querySelector('[data-tracker-locked-notice="true"]')
+    ).toBeTruthy();
+    expect(
+      rootEl.querySelector('button[data-tracker-roll-mine="true"]')
+    ).toBeNull();
+    railTrackerBtn!.click();
+    fixture.detectChanges();
+
+    activeUserSig.set({ id: 'gm-init-1', email: 'gm@test.com' });
+    railTrackerBtn!.click();
+    fixture.detectChanges();
+
+    const initiateBtn = rootEl.querySelector(
+      'button[data-tracker-initiate-combat="true"]'
+    ) as HTMLButtonElement | null;
+    expect(initiateBtn).toBeTruthy();
+    initiateBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.isCombatInitiationOpen()).toBe(true);
+
+    activeUserSig.set({ id: 'player-a', email: 'playera@test.com' });
+    fixture.detectChanges();
+
+    const rollMineBtn = rootEl.querySelector(
+      'button[data-tracker-roll-mine="true"]'
+    ) as HTMLButtonElement | null;
+    expect(rollMineBtn).toBeTruthy();
+    rollMineBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(
+      rootEl.querySelector('[data-vtt-combat-carousel="true"]')
+    ).toBeNull();
+
+    const trackerBodyEl = rootEl.querySelector(
+      '[data-vtt-combat-tracker-window="true"]'
+    ) as HTMLElement | null;
+    expect(trackerBodyEl).toBeTruthy();
+    const trackerWinSection = trackerBodyEl!.closest(
+      'section[data-vtt-floating-window="true"]'
+    ) as HTMLElement | null;
+    expect(trackerWinSection).toBeTruthy();
+    expect(trackerWinSection!.className).toContain('316px');
+
+    const trackerHeaderEl = trackerWinSection!.querySelector(
+      '[data-vtt-floating-header="true"]'
+    ) as HTMLElement | null;
+    expect(trackerHeaderEl).toBeTruthy();
+    trackerHeaderEl!.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        clientX: 160,
+        clientY: 80,
+        bubbles: true,
+      })
+    );
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        clientX: 290,
+        clientY: 130,
+        bubbles: true,
+      })
+    );
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    fixture.detectChanges();
+    expect(vttStore.combatTrackerPosition()).toBeTruthy();
+    const draggedX = vttStore.combatTrackerPosition()!.x;
+    const draggedY = vttStore.combatTrackerPosition()!.y;
+    expect(draggedX).toBeGreaterThan(200);
+
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-hero')?.npc_stats
+        ?.__initiative_mod
+    ).toBe(2);
+
+    activeUserSig.set({ id: 'gm-init-1', email: 'gm@test.com' });
+    fixture.detectChanges();
+
+    vttStore.manualRollOverride.set(19);
+    const rollNpcsBtn = rootEl.querySelector(
+      'button[data-tracker-roll-npcs="true"]'
+    ) as HTMLButtonElement | null;
+    expect(rollNpcsBtn).toBeTruthy();
+    rollNpcsBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(
+      rootEl.querySelector('[data-vtt-combat-carousel="true"]')
+    ).toBeNull();
+    const phase1Rows = Array.from(
+      rootEl.querySelectorAll('[data-tracker-row]')
+    ).map((el) => el.getAttribute('data-tracker-row'));
+    expect(phase1Rows).toEqual(['tok-bandit', 'tok-hero']);
+
+    const beginBtn = rootEl.querySelector(
+      'button[data-tracker-begin-combat="true"]'
+    ) as HTMLButtonElement | null;
+    expect(beginBtn).toBeTruthy();
+    beginBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.activeScene()!.combat_active).toBe(true);
+    expect(vttStore.activeScene()!.initiative_order).toEqual([
+      'tok-bandit',
+      'tok-hero',
+    ]);
+    expect(vttStore.activeScene()!.active_turn_token_id).toBe('tok-bandit');
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-hero')?.current_ap
+    ).toBe(4);
+    expect(
+      rootEl.querySelector('[data-vtt-combat-tracker-window="true"]')
+    ).toBeNull();
+
+    const carouselEl = rootEl.querySelector(
+      '[data-vtt-combat-carousel="true"]'
+    ) as HTMLElement | null;
+    expect(carouselEl).toBeTruthy();
+    const phase2Cards = Array.from(
+      rootEl.querySelectorAll('[data-carousel-card]')
+    ).map((el) => el.getAttribute('data-carousel-card'));
+    expect(phase2Cards).toEqual(['tok-bandit', 'tok-hero']);
+
+    activeUserSig.set({ id: 'player-b', email: 'playerb@test.com' });
+    fixture.detectChanges();
+
+    vttStore.manualRollOverride.set(16);
+    const joinBtn = rootEl.querySelector(
+      'button[data-carousel-join-combat="true"]'
+    ) as HTMLButtonElement | null;
+    expect(joinBtn).toBeTruthy();
+    joinBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const joinedCards = Array.from(
+      rootEl.querySelectorAll('[data-carousel-card]')
+    ).map((el) => el.getAttribute('data-carousel-card'));
+    expect(joinedCards).toEqual(['tok-bandit', 'tok-bystander', 'tok-hero']);
+    expect(vttStore.activeScene()!.active_turn_token_id).toBe('tok-bandit');
+
+    activeUserSig.set({ id: 'gm-init-1', email: 'gm@test.com' });
+    fixture.detectChanges();
+
+    const drawerToggle = rootEl.querySelector(
+      'button[data-carousel-drawer-toggle="true"]'
+    ) as HTMLButtonElement | null;
+    expect(drawerToggle).toBeTruthy();
+    drawerToggle!.click();
+    fixture.detectChanges();
+
+    const drawerEl = rootEl.querySelector(
+      '[data-vtt-combat-drawer="true"]'
+    ) as HTMLElement | null;
+    expect(drawerEl).toBeTruthy();
+    const reopenedWin = drawerEl!.closest(
+      'section[data-vtt-floating-window="true"]'
+    ) as HTMLElement | null;
+    expect(reopenedWin).toBeTruthy();
+    expect(reopenedWin!.style.left).toBe(`${draggedX}px`);
+    expect(reopenedWin!.style.top).toBe(`${draggedY}px`);
+
+    expect(drawerEl!.querySelector('[data-tracker-hide]')).toBeNull();
+
+    const heroScoreInput = drawerEl!.querySelector(
+      'input[data-tracker-init-input="tok-hero"]'
+    ) as HTMLInputElement | null;
+    expect(heroScoreInput).toBeTruthy();
+    expect(heroScoreInput!.type).toBe('text');
+    heroScoreInput!.value = '25';
+    heroScoreInput!.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const stepUpBtn = drawerEl!.querySelector(
+      'button[data-tracker-init-step-up="tok-hero"]'
+    ) as HTMLButtonElement | null;
+    expect(stepUpBtn).toBeTruthy();
+    stepUpBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-hero')?.npc_stats
+        ?.__initiative
+    ).toBe(26);
+
+    expect(vttStore.activeScene()!.initiative_order).toEqual([
+      'tok-hero',
+      'tok-bandit',
+      'tok-bystander',
+    ]);
+
+    const removeBystanderBtn = drawerEl!.querySelector(
+      'button[data-tracker-remove="tok-bystander"]'
+    ) as HTMLButtonElement | null;
+    expect(removeBystanderBtn).toBeTruthy();
+    removeBystanderBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.activeScene()!.initiative_order).toEqual([
+      'tok-hero',
+      'tok-bandit',
+    ]);
+    expect(
+      drawerEl!.querySelector('[data-tracker-unrolled-row="tok-bystander"]')
+    ).toBeTruthy();
+
+    const endBtn = rootEl.querySelector(
+      'button[data-carousel-end-combat="true"]'
+    ) as HTMLButtonElement | null;
+    expect(endBtn).toBeTruthy();
+    endBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.activeScene()!.combat_active).toBe(false);
+    expect(vttStore.activeScene()!.initiative_order).toEqual([]);
+    expect(
+      rootEl.querySelector('[data-vtt-combat-carousel="true"]')
+    ).toBeNull();
+    expect(
+      rootEl.querySelector('[data-vtt-combat-tracker-window="true"]')
+    ).toBeNull();
+  });
 });

@@ -1,0 +1,242 @@
+@if (shouldRender() && scene(); as sc) {
+  @let list = combatants();
+  @let myUnrolled = unrolledControllableTokens();
+  @let activeTok = activeTurnToken();
+  @let trackerOpen = vttStore.combatTrackerDrawerOpen();
+
+  <div
+    data-vtt-combat-carousel="true"
+    (wheel)="$event.stopPropagation()"
+    class="flex max-w-[min(92vw,780px)] flex-col items-center gap-1.5 text-xs text-[#EBF5F3] select-none"
+  >
+    <div
+      class="flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-[#2C4A44] bg-[#0B1413]/96 px-2.5 py-1.5 shadow-2xl backdrop-blur-md"
+    >
+      <span
+        data-carousel-round-badge="true"
+        class="rounded-lg border border-[#784321] bg-[#3D2314] px-2.5 py-1 font-mono-num text-[11px] font-extrabold text-[#FDBA74]"
+      >
+        Round {{ sc.round_number }}
+      </span>
+
+      @if (activeTok) {
+        <span class="hidden sm:inline-block max-w-[140px] truncate rounded-lg border border-[#FBBF24]/40 bg-[#2E2008] px-2 py-1 text-[11px] font-bold text-[#FDE68A]">
+          {{ activeTok.name }}&rsquo;s Turn
+        </span>
+      }
+
+      @if (myUnrolled.length > 0) {
+        <button
+          type="button"
+          data-carousel-join-combat="true"
+          (click)="rollMyInitiative()"
+          class="rounded-lg border border-[#38B29A] bg-[#13352F] px-2.5 py-1 text-[11px] font-bold text-[#5EEAD4] transition-colors hover:bg-[#19453D]"
+          title="Roll Initiative (2d10 + Cunning) to join the active combat order"
+        >
+          + Join ({{ myUnrolled.length }})
+        </button>
+      }
+
+      @if (vttStore.isGm()) {
+        <button
+          type="button"
+          data-carousel-prev-turn="true"
+          [disabled]="list.length === 0"
+          (click)="prevTurn()"
+          class="rounded-lg border border-[#243B37] bg-[#122220] px-2 py-1 text-[11px] font-bold text-[#8AB0AB] transition-colors hover:border-[#38B29A] hover:text-white disabled:opacity-40"
+          title="Rewind to previous combatant"
+        >
+          &larr;
+        </button>
+      }
+
+      @if (canAdvanceTurn()) {
+        <button
+          type="button"
+          data-carousel-next-turn="true"
+          [disabled]="list.length === 0"
+          (click)="nextTurn()"
+          class="btn-copper rounded-lg px-2.5 py-1 text-[11px] font-bold disabled:opacity-45"
+        >
+          {{ vttStore.isGm() ? 'Next Turn' : 'End Turn' }} &rarr;
+        </button>
+      }
+
+      @if (vttStore.isGm()) {
+        <button
+          type="button"
+          data-carousel-end-combat="true"
+          (click)="endCombat()"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-[#FDA4AF] transition-colors hover:border-[#E11D48]"
+          title="End combat encounter and clear Initiative"
+        >
+          End
+        </button>
+      }
+
+      <div class="h-4 w-[1px] bg-[#243B37]"></div>
+
+      <button
+        type="button"
+        data-carousel-drawer-toggle="true"
+        (click)="toggleTrackerWindow()"
+        class="flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors"
+        [class.border-[#38B29A]]="trackerOpen"
+        [class.bg-[#102B26]]="trackerOpen"
+        [class.text-[#5EEAD4]]="trackerOpen"
+        [class.border-[#243B37]]="!trackerOpen"
+        [class.bg-[#122220]]="!trackerOpen"
+        [class.text-[#8AB0AB]]="!trackerOpen"
+        title="Open movable Combat Tracker window"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+        <span>Tracker</span>
+      </button>
+
+      @if (list.length > 0) {
+        <button
+          type="button"
+          data-carousel-collapse-toggle="true"
+          (click)="toggleMinimized()"
+          class="rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[10px] font-bold text-[#8AB0AB] transition-colors hover:text-white"
+          [title]="minimized() ? 'Show combatant portrait strip' : 'Hide combatant portrait strip'"
+        >
+          {{ minimized() ? 'Show' : 'Hide' }}
+        </button>
+      }
+    </div>
+
+    @if (!minimized() && list.length > 0) {
+      <div
+        data-carousel-cards="true"
+        class="flex max-w-full items-end gap-1.5 overflow-x-auto rounded-2xl border border-[#243B37]/90 bg-[#08100F]/92 px-2.5 py-2 shadow-xl backdrop-blur-md"
+      >
+        @for (tok of list; track tok.id) {
+          @let isActive = sc.combat_active && sc.active_turn_token_id === tok.id;
+          @let isSel = isTokenSelected(tok.id);
+          @let portrait = getDisplayPortraitUrl(tok);
+          @let vis = getTokenVisuals(tok);
+          @let showExact = canSeeExactVitals(tok);
+
+          <button
+            type="button"
+            [attr.data-carousel-card]="tok.id"
+            [attr.data-active-turn]="isActive ? 'true' : null"
+            (click)="selectCombatant(tok, $event)"
+            (dblclick)="openCombatantSheet(tok, $event)"
+            [title]="tok.name + (hasRolledInitiative(tok) ? ' · Initiative ' + tok.npc_stats?.__initiative : ' · Unrolled') + ' (Click to select, double-click for sheet)'"
+            class="group relative flex shrink-0 flex-col overflow-hidden rounded-xl border-2 bg-[#0D1716] text-left transition-all"
+            [class.w-[72px]]="isActive"
+            [class.w-[62px]]="!isActive"
+            [class.border-[#FBBF24]]="isActive"
+            [class.ring-2]="isActive"
+            [class.ring-[#FBBF24]/40]="isActive"
+            [class.-translate-y-0.5]="isActive"
+            [class.border-[#38B29A]]="!isActive && tok.faction === 'ally'"
+            [class.border-[#F43F5E]]="!isActive && tok.faction === 'enemy'"
+            [class.border-[#F59E0B]]="!isActive && tok.faction === 'neutral'"
+            [class.ring-1]="!isActive && isSel"
+            [class.ring-white/60]="!isActive && isSel"
+            [class.opacity-60]="tok.current_hp <= 0 || tok.is_hidden"
+          >
+            @if (isActive) {
+              <div class="w-full bg-[#FBBF24] py-[1px] text-center font-mono-num text-[8px] font-extrabold uppercase tracking-wider text-[#09100F]">
+                Turn
+              </div>
+            }
+
+            <div
+              class="relative flex w-full items-center justify-center overflow-hidden bg-[#070D0C]"
+              [class.h-[66px]]="isActive"
+              [class.h-[58px]]="!isActive"
+            >
+              @if (portrait) {
+                <img
+                  [src]="portrait"
+                  [alt]="tok.name"
+                  (error)="markPortraitBroken(portrait)"
+                  class="h-full w-full object-cover object-top"
+                  [class.grayscale]="tok.current_hp <= 0"
+                />
+              } @else {
+                <div class="h-11 w-11">
+                  <app-token-avatar
+                    [tokenImageUrl]="vis.tokenImageUrl"
+                    [appearance]="vis.tokenAppearance"
+                    [icon]="tok.icon || 'greatsword'"
+                    [color]="tok.color || '#5EEAD4'"
+                    [faction]="tok.faction"
+                    [isHidden]="tok.is_hidden"
+                    [grayscale]="tok.current_hp <= 0"
+                    iconSizeClass="h-5 w-5"
+                  />
+                </div>
+              }
+
+              <span
+                data-carousel-init-score="true"
+                class="absolute top-1 right-1 rounded border border-[#243B37] bg-[#09100F]/92 px-1 py-[1px] font-mono-num text-[9px] font-extrabold shadow"
+                [class.text-[#FDE68A]]="hasRolledInitiative(tok)"
+                [class.text-[#8AB0AB]]="!hasRolledInitiative(tok)"
+              >
+                {{ hasRolledInitiative(tok) ? tok.npc_stats?.__initiative : '—' }}
+              </span>
+
+              @if (tok.is_hidden) {
+                <span class="absolute top-1 left-1 rounded bg-[#1E293B]/90 px-1 py-[1px] font-mono-num text-[8px] font-bold text-[#CBD5E1]">
+                  Hid
+                </span>
+              } @else if (tok.shield_raised) {
+                <span class="absolute top-1 left-1 rounded bg-[#0284C7]/90 px-1 py-[1px] font-mono-num text-[8px] font-bold text-white">
+                  Grd
+                </span>
+              }
+
+              @if (tok.current_hp <= 0) {
+                <span class="absolute inset-x-0 bottom-0 bg-[#881337]/92 py-[1px] text-center font-mono-num text-[8px] font-bold uppercase text-[#FFE4E6]">
+                  Down
+                </span>
+              }
+            </div>
+
+            <div class="w-full space-y-1 bg-[#0B1413] px-1.5 py-1">
+              <div class="truncate text-[9px] font-bold text-white">
+                {{ tok.name }}
+              </div>
+
+              @if (showExact) {
+                <div class="space-y-0.5">
+                  <div class="h-1 w-full overflow-hidden rounded-full bg-[#1C2E2B]">
+                    <div
+                      class="h-full bg-[#10B981] transition-all"
+                      [style.width.%]="getHpPercent(tok)"
+                    ></div>
+                  </div>
+                  @if (tok.max_sp > 0) {
+                    <div class="h-1 w-full overflow-hidden rounded-full bg-[#1C2E2B]">
+                      <div
+                        class="h-full bg-[#38BDF8] transition-all"
+                        [style.width.%]="getSpPercent(tok)"
+                      ></div>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="truncate font-mono-num text-[8px] font-semibold text-[#8AB0AB]">
+                  {{ getVitalConditionLabel(tok) }}
+                </div>
+              }
+            </div>
+          </button>
+        }
+      </div>
+    }
+  </div>
+}

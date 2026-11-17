@@ -1007,7 +1007,7 @@
             title: 'Roll Group Initiative',
             apLabel: '0 AP',
             subtitle: '2d10 + Cunning for all ' + groupList.length + ' selected tokens',
-            description: 'Rolls Initiative for every selected token and orders the combat turn tracker.'
+            description: vttStore.isGm() || vttStore.isCombatTrackerUnlocked() ? 'Rolls Initiative for every selected token and orders the Combat Tracker.' : 'Rolls Initiative in chat. Tracker enrollment unlocks once the GM initiates Phase 1.'
           })"
           (mouseleave)="setHover(null)"
           class="flex h-[84px] min-w-[92px] flex-col items-center justify-between rounded-xl border border-[#C4491A] bg-gradient-to-b from-[#29170E] to-[#111D1B] p-1.5 text-center transition-colors hover:border-[#FB923C] disabled:opacity-40"
@@ -1871,7 +1871,7 @@
               title: 'Roll Initiative',
               apLabel: '0 AP',
               subtitle: formatFormula(initInfo.mod) + ' (' + initInfo.govAttr + ')',
-              description: 'Rolls Initiative and updates combat turn order.'
+              description: vttStore.isGm() || vttStore.isCombatTrackerUnlocked() ? 'Rolls Initiative and joins the Combat Tracker turn order.' : 'Rolls Initiative in chat. Tracker enrollment unlocks once the GM initiates Phase 1.'
             })"
             (mouseleave)="setHover(null)"
             class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border border-[#784321] bg-[#1D120A] p-1.5 text-center transition-colors hover:border-[#FDBA74] disabled:opacity-40"

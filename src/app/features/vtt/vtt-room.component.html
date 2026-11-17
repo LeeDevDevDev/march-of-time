@@ -77,72 +77,6 @@
       </div>
     </div>
 
-    @if (vttStore.activeScene(); as sc) {
-      <div class="flex items-center gap-2 overflow-x-auto">
-        @if (!sc.combat_active) {
-          <span
-            class="hidden sm:inline-block rounded-md border border-[#243B37] bg-[#0D1615] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB]"
-          >
-            Exploration
-          </span>
-          @if (vttStore.isGm()) {
-            <button
-              type="button"
-              (click)="vttStore.startCombatEncounter()"
-              [disabled]="vttStore.sceneTokens().length === 0"
-              class="btn-copper rounded-lg px-3 py-1 text-xs font-bold disabled:opacity-45"
-            >
-              Start Combat
-            </button>
-          }
-        } @else {
-          <span
-            class="shrink-0 rounded-md border border-[#784321] bg-[#3D2314] px-2 py-1 font-mono-num text-xs font-bold text-[#FDBA74]"
-          >
-            Round {{ sc.round_number }}
-          </span>
-
-          <div class="hidden md:flex items-center gap-1 max-w-[340px] overflow-x-auto py-0.5">
-            @for (tok of vttStore.initiativeTokens(); track tok.id) {
-              <button
-                type="button"
-                (click)="vttStore.selectedTokenId.set(tok.id)"
-                class="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
-                [class.border-[#FBBF24]]="sc.active_turn_token_id === tok.id"
-                [class.bg-[#3D280A]]="sc.active_turn_token_id === tok.id"
-                [class.text-[#FDE68A]]="sc.active_turn_token_id === tok.id"
-                [class.border-[#243B37]]="sc.active_turn_token_id !== tok.id"
-                [class.bg-[#0D1615]]="sc.active_turn_token_id !== tok.id"
-                [class.text-[#8AB0AB]]="sc.active_turn_token_id !== tok.id"
-                [class.line-through]="tok.current_hp <= 0"
-              >
-                {{ tok.name }}@if (tok.npc_stats?.__initiative !== undefined) {
-                  <span class="ml-1 font-mono-num text-[10px] opacity-80">({{ tok.npc_stats?.__initiative }})</span>
-                }
-              </button>
-            }
-          </div>
-
-          @if (vttStore.isGm()) {
-            <button
-              type="button"
-              (click)="vttStore.advanceTurn()"
-              class="btn-copper shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold"
-            >
-              Next Turn &rarr;
-            </button>
-            <button
-              type="button"
-              (click)="vttStore.endCombatEncounter()"
-              class="shrink-0 rounded-lg border border-[#243B37] bg-[#0D1615] px-2 py-1 text-[11px] font-semibold text-[#FDA4AF] hover:border-[#E11D48]"
-            >
-              End
-            </button>
-          }
-        }
-      </div>
-    }
-
     <div class="flex shrink-0 items-center gap-1.5">
       @if (vttStore.isGm()) {
         <button
@@ -369,6 +303,37 @@
 
             <div class="my-0.5 border-t border-[#243B37]"></div>
 
+            @let trackerCount = vttStore.enrolledCombatTokens().length;
+            <button
+              type="button"
+              data-tool-combat-tracker="true"
+              (click)="vttStore.toggleCombatTrackerDrawer()"
+              title="Open Combat Tracker"
+              class="flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              [class.bg-[#102B26]]="vttStore.combatTrackerDrawerOpen()"
+              [class.text-[#5EEAD4]]="vttStore.combatTrackerDrawerOpen()"
+              [class.text-[#8AB0AB]]="!vttStore.combatTrackerDrawerOpen()"
+              [class.hover:bg-[#192B28]]="!vttStore.combatTrackerDrawerOpen()"
+              [class.hover:text-white]="!vttStore.combatTrackerDrawerOpen()"
+            >
+              <span class="flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="8" y1="6" x2="21" y2="6" />
+                  <line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" />
+                  <line x1="3" y1="6" x2="3.01" y2="6" />
+                  <line x1="3" y1="12" x2="3.01" y2="12" />
+                  <line x1="3" y1="18" x2="3.01" y2="18" />
+                </svg>
+                <span>Tracker</span>
+              </span>
+              @if (trackerCount > 0) {
+                <span class="rounded border border-[#38B29A]/50 bg-[#102B26] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                  {{ trackerCount }}
+                </span>
+              }
+            </button>
+
             <button
               type="button"
               (click)="vttStore.undoLastAction()"
@@ -562,9 +527,14 @@
           }
         </div>
 
+        <div
+          class="pointer-events-none absolute top-3 left-1/2 z-30 flex max-w-[calc(100%-120px)] -translate-x-1/2 flex-col items-center gap-2"
+        >
+          <app-vtt-combat-carousel class="pointer-events-auto" />
+
         @if (vttStore.pendingTargetAction(); as targetAct) {
           <div
-            class="absolute left-1/2 top-3 z-30 w-[min(92vw,580px)] -translate-x-1/2 rounded-2xl border border-[#C4491A] bg-[#0D1615]/96 p-3.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-2.5"
+            class="pointer-events-auto w-[min(92vw,580px)] rounded-2xl border border-[#C4491A] bg-[#0D1615]/96 p-3.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-2.5"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -662,7 +632,7 @@
 
         @if (vttStore.pendingClash(); as clash) {
           <div
-            class="absolute left-1/2 top-3 z-30 w-[min(94vw,640px)] -translate-x-1/2 rounded-2xl border-2 border-[#C4491A] bg-[#0D1615]/97 p-4 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-3"
+            class="pointer-events-auto w-[min(94vw,640px)] rounded-2xl border-2 border-[#C4491A] bg-[#0D1615]/97 p-4 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs space-y-3"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -956,6 +926,7 @@
             }
           </div>
         }
+        </div>
 
         @let hudTokens = hudSelectedTokens();
         @if (hudTokens.length > 0) {
@@ -6235,6 +6206,7 @@
       [windowId]="sheetWin.windowId"
     />
   }
+  <app-vtt-combat-tracker-window />
   <app-vtt-tokenizer-window />
 
   @let abm = assetBrowserModal();

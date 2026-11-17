@@ -127,6 +127,7 @@ import {
   VttWallKind,
   VttWallSegment,
   TokenAppearanceConfig,
+  VTT_INITIATION_PHASE_SENTINEL,
   VTT_NPC_PRESETS,
   cloneDetachedNpcStats,
   cloneDetachedVttCharacterSheet,
@@ -1164,26 +1165,75 @@ export class VttStore {
     return controlled;
   });
 
-  readonly initiativeTokens = computed<VttTokenModel[]>(() => {
-    const sc = this.activeScene();
-    const list = this.sceneTokens().filter(
-      (t) => this.isGm() || !t.is_hidden
-    );
-    if (!sc || sc.initiative_order.length === 0) return list;
+  readonly combatTrackerDrawerOpen = signal<boolean>(false);
+  readonly combatTrackerPosition = signal<{ x: number; y: number } | null>(
+    null
+  );
 
-    const byId = new Map(list.map((t) => [t.id, t]));
-    const ordered: VttTokenModel[] = [];
-    for (const id of sc.initiative_order) {
-      const found = byId.get(id);
-      if (found) {
-        ordered.push(found);
-        byId.delete(id);
-      }
+  readonly isCombatInitiationOpen = computed<boolean>(() => {
+    const sc = this.activeScene();
+    if (!sc || sc.combat_active) return false;
+    return (sc.initiative_order ?? []).includes(VTT_INITIATION_PHASE_SENTINEL);
+  });
+
+  readonly isCombatTrackerUnlocked = computed<boolean>(() => {
+    const sc = this.activeScene();
+    if (!sc) return false;
+    return sc.combat_active || this.isCombatInitiationOpen();
+  });
+
+  readonly allEnrolledCombatTokens = computed<VttTokenModel[]>(() => {
+    const sc = this.activeScene();
+    if (!sc) return [];
+    if (!sc.combat_active && !this.isCombatInitiationOpen()) {
+      return [];
     }
-    for (const leftover of byId.values()) {
-      ordered.push(leftover);
-    }
-    return ordered;
+    const cleanOrder = (sc.initiative_order ?? []).filter(
+      (id) => id !== VTT_INITIATION_PHASE_SENTINEL
+    );
+    const orderSet = new Set(cleanOrder);
+    const enrolled = this.sceneTokens().filter((t) => {
+      if (t.npc_stats?.__in_combat === false) return false;
+      return (
+        orderSet.has(t.id) ||
+        t.npc_stats?.__in_combat === true ||
+        typeof t.npc_stats?.__initiative === 'number'
+      );
+    });
+    return this.sortCombatantTokens(enrolled, cleanOrder);
+  });
+
+  readonly enrolledCombatTokens = computed<VttTokenModel[]>(() =>
+    this.allEnrolledCombatTokens().filter((t) => this.isGm() || !t.is_hidden)
+  );
+
+  readonly unrolledSceneTokens = computed<VttTokenModel[]>(() => {
+    const enrolledIds = new Set(
+      this.allEnrolledCombatTokens().map((t) => t.id)
+    );
+    return this.sceneTokens().filter(
+      (t) => !enrolledIds.has(t.id) && (this.isGm() || !t.is_hidden)
+    );
+  });
+
+  readonly unrolledControllableTokens = computed<VttTokenModel[]>(() => {
+    const enrolledIds = new Set(
+      this.allEnrolledCombatTokens().map((t) => t.id)
+    );
+    return this.sceneTokens().filter(
+      (t) =>
+        !t.is_hidden &&
+        this.canControlToken(t) &&
+        (!enrolledIds.has(t.id) || typeof t.npc_stats?.__initiative !== 'number')
+    );
+  });
+
+  readonly initiativeTokens = computed<VttTokenModel[]>(() => {
+    const enrolled = this.enrolledCombatTokens();
+    if (enrolled.length > 0) return enrolled;
+    const sc = this.activeScene();
+    if (sc?.combat_active) return [];
+    return this.sceneTokens().filter((t) => this.isGm() || !t.is_hidden);
   });
 
   readonly pendingClash = computed<VttPendingClash | null>(
@@ -7540,25 +7590,13 @@ export class VttStore {
     };
   }
 
-  private buildInitiativeOrderForTokens(
-    visibleTokens: readonly VttTokenModel[]
-  ): string[] {
-    const hasAnyRolled = visibleTokens.some(
-      (t) => typeof t.npc_stats?.__initiative === 'number'
-    );
-    if (!hasAnyRolled) {
-      const allies = visibleTokens.filter((t) => t.faction === 'ally');
-      const others = visibleTokens.filter((t) => t.faction !== 'ally');
-      const interleaved: string[] = [];
-      const maxLen = Math.max(allies.length, others.length);
-      for (let i = 0; i < maxLen; i++) {
-        if (allies[i]) interleaved.push(allies[i].id);
-        if (others[i]) interleaved.push(others[i].id);
-      }
-      return interleaved;
-    }
+  private sortCombatantTokens(
+    tokens: readonly VttTokenModel[],
+    fallbackOrder: readonly string[] = []
+  ): VttTokenModel[] {
+    if (tokens.length === 0) return [];
 
-    const rolled = visibleTokens
+    const rolled = tokens
       .filter((t) => typeof t.npc_stats?.__initiative === 'number')
       .slice()
       .sort((a, b) => {
@@ -7576,10 +7614,108 @@ export class VttStore {
         return a.name.localeCompare(b.name);
       });
 
-    const unrolled = visibleTokens.filter(
+    const unrolled = tokens.filter(
       (t) => typeof t.npc_stats?.__initiative !== 'number'
     );
-    return [...rolled.map((t) => t.id), ...unrolled.map((t) => t.id)];
+    if (unrolled.length === 0) {
+      return rolled;
+    }
+
+    const fallbackIndex = new Map<string, number>();
+    fallbackOrder.forEach((id, idx) => fallbackIndex.set(id, idx));
+
+    const inFallback = unrolled
+      .filter((t) => fallbackIndex.has(t.id))
+      .slice()
+      .sort(
+        (a, b) =>
+          (fallbackIndex.get(a.id) ?? 0) - (fallbackIndex.get(b.id) ?? 0)
+      );
+
+    const notInFallback = unrolled.filter((t) => !fallbackIndex.has(t.id));
+    const allies = notInFallback.filter((t) => t.faction === 'ally');
+    const others = notInFallback.filter((t) => t.faction !== 'ally');
+    const interleaved: VttTokenModel[] = [];
+    const maxLen = Math.max(allies.length, others.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (allies[i]) interleaved.push(allies[i]);
+      if (others[i]) interleaved.push(others[i]);
+    }
+
+    return [...rolled, ...inFallback, ...interleaved];
+  }
+
+  private stripCombatInitiativeFields(
+    stats: VttNpcStats | null | undefined,
+    inCombatFlag?: boolean
+  ): VttNpcStats {
+    const next: VttNpcStats = { ...(stats ?? {}) };
+    delete next.__initiative;
+    delete next.__initiative_mod;
+    if (inCombatFlag === undefined) {
+      delete next.__in_combat;
+    } else {
+      next.__in_combat = inCombatFlag;
+    }
+    return next;
+  }
+
+  private buildSceneInitiativeOrder(
+    sc: VttSceneModel,
+    tokenIds: readonly string[],
+    keepPhase1Open?: boolean
+  ): string[] {
+    const cleanIds = tokenIds.filter(
+      (id) => id !== VTT_INITIATION_PHASE_SENTINEL
+    );
+    const shouldIncludeSentinel =
+      !sc.combat_active &&
+      (keepPhase1Open ??
+        (sc.initiative_order ?? []).includes(VTT_INITIATION_PHASE_SENTINEL));
+    return shouldIncludeSentinel
+      ? [VTT_INITIATION_PHASE_SENTINEL, ...cleanIds]
+      : cleanIds;
+  }
+
+  toggleCombatTrackerDrawer(force?: boolean): void {
+    this.combatTrackerDrawerOpen.update((curr) =>
+      force !== undefined ? force : !curr
+    );
+  }
+
+  async initiateCombatPhase(silentLog = false): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm() || sc.combat_active) return;
+    if (this.isCombatInitiationOpen()) {
+      this.combatTrackerDrawerOpen.set(true);
+      return;
+    }
+
+    const staleTokens = this.sceneTokens().filter(
+      (t) =>
+        t.npc_stats?.__in_combat !== undefined ||
+        t.npc_stats?.__initiative !== undefined ||
+        t.npc_stats?.__initiative_mod !== undefined
+    );
+    for (const tok of staleTokens) {
+      await this.patchToken(tok.id, {
+        npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
+      });
+    }
+
+    this.combatTrackerDrawerOpen.set(true);
+    await this.patchScene(sc.id, {
+      initiative_order: [VTT_INITIATION_PHASE_SENTINEL],
+      active_turn_token_id: null,
+    });
+
+    if (!silentLog) {
+      await this.postLog({
+        kind: 'round',
+        title: 'Combat Initiation — Roll Initiative!',
+        detail: 'Roll Initiative (2d10 + Cunning) to enter the Combat Tracker.',
+      });
+    }
   }
 
   async rollInitiativeForTokens(tokenIds: readonly string[]): Promise<void> {
@@ -7594,10 +7730,20 @@ export class VttStore {
       );
     if (targets.length === 0) return;
 
+    if (this.isGm() && !sc.combat_active && !this.isCombatInitiationOpen()) {
+      await this.initiateCombatPhase(true);
+    }
+
+    const activeSc = this.activeScene() ?? sc;
+    const canEnrollInTracker =
+      activeSc.combat_active || this.isCombatInitiationOpen();
+
     const manual = this.manualRollOverride();
     let playedCue = false;
 
-    for (const tok of targets) {
+    for (const startTok of targets) {
+      const tok =
+        this.sceneTokens().find((t) => t.id === startTok.id) ?? startTok;
       const { mod, govAttr } = this.resolveTokenInitiativeInfo(tok);
       const roll =
         manual !== null
@@ -7607,13 +7753,16 @@ export class VttStore {
       const vis = this.resolveTokenVisuals(tok);
       const fullLabel = `${tok.name} · Initiative`;
 
-      await this.patchToken(tok.id, {
-        npc_stats: {
-          ...(tok.npc_stats ?? {}),
-          __initiative: roll.total,
-          __initiative_mod: mod,
-        },
-      });
+      if (canEnrollInTracker) {
+        await this.patchToken(tok.id, {
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __in_combat: true,
+            __initiative: roll.total,
+            __initiative_mod: mod,
+          },
+        });
+      }
 
       const speakerVisualExtras: Record<string, unknown> = {
         speaker_color: tok.color || '#38B29A',
@@ -7663,35 +7812,306 @@ export class VttStore {
       });
     }
 
+    if (!canEnrollInTracker) {
+      return;
+    }
+
+    const latestAfterRoll = this.activeScene() ?? activeSc;
+    if (!latestAfterRoll.combat_active) {
+      this.combatTrackerDrawerOpen.set(true);
+    }
+
     if (this.isGm()) {
-      const visible = this.sceneTokens().filter((t) => !t.is_hidden);
-      if (visible.length > 0) {
-        const nextOrder = this.buildInitiativeOrderForTokens(visible);
-        await this.patchScene(sc.id, {
-          initiative_order: nextOrder,
-          ...(sc.combat_active && !sc.active_turn_token_id
-            ? { active_turn_token_id: nextOrder[0] ?? null }
-            : {}),
-        });
+      const enrolled = this.allEnrolledCombatTokens();
+      const nextIds = enrolled.map((t) => t.id);
+      const nextOrder = this.buildSceneInitiativeOrder(
+        latestAfterRoll,
+        nextIds,
+        !latestAfterRoll.combat_active
+      );
+      const firstLivingId =
+        enrolled.find((t) => t.current_hp > 0 && !t.is_hidden)?.id ??
+        enrolled.find((t) => t.current_hp > 0)?.id ??
+        nextIds[0] ??
+        null;
+      await this.patchScene(sc.id, {
+        initiative_order: nextOrder,
+        ...(latestAfterRoll.combat_active && !latestAfterRoll.active_turn_token_id
+          ? { active_turn_token_id: firstLivingId }
+          : {}),
+      });
+    }
+  }
+
+  async rollInitiativeForMyTokens(): Promise<void> {
+    const pending = this.unrolledControllableTokens().map((t) => t.id);
+    if (pending.length > 0) {
+      await this.rollInitiativeForTokens(pending);
+      return;
+    }
+    const mine = this.sceneTokens()
+      .filter((t) => !t.is_hidden && this.canControlToken(t))
+      .map((t) => t.id);
+    if (mine.length > 0) {
+      await this.rollInitiativeForTokens(mine);
+    }
+  }
+
+  private isGmNpcToken(tok: VttTokenModel): boolean {
+    const sc = this.activeScene();
+    const gmId = this.campaign()?.gm_id ?? sc?.gm_id ?? null;
+    if (tok.owner_id && tok.owner_id !== gmId) {
+      return false;
+    }
+    if (this.resolveCharacterForToken(tok)) {
+      return false;
+    }
+    const actor = this.resolveRosterActorForToken(tok);
+    if (actor) {
+      return actor.actor_kind === 'npc';
+    }
+    return tok.faction !== 'ally';
+  }
+
+  async rollInitiativeForSceneNpcs(): Promise<void> {
+    if (!this.isGm()) return;
+    const sc = this.activeScene();
+    if (sc && !sc.combat_active && !this.isCombatInitiationOpen()) {
+      await this.initiateCombatPhase(true);
+    }
+    const npcs = this.sceneTokens().filter(
+      (t) =>
+        this.isGmNpcToken(t) &&
+        (!t.is_hidden || t.npc_stats?.__in_combat === true)
+    );
+    if (npcs.length === 0) return;
+    const unrolled = npcs.filter(
+      (t) =>
+        typeof t.npc_stats?.__initiative !== 'number' ||
+        t.npc_stats?.__in_combat === false
+    );
+    const targetIds = (unrolled.length > 0 ? unrolled : npcs).map((t) => t.id);
+    await this.rollInitiativeForTokens(targetIds);
+  }
+
+  async rollInitiativeForAllSceneTokens(): Promise<void> {
+    if (!this.isGm()) return;
+    const sc = this.activeScene();
+    if (sc && !sc.combat_active && !this.isCombatInitiationOpen()) {
+      await this.initiateCombatPhase(true);
+    }
+    const candidates = this.sceneTokens().filter(
+      (t) => !t.is_hidden || t.npc_stats?.__in_combat === true
+    );
+    if (candidates.length === 0) return;
+    const unrolled = candidates.filter(
+      (t) =>
+        typeof t.npc_stats?.__initiative !== 'number' ||
+        t.npc_stats?.__in_combat === false
+    );
+    const targetIds = (unrolled.length > 0 ? unrolled : candidates).map(
+      (t) => t.id
+    );
+    await this.rollInitiativeForTokens(targetIds);
+  }
+
+  async addTokensToCombat(tokenIds: readonly string[]): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc) return;
+    if (!sc.combat_active && !this.isCombatInitiationOpen() && !this.isGm()) {
+      return;
+    }
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.sceneTokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          t !== undefined && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+
+    if (this.isGm() && !sc.combat_active && !this.isCombatInitiationOpen()) {
+      await this.initiateCombatPhase(true);
+    }
+
+    for (const startTok of targets) {
+      const tok =
+        this.sceneTokens().find((t) => t.id === startTok.id) ?? startTok;
+      await this.patchToken(tok.id, {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __in_combat: true,
+        },
+      });
+    }
+
+    const latestScene = this.activeScene() ?? sc;
+    if (!latestScene.combat_active) {
+      this.combatTrackerDrawerOpen.set(true);
+    }
+
+    if (this.isGm()) {
+      const enrolled = this.allEnrolledCombatTokens();
+      await this.patchScene(sc.id, {
+        initiative_order: this.buildSceneInitiativeOrder(
+          latestScene,
+          enrolled.map((t) => t.id),
+          !latestScene.combat_active
+        ),
+      });
+    }
+  }
+
+  async setTokenInitiativeScore(
+    tokenId: string,
+    score: number | null
+  ): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm()) return;
+    if (!sc.combat_active && !this.isCombatInitiationOpen()) {
+      await this.initiateCombatPhase(true);
+    }
+    const tok = this.sceneTokens().find((t) => t.id === tokenId);
+    if (!tok) return;
+
+    const { mod } = this.resolveTokenInitiativeInfo(tok);
+    const nextStats: VttNpcStats = {
+      ...(tok.npc_stats ?? {}),
+      __in_combat: true,
+      __initiative_mod:
+        typeof tok.npc_stats?.__initiative_mod === 'number'
+          ? tok.npc_stats.__initiative_mod
+          : mod,
+    };
+    if (score === null || !Number.isFinite(score)) {
+      delete nextStats.__initiative;
+    } else {
+      nextStats.__initiative = Math.round(score);
+    }
+
+    await this.patchToken(tok.id, { npc_stats: nextStats });
+    const latestScene = this.activeScene() ?? sc;
+    const nextIds = this.allEnrolledCombatTokens().map((t) => t.id);
+    await this.patchScene(sc.id, {
+      initiative_order: this.buildSceneInitiativeOrder(latestScene, nextIds),
+    });
+  }
+
+  async removeTokenFromCombat(tokenId: string): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm()) return;
+    const tok = this.sceneTokens().find((t) => t.id === tokenId);
+    if (!tok) return;
+
+    let replacementActiveId: string | null | undefined = undefined;
+    if (sc.combat_active && sc.active_turn_token_id === tokenId) {
+      const currentOrder = this.allEnrolledCombatTokens().filter(
+        (t) => t.current_hp > 0 && (t.id === tokenId || !t.is_hidden)
+      );
+      const currIdx = currentOrder.findIndex((t) => t.id === tokenId);
+      const remaining = currentOrder.filter((t) => t.id !== tokenId);
+      if (remaining.length === 0) {
+        replacementActiveId = null;
+      } else {
+        const nextIdx = currIdx >= 0 ? currIdx % remaining.length : 0;
+        replacementActiveId = remaining[nextIdx].id;
       }
     }
+
+    await this.patchToken(tok.id, {
+      npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
+    });
+
+    const filteredPrevIds = (sc.initiative_order ?? []).filter(
+      (id) => id !== tokenId && id !== VTT_INITIATION_PHASE_SENTINEL
+    );
+    const filteredPrevOrder = this.buildSceneInitiativeOrder(
+      sc,
+      filteredPrevIds
+    );
+    await this.patchScene(sc.id, {
+      initiative_order: filteredPrevOrder,
+      ...(replacementActiveId !== undefined
+        ? { active_turn_token_id: replacementActiveId }
+        : {}),
+    });
+
+    const latestScene = this.activeScene() ?? sc;
+    const finalOrder = this.buildSceneInitiativeOrder(
+      latestScene,
+      this.allEnrolledCombatTokens().map((t) => t.id)
+    );
+    if (
+      finalOrder.length !== filteredPrevOrder.length ||
+      finalOrder.some((id, idx) => id !== filteredPrevOrder[idx])
+    ) {
+      await this.patchScene(sc.id, { initiative_order: finalOrder });
+    }
+  }
+
+  async clearInitiativeLobby(): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !this.isGm()) return;
+
+    const toReset = this.sceneTokens().filter(
+      (t) =>
+        t.npc_stats?.__in_combat !== undefined ||
+        t.npc_stats?.__initiative !== undefined ||
+        t.npc_stats?.__initiative_mod !== undefined
+    );
+    for (const tok of toReset) {
+      await this.patchToken(tok.id, {
+        npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
+      });
+    }
+
+    this.combatTrackerDrawerOpen.set(false);
+    await this.patchScene(sc.id, {
+      combat_active: false,
+      round_number: 1,
+      initiative_order: [],
+      active_turn_token_id: null,
+      pending_clash: null,
+    });
   }
 
   async startCombatEncounter(): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
-    const visible = this.sceneTokens().filter((t) => !t.is_hidden);
-    if (visible.length === 0) return;
 
-    const orderedIds = this.buildInitiativeOrderForTokens(visible);
-    const firstId = orderedIds[0] ?? null;
-    for (const tok of visible) {
+    let combatants = this.allEnrolledCombatTokens();
+    if (combatants.length === 0) {
+      const visible = this.sceneTokens().filter((t) => !t.is_hidden);
+      if (visible.length === 0) return;
+      combatants = this.sortCombatantTokens(visible);
+    }
+
+    const cleanPrevOrder = (sc.initiative_order ?? []).filter(
+      (id) => id !== VTT_INITIATION_PHASE_SENTINEL
+    );
+    const orderedCombatants = this.sortCombatantTokens(
+      combatants,
+      cleanPrevOrder
+    );
+    const orderedIds = orderedCombatants.map((t) => t.id);
+    const firstId =
+      orderedCombatants.find((t) => t.current_hp > 0 && !t.is_hidden)?.id ??
+      orderedCombatants.find((t) => t.current_hp > 0)?.id ??
+      orderedIds[0] ??
+      null;
+
+    for (const tok of orderedCombatants) {
       await this.patchToken(tok.id, {
         current_ap: tok.max_ap,
         shield_raised: false,
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __in_combat: true,
+        },
       });
     }
 
+    this.combatTrackerDrawerOpen.set(false);
     await this.patchScene(sc.id, {
       combat_active: true,
       round_number: 1,
@@ -7702,7 +8122,7 @@ export class VttStore {
     await this.postLog({
       kind: 'round',
       title: 'Combat Started — Round 1',
-      detail: `${orderedIds.length} combatants ready · All AP refreshed`,
+      detail: `${orderedIds.length} combatant${orderedIds.length === 1 ? '' : 's'} in turn order · All AP refreshed`,
     });
   }
 
@@ -7717,7 +8137,14 @@ export class VttStore {
       return;
     }
 
-    const order = this.initiativeTokens().filter((t) => t.current_hp > 0);
+    const allCombatants = this.allEnrolledCombatTokens();
+    const visibleLiving = allCombatants.filter(
+      (t) => t.current_hp > 0 && !t.is_hidden
+    );
+    const order =
+      visibleLiving.length > 0
+        ? visibleLiving
+        : allCombatants.filter((t) => t.current_hp > 0);
     if (order.length === 0) return;
 
     const currIdx = order.findIndex((t) => t.id === sc.active_turn_token_id);
@@ -7757,7 +8184,7 @@ export class VttStore {
     await this.patchScene(sc.id, {
       round_number: nextRound,
       active_turn_token_id: nextTok.id,
-      initiative_order: order.map((t) => t.id),
+      initiative_order: allCombatants.map((t) => t.id),
     });
 
     await this.postLog({
@@ -7767,19 +8194,97 @@ export class VttStore {
     });
   }
 
+  async previousTurn(): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !sc.combat_active || !this.isGm()) return;
+
+    const allCombatants = this.allEnrolledCombatTokens();
+    const visibleLiving = allCombatants.filter(
+      (t) => t.current_hp > 0 && !t.is_hidden
+    );
+    const order =
+      visibleLiving.length > 0
+        ? visibleLiving
+        : allCombatants.filter((t) => t.current_hp > 0);
+    if (order.length === 0) return;
+
+    const currIdx = order.findIndex((t) => t.id === sc.active_turn_token_id);
+    const wrappedBack = currIdx <= 0;
+    const prevIdx = wrappedBack ? order.length - 1 : currIdx - 1;
+    const prevTok = order[prevIdx];
+    const prevRound =
+      currIdx === 0 ? Math.max(1, sc.round_number - 1) : sc.round_number;
+
+    await this.patchToken(prevTok.id, {
+      current_ap: prevTok.max_ap,
+      shield_raised: false,
+    });
+
+    await this.patchScene(sc.id, {
+      round_number: prevRound,
+      active_turn_token_id: prevTok.id,
+      initiative_order: allCombatants.map((t) => t.id),
+    });
+
+    await this.postLog({
+      kind: 'round',
+      title: `Round ${prevRound} — ${prevTok.name}'s Turn`,
+      detail: `Turn rewound by GM · AP refreshed to ${prevTok.max_ap}`,
+    });
+  }
+
+  async setActiveCombatTurn(tokenId: string): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc || !sc.combat_active || !this.isGm()) return;
+    const tok = this.allEnrolledCombatTokens().find((t) => t.id === tokenId);
+    if (!tok) return;
+
+    await this.patchToken(tok.id, {
+      current_ap: tok.max_ap,
+      shield_raised: false,
+    });
+
+    await this.patchScene(sc.id, {
+      active_turn_token_id: tok.id,
+      initiative_order: this.allEnrolledCombatTokens().map((t) => t.id),
+    });
+
+    await this.postLog({
+      kind: 'round',
+      title: `Round ${sc.round_number} — ${tok.name}'s Turn`,
+      detail: `Active turn set by GM · AP refreshed to ${tok.max_ap}`,
+    });
+  }
+
   async endCombatEncounter(): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
+
+    const toReset = this.sceneTokens().filter(
+      (t) =>
+        t.npc_stats?.__in_combat !== undefined ||
+        t.npc_stats?.__initiative !== undefined ||
+        t.npc_stats?.__initiative_mod !== undefined
+    );
+    for (const tok of toReset) {
+      await this.patchToken(tok.id, {
+        npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
+      });
+    }
+
+    this.combatTrackerDrawerOpen.set(false);
     await this.patchScene(sc.id, {
       combat_active: false,
+      round_number: 1,
       active_turn_token_id: null,
+      initiative_order: [],
       pending_clash: null,
     });
     this.enforceApOnMove.set(false);
     await this.postLog({
       kind: 'round',
       title: 'Combat Ended',
-      detail: 'Returned to exploration mode.',
+      detail: 'Initiative order cleared.',
     });
   }
 

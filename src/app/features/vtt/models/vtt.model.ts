@@ -287,6 +287,7 @@ export interface VttNpcStats {
   __rotation?: number;
   __initiative?: number;
   __initiative_mod?: number;
+  __in_combat?: boolean;
   __portrait_url?: string | null;
   __token_image_url?: string | null;
   __token_appearance?: TokenAppearanceConfig;
@@ -295,6 +296,8 @@ export interface VttNpcStats {
   __source_preset_id?: string | null;
   __character_sheet?: CharacterModel | null;
 }
+
+export const VTT_INITIATION_PHASE_SENTINEL = '__phase1_open__';
 
 export function normalizeNpcAttributes(
   raw?: Partial<Record<AttributeName, number>> | null

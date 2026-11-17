@@ -21,8 +21,13 @@
   [style.zIndex]="zIndex()"
 >
   <div
+    data-vtt-floating-header="true"
     (pointerdown)="onHeaderPointerDown($event)"
-    class="flex shrink-0 cursor-move select-none items-start justify-between gap-2.5 px-4 py-3"
+    class="flex shrink-0 cursor-move select-none items-start justify-between gap-2"
+    [class.px-3]="compactHeader()"
+    [class.py-2]="compactHeader()"
+    [class.px-4]="!compactHeader()"
+    [class.py-3]="!compactHeader()"
     [class.rounded-t-2xl]="allowOverflow() && !minimized()"
     [class.rounded-2xl]="allowOverflow() && minimized()"
     [class.border-b]="!minimized()"

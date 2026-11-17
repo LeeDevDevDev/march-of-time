@@ -77,6 +77,8 @@ import { CollectionsStore } from '../collections/collections.store';
 import { VttActionHudComponent } from './components/vtt-action-hud/vtt-action-hud.component';
 import { VttActorSheetComponent } from './components/vtt-actor-sheet/vtt-actor-sheet.component';
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
+import { VttCombatCarouselComponent } from './components/vtt-combat-carousel/vtt-combat-carousel.component';
+import { VttCombatTrackerWindowComponent } from './components/vtt-combat-tracker-window/vtt-combat-tracker-window.component';
 import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
 import { VttFloatingWindowComponent } from './components/vtt-floating-window/vtt-floating-window.component';
 import { VttTokenizerWindowComponent } from './components/vtt-tokenizer-window/vtt-tokenizer-window.component';
@@ -244,6 +246,8 @@ export interface EditingMapDraft {
     VttActionHudComponent,
     VttActorSheetComponent,
     VttCanvasComponent,
+    VttCombatCarouselComponent,
+    VttCombatTrackerWindowComponent,
     VttDiceOverlayComponent,
     VttFloatingWindowComponent,
     VttTokenizerWindowComponent,
@@ -815,6 +819,11 @@ export class VttRoomComponent {
     });
   });
 
+  private lastTrackerSceneId: string | null = null;
+  private lastTrackerPhase1Open = false;
+  private lastTrackerCombatActive = false;
+  private lastTrackerEnrolledCount = 0;
+
   constructor() {
     const sub = this.route.paramMap.subscribe((params) => {
       const campaignId = params.get('campaignId');
@@ -826,6 +835,51 @@ export class VttRoomComponent {
     this.destroyRef.onDestroy(() => {
       sub.unsubscribe();
       this.vttStore.leaveRoom();
+    });
+
+    effect(() => {
+      const sc = this.vttStore.activeScene();
+      const phase1Open = this.vttStore.isCombatInitiationOpen();
+      const count = this.vttStore.enrolledCombatTokens().length;
+      if (!sc) {
+        this.lastTrackerSceneId = null;
+        this.lastTrackerPhase1Open = false;
+        this.lastTrackerCombatActive = false;
+        this.lastTrackerEnrolledCount = 0;
+        return;
+      }
+      if (this.lastTrackerSceneId !== sc.id) {
+        this.lastTrackerSceneId = sc.id;
+        this.lastTrackerPhase1Open = phase1Open;
+        this.lastTrackerCombatActive = sc.combat_active;
+        this.lastTrackerEnrolledCount = count;
+        if (phase1Open) {
+          this.vttStore.combatTrackerDrawerOpen.set(true);
+        }
+        return;
+      }
+      const prevPhase1Open = this.lastTrackerPhase1Open;
+      const prevCombatActive = this.lastTrackerCombatActive;
+      const prevCount = this.lastTrackerEnrolledCount;
+      this.lastTrackerPhase1Open = phase1Open;
+      this.lastTrackerCombatActive = sc.combat_active;
+      this.lastTrackerEnrolledCount = count;
+
+      if (!prevCombatActive && sc.combat_active) {
+        this.vttStore.combatTrackerDrawerOpen.set(false);
+        return;
+      }
+      if (!prevPhase1Open && phase1Open) {
+        this.vttStore.combatTrackerDrawerOpen.set(true);
+        return;
+      }
+      if (prevPhase1Open && !phase1Open && !sc.combat_active) {
+        this.vttStore.combatTrackerDrawerOpen.set(false);
+        return;
+      }
+      if (phase1Open && count > prevCount && count > 0) {
+        this.vttStore.combatTrackerDrawerOpen.set(true);
+      }
     });
 
     effect(() => {
