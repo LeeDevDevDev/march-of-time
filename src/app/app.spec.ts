@@ -3792,7 +3792,7 @@ describe('App', () => {
     roomFixture.detectChanges();
     expect(
       (roomFixture.nativeElement as HTMLElement).textContent ?? ''
-    ).toContain('Clear Log');
+    ).toContain('Clear Chat');
 
     roomComp.requestClearAllLogs();
     expect(roomComp.confirmClearLogs()).toBe(true);
@@ -5097,7 +5097,7 @@ describe('App', () => {
     const logPanelText = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(logPanelText).not.toContain('1 Entry');
     expect(logPanelText).not.toContain('Entries');
-    expect(logPanelText).toContain('Clear Log');
+    expect(logPanelText).toContain('Clear Chat');
 
     comp.onChatInputChange('Welcome to the session!');
     await comp.sendChatMessage();
@@ -13519,5 +13519,658 @@ describe('App', () => {
     expect(
       isHexStraddlingMapBorder({ col: movedTok.x, row: movedTok.y }, nextLayout)
     ).toBe(false);
+  });
+
+  it('should label the VTT feed as Chat, keep speaker toggle height locked, render prominent roll totals with Flat DMG, and keep Clash resolution concise with conditional SP and HP damage pills', async () => {
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-chat-1',
+      email: 'gm@test.com',
+    });
+    let logSeq = 1;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-chat-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-chat-ui',
+      gm_id: 'gm-chat-1',
+      name: 'Chat Polish Campaign',
+      cover_image_url: null,
+      invite_code: 'CHAT01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-chat-1',
+        campaign_id: 'camp-chat-ui',
+        gm_id: 'gm-chat-1',
+        folder_id: null,
+        name: 'Courtyard',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: 1600,
+        scene_height: 1100,
+        padding: 0.2,
+        grid_width: 24,
+        grid_height: 16,
+        grid_size_px: 100,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: true,
+        round_number: 1,
+        active_turn_token_id: 'tok-att',
+        initiative_order: ['tok-att', 'tok-def'],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-chat-1');
+    vttStore.tokens.set([
+      {
+        id: 'tok-att',
+        encounter_id: 'scene-chat-1',
+        character_id: null,
+        owner_id: 'gm-chat-1',
+        name: 'Iron Vanguard',
+        faction: 'ally',
+        x: 5,
+        y: 5,
+        q: 5,
+        r: 5,
+        size: 1,
+        icon: 'greatsword',
+        color: '#38B29A',
+        token_image_url: 'https://cdn.example.com/vanguard-token.png',
+        current_hp: 20,
+        max_hp: 20,
+        current_sp: 6,
+        max_sp: 6,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          weapon_name: 'Halberd Strike',
+          attack_mod: 4,
+          flat_damage: 7,
+          reach_feet: 10,
+        },
+      },
+      {
+        id: 'tok-def',
+        encounter_id: 'scene-chat-1',
+        character_id: null,
+        owner_id: null,
+        name: 'Ash Raider',
+        faction: 'enemy',
+        x: 6,
+        y: 5,
+        q: 6,
+        r: 5,
+        size: 1,
+        icon: 'axe',
+        color: '#F43F5E',
+        current_hp: 15,
+        max_hp: 15,
+        current_sp: 0,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          dodge_mod: 2,
+          can_dodge: true,
+        },
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const chatTabBtn = rootEl.querySelector(
+      'button[data-sidebar-tab="chat"]'
+    ) as HTMLButtonElement | null;
+    expect(chatTabBtn).toBeTruthy();
+    expect(chatTabBtn!.textContent?.trim()).toBe('Chat');
+
+    const toolbarUnselected = rootEl.querySelector(
+      '[data-chat-composer-toolbar="true"]'
+    ) as HTMLElement | null;
+    const gmToggleUnselected = rootEl.querySelector(
+      '[data-chat-speaker-toggle="gm"]'
+    ) as HTMLElement | null;
+    expect(toolbarUnselected?.className).toContain('h-7');
+    expect(gmToggleUnselected?.className).toContain('h-7');
+
+    vttStore.selectedTokenId.set('tok-att');
+    fixture.detectChanges();
+
+    const gmToggleSelected = rootEl.querySelector(
+      '[data-chat-speaker-toggle="gm"]'
+    ) as HTMLElement | null;
+    expect(gmToggleSelected?.className).toContain('h-7');
+    expect(gmToggleSelected?.textContent).toContain('Iron Vanguard');
+
+    vttStore.manualRollOverride.set(19);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.rollPendingActionFreeform();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const rollTotalBadge = rootEl.querySelector(
+      '[data-roll-total-badge="true"]'
+    ) as HTMLElement | null;
+    const rollFlatDmgBadge = rootEl.querySelector(
+      '[data-roll-flat-dmg="true"]'
+    ) as HTMLElement | null;
+    expect(rollTotalBadge).toBeTruthy();
+    expect(rollTotalBadge!.textContent?.trim()).toBe('19');
+    expect(rollFlatDmgBadge).toBeTruthy();
+    expect(rollFlatDmgBadge!.textContent?.trim()).toBe('7 DMG');
+    expect(rollFlatDmgBadge!.textContent).not.toContain('Flat');
+
+    vttStore.manualRollOverride.set(20);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    await vttStore.declareClashReaction('dodge', 11);
+    await vttStore.applyPendingClashOutcome();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const fullChatText = rootEl.textContent ?? '';
+    expect(fullChatText).not.toContain('Caught Mid-Dodge');
+    expect(fullChatText).not.toContain('Flat DMG');
+
+    const clashOutcomeEl = rootEl.querySelector(
+      '[data-chat-clash-outcome="true"]'
+    ) as HTMLElement | null;
+    expect(clashOutcomeEl).toBeTruthy();
+    expect(clashOutcomeEl!.textContent).toContain(
+      'Attack Succeeded · Dodge Failed'
+    );
+    expect(
+      clashOutcomeEl!.querySelector('[data-clash-sp-dmg="true"]')
+    ).toBeNull();
+    const hpDmgPill = clashOutcomeEl!.querySelector(
+      '[data-clash-hp-dmg="true"]'
+    ) as HTMLElement | null;
+    expect(hpDmgPill).toBeTruthy();
+    expect(hpDmgPill!.textContent?.replace(/\s+/g, ' ').trim()).toContain(
+      '6 HP'
+    );
+  });
+
+  it('gates skill cooldowns to active combat initiative and refreshes AP for everyone on round start', async () => {
+    TestBed.resetTestingModule();
+    let logSeq = 1;
+    const activeUserSig = signal<{ id: string; email: string } | null>({
+      id: 'gm-round-1',
+      email: 'gm-round@marchoftime.test',
+    });
+
+    const sunderArtNode: PerkNodeModel = {
+      id: 'node-round-sunder',
+      tree_id: 'tree-round-1',
+      slug: 'sunder-strike',
+      parent_node_id: null,
+      tier: 1,
+      name: 'Sunder Strike',
+      node_type: 'combat_art',
+      perk_cost: 1,
+      ap_cost: 2,
+      cooldown_rounds: 2,
+      combat_tag: 'Crushing',
+      description: 'Heavy strike.',
+      rule_hooks: { bonus_flat_damage: 3 },
+      is_active: true,
+    };
+
+    const pcSheet: CharacterModel = {
+      id: 'char-round-pc',
+      owner_id: 'gm-round-1',
+      name: 'Swift Duelist',
+      level: 2,
+      attributes: {
+        Brawn: 3,
+        Agility: 3,
+        Iron: 2,
+        Technique: 3,
+        Cunning: 3,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 2,
+        Dodge: 2,
+        Block: 0,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 1,
+        Tinkering: 0,
+        Medicine: 0,
+        Survival: 0,
+        Resolve: 1,
+        Perception: 1,
+        Sway: 0,
+        Lore: 0,
+      },
+      unlocked_perk_ids: ['node-round-sunder'],
+      weapon_slot_1_id: null,
+      weapon_slot_2_id: null,
+      active_weapon_slot: 1,
+      equipped_armor: 'Light',
+      equipped_shield: 'None',
+      current_hp: 18,
+      current_sp: 6,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [],
+      notes: '',
+      portrait_url: null,
+      created_at: new Date().toISOString(),
+    };
+
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([sunderArtNode]),
+            perkNodes: signal([sunderArtNode]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateRosterActor: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-round-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-round-ap',
+      gm_id: 'gm-round-1',
+      name: 'Round AP Campaign',
+      cover_image_url: null,
+      invite_code: 'RNDAP1',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-round-1',
+        campaign_id: 'camp-round-ap',
+        gm_id: 'gm-round-1',
+        folder_id: null,
+        name: 'Arena',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: 1200,
+        scene_height: 900,
+        padding: 0.2,
+        grid_width: 24,
+        grid_height: 18,
+        grid_size_px: 50,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: false,
+        round_number: 1,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-round-1');
+    vttStore.tokens.set([
+      {
+        id: 'tok-pc-fast',
+        encounter_id: 'scene-round-1',
+        character_id: null,
+        owner_id: 'gm-round-1',
+        name: 'Swift Duelist',
+        faction: 'ally',
+        x: 4,
+        y: 4,
+        q: 4,
+        r: 4,
+        size: 1,
+        icon: 'sword',
+        color: '#38B29A',
+        current_hp: 18,
+        max_hp: 18,
+        current_sp: 6,
+        max_sp: 6,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          __character_sheet: pcSheet,
+          __initiative: 18,
+          __in_combat: true,
+        },
+      },
+      {
+        id: 'tok-npc-slow',
+        encounter_id: 'scene-round-1',
+        character_id: null,
+        owner_id: null,
+        name: 'Slow Brute',
+        faction: 'enemy',
+        x: 5,
+        y: 4,
+        q: 5,
+        r: 4,
+        size: 1,
+        icon: 'axe',
+        color: '#F43F5E',
+        current_hp: 20,
+        max_hp: 20,
+        current_sp: 4,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          dodge_mod: 2,
+          can_dodge: true,
+          __initiative: 8,
+          __in_combat: true,
+        },
+      },
+    ]);
+
+    const initialPcTok = vttStore.tokens()[0];
+    const initialPcChar = vttStore.resolveCharacterForToken(initialPcTok)!;
+    const initialStats = computeDerivedStats(
+      initialPcChar,
+      [],
+      [sunderArtNode],
+      DEFAULT_COMPENDIUM_ARMORS
+    );
+    const sunderResolved = initialStats.resolvedCombatArts[0];
+    expect(sunderResolved).toBeTruthy();
+    expect(sunderResolved.cooldownRounds).toBe(2);
+
+    vttStore.manualRollOverride.set(17);
+    vttStore.beginCombatArtTargetSelection(
+      initialPcTok,
+      sunderResolved,
+      initialStats
+    );
+    await vttStore.rollPendingActionFreeform();
+
+    const pcCharOutsideCombat = vttStore.resolveCharacterForToken(
+      vttStore.tokens().find((t) => t.id === 'tok-pc-fast')!
+    )!;
+    expect(
+      vttStore.getPerkCooldown(pcCharOutsideCombat, 'node-round-sunder')
+    ).toBe(0);
+
+    await vttStore.startCombatEncounter();
+    expect(vttStore.activeScene()?.combat_active).toBe(true);
+    expect(vttStore.activeScene()?.round_number).toBe(1);
+    expect(vttStore.activeScene()?.active_turn_token_id).toBe('tok-pc-fast');
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-pc-fast')?.current_ap
+    ).toBe(4);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-npc-slow')?.current_ap
+    ).toBe(4);
+
+    const r1PcTok = vttStore.tokens().find((t) => t.id === 'tok-pc-fast')!;
+    const r1PcChar = vttStore.resolveCharacterForToken(r1PcTok)!;
+    const r1Stats = computeDerivedStats(
+      r1PcChar,
+      [],
+      [sunderArtNode],
+      DEFAULT_COMPENDIUM_ARMORS
+    );
+    vttStore.manualRollOverride.set(18);
+    vttStore.beginCombatArtTargetSelection(
+      r1PcTok,
+      r1Stats.resolvedCombatArts[0],
+      r1Stats
+    );
+    await vttStore.launchClashAgainstTarget('tok-npc-slow');
+    await vttStore.declareClashReaction('dodge', 12);
+    await vttStore.applyPendingClashOutcome();
+
+    const pcAfterR1Attack = vttStore.tokens().find(
+      (t) => t.id === 'tok-pc-fast'
+    )!;
+    expect(pcAfterR1Attack.current_ap).toBe(2);
+    expect(
+      vttStore.getPerkCooldown(
+        vttStore.resolveCharacterForToken(pcAfterR1Attack),
+        'node-round-sunder'
+      )
+    ).toBe(2);
+
+    await vttStore.patchToken('tok-npc-slow', { current_ap: 0 });
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-npc-slow')?.current_ap
+    ).toBe(0);
+
+    await vttStore.advanceTurn();
+    expect(vttStore.activeScene()?.round_number).toBe(1);
+    expect(vttStore.activeScene()?.active_turn_token_id).toBe('tok-npc-slow');
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-npc-slow')?.current_ap
+    ).toBe(0);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-pc-fast')?.current_ap
+    ).toBe(2);
+
+    await vttStore.advanceTurn();
+    expect(vttStore.activeScene()?.round_number).toBe(2);
+    expect(vttStore.activeScene()?.active_turn_token_id).toBe('tok-pc-fast');
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-pc-fast')?.current_ap
+    ).toBe(4);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-npc-slow')?.current_ap
+    ).toBe(4);
+    expect(
+      vttStore.getPerkCooldown(
+        vttStore.resolveCharacterForToken(
+          vttStore.tokens().find((t) => t.id === 'tok-pc-fast')!
+        ),
+        'node-round-sunder'
+      )
+    ).toBe(1);
+
+    await vttStore.endCombatEncounter();
+    expect(
+      vttStore.getPerkCooldown(
+        vttStore.resolveCharacterForToken(
+          vttStore.tokens().find((t) => t.id === 'tok-pc-fast')!
+        ),
+        'node-round-sunder'
+      )
+    ).toBe(0);
   });
 });

@@ -90,6 +90,7 @@ import {
   getPrimaryCommandTrigger,
   resolveSlashCommand,
 } from './config/vtt-commands.config';
+import { formatClashOutcomeStatus } from './engine/clash.engine';
 import {
   DicePoolCounts,
   POLYHEDRAL_DIE_TYPES,
@@ -173,6 +174,39 @@ export type VttSidebarTab =
 export type VttCompendiumPackKind = 'weapons' | 'armors' | 'items' | 'skills';
 export type VttSettingsModalKind = 'general' | 'dice' | 'controls' | 'invites';
 export type EditSceneModalTab = 'general' | 'grid' | 'visibility';
+
+export interface VttRollCardView {
+  label: string;
+  formula: string | null;
+  total: number;
+  flatDamage: number | null;
+  combatTags: ActiveCombatTag[];
+  subNote: string | null;
+}
+
+export interface VttClashRollCardView {
+  attackerName: string;
+  defenderName: string;
+  actionName: string;
+  attackTotal: number;
+  defenseLabel: string;
+  defenseTotal: number | null;
+  hitLanded: boolean;
+  statusLabel: string;
+  flatDamage: number | null;
+}
+
+export interface VttClashOutcomeCardView {
+  attackerName: string;
+  defenderName: string;
+  actionName: string;
+  hitLanded: boolean;
+  statusLabel: string;
+  spDamage: number;
+  hpDamage: number;
+  counterSp: number;
+  statuses: string[];
+}
 export type VttRosterImportTab =
   | 'my-characters'
   | 'collections'
@@ -2836,6 +2870,224 @@ export class VttRoomComponent {
   getLogRollChips(entry: VttLogEntry): RolledDieChip[] {
     if (entry.kind !== 'roll' && entry.kind !== 'clash') return [];
     return extractLogRollChips(entry.payload);
+  }
+
+  getRollCardView(entry: VttLogEntry): VttRollCardView | null {
+    if (entry.kind !== 'roll') return null;
+    const payload = entry.payload ?? {};
+    if (payload['clash_roll']) return null;
+
+    const rollObj =
+      payload['roll'] && typeof payload['roll'] === 'object'
+        ? (payload['roll'] as Record<string, unknown>)
+        : null;
+    const rawTotal =
+      typeof payload['total'] === 'number'
+        ? payload['total']
+        : typeof rollObj?.['total'] === 'number'
+          ? (rollObj['total'] as number)
+          : null;
+
+    let total = rawTotal;
+    if (total === null || !Number.isFinite(total)) {
+      const arrowMatch = entry.title.match(/→\s*(-?\d+)\s*$/);
+      if (!arrowMatch) return null;
+      total = Number(arrowMatch[1]);
+      if (!Number.isFinite(total)) return null;
+    }
+
+    let cleanedTitle = entry.title.replace(/\s*→\s*-?\d+\s*$/, '').trim();
+    let extractedFormula: string | null = null;
+    const parenMatch = cleanedTitle.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+    if (parenMatch) {
+      cleanedTitle = parenMatch[1].trim();
+      extractedFormula = parenMatch[2].trim();
+    }
+
+    const senderPrefix = `${entry.sender_name} · `;
+    if (cleanedTitle.startsWith(senderPrefix)) {
+      cleanedTitle = cleanedTitle.slice(senderPrefix.length).trim();
+    }
+
+    const label =
+      typeof payload['action_label'] === 'string' &&
+      payload['action_label'].trim()
+        ? payload['action_label'].trim()
+        : cleanedTitle || 'Roll';
+
+    let formula: string | null =
+      typeof payload['formula'] === 'string' && payload['formula'].trim()
+        ? payload['formula'].trim()
+        : extractedFormula;
+
+    if (!formula && rollObj) {
+      const mode = rollObj['mode'];
+      const mod = Number(rollObj['modifier'] ?? 0);
+      if (mode === 'manual') {
+        formula = 'Manual';
+      } else {
+        const base =
+          rollObj['d3'] !== undefined
+            ? mode === 'advantage'
+              ? '3d10kh2'
+              : '3d10kl2'
+            : '2d10';
+        formula =
+          mod === 0
+            ? base
+            : mod > 0
+              ? `${base} + ${mod}`
+              : `${base} − ${Math.abs(mod)}`;
+      }
+    }
+
+    let flatDamage: number | null =
+      typeof payload['flat_damage'] === 'number' &&
+      Number.isFinite(payload['flat_damage'])
+        ? Math.round(payload['flat_damage'])
+        : null;
+    if (flatDamage === null && entry.detail) {
+      const flatMatch = entry.detail.match(
+        /(\d+)\s*(?:Flat\s+)?(?:DMG|Damage)\b/i
+      );
+      if (flatMatch) {
+        flatDamage = Number(flatMatch[1]);
+      }
+    }
+
+    let combatTags: ActiveCombatTag[] = [];
+    if (Array.isArray(payload['combat_tags'])) {
+      combatTags = payload['combat_tags'].filter(
+        (t): t is ActiveCombatTag =>
+          t === 'Crushing' || t === 'Sweeping' || t === 'Piercing'
+      );
+    } else if (entry.detail) {
+      for (const candidate of [
+        'Crushing',
+        'Sweeping',
+        'Piercing',
+      ] as ActiveCombatTag[]) {
+        if (entry.detail.includes(candidate)) {
+          combatTags.push(candidate);
+        }
+      }
+    }
+
+    let subNote: string | null = null;
+    if (entry.detail) {
+      const trimmedDetail = entry.detail.trim();
+      const looksLikeRawDiceBreakdown =
+        /^\[/.test(trimmedDetail) ||
+        /^2d10\s*\(/i.test(trimmedDetail) ||
+        /^3d10\s*\(/i.test(trimmedDetail) ||
+        /^\d+\s*(?:Flat\s+)?(?:DMG|Damage)$/i.test(trimmedDetail);
+      if (!looksLikeRawDiceBreakdown && trimmedDetail.length > 0) {
+        subNote = trimmedDetail;
+      }
+    }
+
+    return {
+      label,
+      formula,
+      total: Math.round(total),
+      flatDamage,
+      combatTags,
+      subNote,
+    };
+  }
+
+  getClashRollCardView(entry: VttLogEntry): VttClashRollCardView | null {
+    const payload = entry.payload ?? {};
+    if (!payload['clash_roll']) return null;
+
+    const attackerName =
+      typeof payload['attacker_name'] === 'string'
+        ? payload['attacker_name']
+        : entry.sender_name;
+    const defenderName =
+      typeof payload['defender_name'] === 'string'
+        ? payload['defender_name']
+        : 'Defender';
+    const actionName =
+      typeof payload['action_name'] === 'string'
+        ? payload['action_name']
+        : 'Attack';
+    const attackTotal = Number(payload['attack_total'] ?? 0);
+    const rawChoice = payload['defense_choice'];
+    const choice: VttDefenseChoice =
+      rawChoice === 'parry' || rawChoice === 'dodge' ? rawChoice : 'take_hit';
+    const defenseLabel =
+      choice === 'parry' ? 'Parry' : choice === 'dodge' ? 'Dodge' : 'Take Hit';
+    const defenseTotal =
+      typeof payload['defense_total'] === 'number' &&
+      Number.isFinite(payload['defense_total'])
+        ? Math.round(payload['defense_total'])
+        : null;
+    const hitLanded = Boolean(payload['hit_landed']);
+    const flawless = Boolean(payload['flawless']);
+    const flatDamage =
+      typeof payload['flat_damage'] === 'number' &&
+      Number.isFinite(payload['flat_damage'])
+        ? Math.round(payload['flat_damage'])
+        : null;
+
+    return {
+      attackerName,
+      defenderName,
+      actionName,
+      attackTotal: Math.round(attackTotal),
+      defenseLabel,
+      defenseTotal,
+      hitLanded,
+      statusLabel: formatClashOutcomeStatus(choice, hitLanded, flawless),
+      flatDamage,
+    };
+  }
+
+  getClashOutcomeCardView(entry: VttLogEntry): VttClashOutcomeCardView | null {
+    const payload = entry.payload ?? {};
+    if (!payload['clash_outcome']) return null;
+
+    const attackerName =
+      typeof payload['attacker_name'] === 'string'
+        ? payload['attacker_name']
+        : entry.sender_name;
+    const defenderName =
+      typeof payload['defender_name'] === 'string'
+        ? payload['defender_name']
+        : 'Defender';
+    const actionName =
+      typeof payload['action_name'] === 'string'
+        ? payload['action_name']
+        : 'Clash';
+    const rawReaction = payload['reaction'];
+    const reaction: VttDefenseChoice =
+      rawReaction === 'parry' || rawReaction === 'dodge'
+        ? rawReaction
+        : 'take_hit';
+    const hitLanded = Boolean(payload['hit_landed']);
+    const flawless = Boolean(payload['flawless']);
+    const spDamage = Math.max(0, Math.round(Number(payload['sp_damage'] ?? 0)));
+    const hpDamage = Math.max(0, Math.round(Number(payload['hp_damage'] ?? 0)));
+    const counterSp = Math.max(
+      0,
+      Math.round(Number(payload['counter_sp'] ?? 0))
+    );
+    const statuses = Array.isArray(payload['statuses'])
+      ? payload['statuses'].filter((s): s is string => typeof s === 'string')
+      : [];
+
+    return {
+      attackerName,
+      defenderName,
+      actionName,
+      hitLanded,
+      statusLabel: formatClashOutcomeStatus(reaction, hitLanded, flawless),
+      spDamage,
+      hpDamage,
+      counterSp,
+      statuses,
+    };
   }
 
   selectDicePreset(presetId: string): void {

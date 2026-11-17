@@ -57,6 +57,8 @@ import {
 import {
   DefenderClashCapabilities,
   createManualRoll,
+  formatClashDamageParts,
+  formatClashOutcomeStatus,
   getLegalDefenderReactions,
   resolveClashReaction,
   roll2d10Check,
@@ -7575,10 +7577,32 @@ export class VttStore {
       current_sp: nextSp,
     });
     await this.postLog({
-      kind: 'roll',
-      title: `${token.name} used Stance Recovery (1 AP)`,
-      detail: `Recovered +${nextSp - token.current_sp} SP (now ${nextSp}/${token.max_sp} SP)`,
+      kind: 'system',
+      title: 'Stance Recovery',
+      detail: `+${nextSp - token.current_sp} SP (${nextSp}/${token.max_sp} SP)`,
+      senderNameOverride: token.name,
+      payload: this.buildTokenSpeakerPayload(token),
     });
+  }
+
+  private buildTokenSpeakerPayload(
+    token: VttTokenModel
+  ): Record<string, unknown> {
+    const vis = this.resolveTokenVisuals(token);
+    return {
+      speaker_mode: 'character',
+      speaker_token_id: token.id,
+      speaker_color: token.color || '#38B29A',
+      speaker_icon: token.icon || 'greatsword',
+      speaker_faction: token.faction,
+      ...(vis.portraitUrl ? { speaker_portrait_url: vis.portraitUrl } : {}),
+      ...(vis.tokenImageUrl
+        ? { speaker_token_image_url: vis.tokenImageUrl }
+        : {}),
+      ...(vis.tokenAppearance
+        ? { speaker_token_appearance: vis.tokenAppearance }
+        : {}),
+    };
   }
 
   async toggleTokenRaiseShield(token: VttTokenModel): Promise<void> {
@@ -7606,9 +7630,11 @@ export class VttStore {
       current_ap: Math.max(0, token.current_ap - 1),
     });
     await this.postLog({
-      kind: 'roll',
-      title: `${token.name} raised Guard / Shield (1 AP)`,
-      detail: `Mitigates ${token.shield_block} DMG vs non-Piercing attacks until next turn.`,
+      kind: 'system',
+      title: 'Guard Raised',
+      detail: `Block −${token.shield_block} DMG`,
+      senderNameOverride: token.name,
+      payload: this.buildTokenSpeakerPayload(token),
     });
   }
 
@@ -7662,8 +7688,10 @@ export class VttStore {
     });
     await this.postLog({
       kind: 'system',
-      title: `${token.name} switched to ${nextStats.activeWeapon?.name ?? 'Unarmed'} (1 AP)`,
-      detail: `Active Slot ${nextSlot}`,
+      title: `Switched to ${nextStats.activeWeapon?.name ?? 'Unarmed'}`,
+      detail: null,
+      senderNameOverride: token.name,
+      payload: this.buildTokenSpeakerPayload(token),
     });
   }
 
@@ -7909,13 +7937,59 @@ export class VttStore {
     await this.postLog({
       kind: 'roll',
       title: `${attacker.name} · ${pending.actionName} → ${roll.total}`,
-      detail: `2d10 (${roll.d1}+${roll.d2}) + ${roll.modifier} · ${pending.flatDamage} Flat DMG${pending.combatTags.length ? ' · ' + pending.combatTags.join('/') : ''}`,
+      detail: `${pending.flatDamage} DMG`,
+      senderNameOverride: attacker.name,
       payload: {
         roll,
         chips: built.chips,
+        total: roll.total,
+        formula: manual !== null ? 'Manual' : built.formula,
+        action_label: pending.actionName,
+        flat_damage: pending.flatDamage,
+        combat_tags: pending.combatTags,
         ...(diceThrow ? { diceThrow } : {}),
+        ...this.buildTokenSpeakerPayload(attacker),
       },
     });
+  }
+
+  isTokenInActiveCombat(tok: VttTokenModel | null | undefined): boolean {
+    if (!tok) return false;
+    const sc = this.activeScene();
+    if (!sc || !sc.combat_active) return false;
+    if (tok.npc_stats?.__in_combat === true) return true;
+    return (sc.initiative_order ?? []).includes(tok.id);
+  }
+
+  private async clearTokenSkillCooldowns(tok: VttTokenModel): Promise<void> {
+    const ch = this.resolveCharacterForToken(tok);
+    if (!ch) return;
+    const currentCd = ch.active_cooldowns ?? {};
+    let hadSkillCooldown = false;
+    const nextCd: Record<string, number | string> = {};
+    for (const [k, v] of Object.entries(currentCd)) {
+      if (k.startsWith(UPGRADE_SLOT_PREFIX) || k === '__shield_raised') {
+        nextCd[k] = v;
+      } else {
+        hadSkillCooldown = true;
+      }
+    }
+    if (!hadSkillCooldown) return;
+    const updated = cloneDetachedVttCharacterSheet(
+      {
+        ...ch,
+        active_cooldowns: nextCd,
+      },
+      ch.id
+    );
+    await this.persistDetachedSheetOnActorForToken(tok, updated);
+  }
+
+  private async clearSceneCombatSkillCooldowns(): Promise<void> {
+    for (const tok of this.sceneTokens()) {
+      const latestTok = this.tokens().find((t) => t.id === tok.id) ?? tok;
+      await this.clearTokenSkillCooldowns(latestTok);
+    }
   }
 
   private async consumeAttackerActionCost(
@@ -7925,8 +7999,14 @@ export class VttStore {
     const nextAp = Math.max(0, attacker.current_ap - action.apCost);
     await this.patchToken(attacker.id, { current_ap: nextAp });
 
-    if (action.perkId && action.cooldownRounds > 0) {
-      const ch = this.resolveCharacterForToken(attacker);
+    if (
+      action.perkId &&
+      action.cooldownRounds > 0 &&
+      this.isTokenInActiveCombat(attacker)
+    ) {
+      const latestAttacker =
+        this.tokens().find((t) => t.id === attacker.id) ?? attacker;
+      const ch = this.resolveCharacterForToken(latestAttacker);
       if (ch) {
         const nextCooldowns = {
           ...(ch.active_cooldowns ?? {}),
@@ -7940,7 +8020,7 @@ export class VttStore {
           },
           ch.id
         );
-        await this.persistDetachedSheetOnActorForToken(attacker, updated);
+        await this.persistDetachedSheetOnActorForToken(latestAttacker, updated);
       }
     }
   }
@@ -8001,12 +8081,13 @@ export class VttStore {
     this.manualRollOverride.set(null);
     this.attackRollMode.set('normal');
 
-    const modSign = pending.attackMod >= 0 ? '+' : '';
     await this.patchScene(sc.id, { pending_clash: clash });
     await this.postLog({
       kind: 'clash',
-      title: `${attacker.name} targets ${defender.name} with ${pending.actionName}`,
-      detail: `Distance ${distFeet} ft · 2d10${modSign}${pending.attackMod} · ${pending.flatDamage} Raw DMG${pending.combatTags.length ? ' · [' + pending.combatTags.join(', ') + ']' : ''} — Awaiting ${defender.name}'s reaction before rolling`,
+      title: `${attacker.name} → ${defender.name} · ${pending.actionName}`,
+      detail: `${pending.flatDamage} DMG${pending.combatTags.length ? ' · ' + pending.combatTags.join(', ') : ''}`,
+      senderNameOverride: attacker.name,
+      payload: this.buildTokenSpeakerPayload(attacker),
     });
   }
 
@@ -8091,13 +8172,6 @@ export class VttStore {
       this.enqueueDiceThrow(defDiceThrow, true);
     }
 
-    const reactionTitle =
-      reaction === 'parry'
-        ? `Parry ${resolution.defenseRoll?.total ?? 0}`
-        : reaction === 'dodge'
-          ? `Dodge ${resolution.defenseRoll?.total ?? 0}`
-          : 'Take Hit';
-
     await this.patchScene(sc.id, {
       pending_clash: {
         ...clashWithAttack,
@@ -8106,14 +8180,29 @@ export class VttStore {
       },
     });
 
+    const attackerTok = this.sceneTokens().find(
+      (t) => t.id === clash.attackerTokenId
+    );
     await this.postLog({
       kind: 'roll',
-      title: `Clash Rolled: ${clash.attackerName} (${attackRoll.total}) vs ${defender.name} (${reactionTitle})`,
-      detail: `${resolution.summary} — Awaiting GM to apply outcome`,
+      title: `${clash.attackerName} vs ${defender.name} · ${clash.actionName}`,
+      detail: resolution.summary,
+      senderNameOverride: clash.attackerName,
       payload: {
+        clash_roll: true,
+        attacker_name: clash.attackerName,
+        defender_name: defender.name,
+        action_name: clash.actionName,
+        attack_total: attackRoll.total,
+        defense_choice: reaction,
+        defense_total: resolution.defenseRoll?.total ?? null,
+        hit_landed: resolution.hitLanded,
+        flawless: resolution.flawlessDefense,
+        flat_damage: clash.rawFlatDamage,
         roll: attackRoll,
         chips: builtAttack.chips,
         ...(attackDiceThrow ? { diceThrow: attackDiceThrow } : {}),
+        ...(attackerTok ? this.buildTokenSpeakerPayload(attackerTok) : {}),
       },
     });
   }
@@ -8168,11 +8257,41 @@ export class VttStore {
       });
     }
 
+    const statusLabel = formatClashOutcomeStatus(
+      res.reaction,
+      res.hitLanded,
+      res.flawlessDefense
+    );
+    const dmgParts = formatClashDamageParts(
+      res.spDamageToDefender,
+      res.hpDamageToDefender,
+      res.counterSpToAttacker
+    );
+    const detailText =
+      res.hitLanded && dmgParts.length === 0
+        ? `${statusLabel} · 0 DMG`
+        : [statusLabel, ...dmgParts].join(' · ');
+
     await this.patchScene(sc.id, { pending_clash: null });
     await this.postLog({
-      kind: 'damage',
-      title: `Clash Resolved: ${clash.attackerName} vs ${clash.defenderName}`,
-      detail: `${res.summary} → ${clash.defenderName} takes ${res.spDamageToDefender} SP & ${res.hpDamageToDefender} HP DMG${res.counterSpToAttacker > 0 ? ` · ${clash.attackerName} takes ${res.counterSpToAttacker} Counter SP` : ''}`,
+      kind: res.hitLanded ? 'damage' : 'round',
+      title: `${clash.attackerName} → ${clash.defenderName} · ${clash.actionName}`,
+      detail: detailText,
+      senderNameOverride: clash.attackerName,
+      payload: {
+        clash_outcome: true,
+        attacker_name: clash.attackerName,
+        defender_name: clash.defenderName,
+        action_name: clash.actionName,
+        reaction: res.reaction,
+        hit_landed: res.hitLanded,
+        flawless: res.flawlessDefense,
+        sp_damage: res.spDamageToDefender,
+        hp_damage: res.hpDamageToDefender,
+        counter_sp: res.counterSpToAttacker,
+        statuses: res.hitLanded ? res.inflictedStatuses : [],
+        ...(attacker ? this.buildTokenSpeakerPayload(attacker) : {}),
+      },
     });
   }
 
@@ -8391,8 +8510,8 @@ export class VttStore {
     if (!silentLog) {
       await this.postLog({
         kind: 'round',
-        title: 'Combat Initiation — Roll Initiative!',
-        detail: 'Roll Initiative (2d10 + Cunning) to enter the Combat Tracker.',
+        title: 'Roll Initiative',
+        detail: null,
       });
     }
   }
@@ -8700,6 +8819,8 @@ export class VttStore {
     await this.patchToken(tok.id, {
       npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
     });
+    const latestRemovedTok = this.tokens().find((t) => t.id === tok.id) ?? tok;
+    await this.clearTokenSkillCooldowns(latestRemovedTok);
 
     const filteredPrevIds = (sc.initiative_order ?? []).filter(
       (id) => id !== tokenId && id !== VTT_INITIATION_PHASE_SENTINEL
@@ -8743,6 +8864,7 @@ export class VttStore {
         npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
       });
     }
+    await this.clearSceneCombatSkillCooldowns();
 
     this.combatTrackerDrawerOpen.set(false);
     await this.patchScene(sc.id, {
@@ -8800,8 +8922,8 @@ export class VttStore {
     this.enforceApOnMove.set(true);
     await this.postLog({
       kind: 'round',
-      title: 'Combat Started — Round 1',
-      detail: `${orderedIds.length} combatant${orderedIds.length === 1 ? '' : 's'} in turn order · All AP refreshed`,
+      title: 'Combat Started · Round 1',
+      detail: `${orderedIds.length} combatant${orderedIds.length === 1 ? '' : 's'} · All AP refreshed`,
     });
   }
 
@@ -8826,38 +8948,85 @@ export class VttStore {
         : allCombatants.filter((t) => t.current_hp > 0);
     if (order.length === 0) return;
 
-    const currIdx = order.findIndex((t) => t.id === sc.active_turn_token_id);
-    const wrapped = currIdx === -1 || currIdx + 1 >= order.length;
-    const nextIdx = wrapped ? 0 : currIdx + 1;
-    const nextTok = order[nextIdx];
-    const nextRound =
-      currIdx !== -1 && wrapped ? sc.round_number + 1 : sc.round_number;
+    const currOrderIdx = order.findIndex(
+      (t) => t.id === sc.active_turn_token_id
+    );
+    let nextTok: VttTokenModel;
+    let isNewRound = false;
 
-    await this.patchToken(nextTok.id, {
-      current_ap: nextTok.max_ap,
-      shield_raised: false,
-    });
+    if (currOrderIdx !== -1) {
+      if (currOrderIdx + 1 >= order.length) {
+        isNewRound = true;
+        nextTok = order[0];
+      } else {
+        nextTok = order[currOrderIdx + 1];
+      }
+    } else {
+      const orderSet = new Set(order.map((t) => t.id));
+      const fullIdx = allCombatants.findIndex(
+        (t) => t.id === sc.active_turn_token_id
+      );
+      if (fullIdx !== -1) {
+        const nextAfterInRound = allCombatants
+          .slice(fullIdx + 1)
+          .find((t) => orderSet.has(t.id));
+        if (nextAfterInRound) {
+          nextTok = nextAfterInRound;
+        } else {
+          isNewRound = true;
+          nextTok = order[0];
+        }
+      } else {
+        nextTok = order[0];
+      }
+    }
 
-    const ch = this.resolveCharacterForToken(nextTok);
-    if (ch) {
-      const nextCd: Record<string, number | string> = {};
-      for (const [k, v] of Object.entries(ch.active_cooldowns ?? {})) {
-        if (k.startsWith(UPGRADE_SLOT_PREFIX)) {
-          nextCd[k] = v;
-        } else if (k !== '__shield_raised') {
-          const rem = Number(v) - 1;
-          if (rem > 0) nextCd[k] = rem;
+    const nextRound = isNewRound ? sc.round_number + 1 : sc.round_number;
+
+    if (isNewRound) {
+      for (const tok of allCombatants) {
+        await this.patchToken(
+          tok.id,
+          tok.id === nextTok.id
+            ? { current_ap: tok.max_ap, shield_raised: false }
+            : { current_ap: tok.max_ap }
+        );
+
+        const latestTok = this.tokens().find((t) => t.id === tok.id) ?? tok;
+        const ch = this.resolveCharacterForToken(latestTok);
+        if (ch) {
+          const nextCd: Record<string, number | string> = {};
+          for (const [k, v] of Object.entries(ch.active_cooldowns ?? {})) {
+            if (k.startsWith(UPGRADE_SLOT_PREFIX)) {
+              nextCd[k] = v;
+            } else if (k === '__shield_raised') {
+              if (latestTok.id !== nextTok.id && v) {
+                nextCd[k] = v;
+              }
+            } else {
+              const rem = Number(v) - 1;
+              if (rem > 0) nextCd[k] = rem;
+            }
+          }
+          const updated = cloneDetachedVttCharacterSheet(
+            {
+              ...ch,
+              current_ap: latestTok.max_ap,
+              active_cooldowns: nextCd,
+            },
+            ch.id
+          );
+          await this.persistDetachedSheetOnActorForToken(latestTok, updated);
         }
       }
-      const updated = cloneDetachedVttCharacterSheet(
-        {
-          ...ch,
-          current_ap: nextTok.max_ap,
-          active_cooldowns: nextCd,
-        },
-        ch.id
-      );
-      await this.persistDetachedSheetOnActorForToken(nextTok, updated);
+    } else {
+      const nextTokChar = this.resolveCharacterForToken(nextTok);
+      if (
+        nextTok.shield_raised ||
+        Boolean(nextTokChar?.active_cooldowns?.['__shield_raised'])
+      ) {
+        await this.patchToken(nextTok.id, { shield_raised: false });
+      }
     }
 
     await this.patchScene(sc.id, {
@@ -8868,8 +9037,8 @@ export class VttStore {
 
     await this.postLog({
       kind: 'round',
-      title: `Round ${nextRound} — ${nextTok.name}'s Turn`,
-      detail: `AP refreshed to ${nextTok.max_ap} · Guard reset`,
+      title: `Round ${nextRound} · ${nextTok.name}'s Turn`,
+      detail: isNewRound ? 'All AP refreshed' : null,
     });
   }
 
@@ -8894,11 +9063,6 @@ export class VttStore {
     const prevRound =
       currIdx === 0 ? Math.max(1, sc.round_number - 1) : sc.round_number;
 
-    await this.patchToken(prevTok.id, {
-      current_ap: prevTok.max_ap,
-      shield_raised: false,
-    });
-
     await this.patchScene(sc.id, {
       round_number: prevRound,
       active_turn_token_id: prevTok.id,
@@ -8907,8 +9071,8 @@ export class VttStore {
 
     await this.postLog({
       kind: 'round',
-      title: `Round ${prevRound} — ${prevTok.name}'s Turn`,
-      detail: `Turn rewound by GM · AP refreshed to ${prevTok.max_ap}`,
+      title: `Round ${prevRound} · ${prevTok.name}'s Turn`,
+      detail: 'Turn rewound',
     });
   }
 
@@ -8918,11 +9082,6 @@ export class VttStore {
     const tok = this.allEnrolledCombatTokens().find((t) => t.id === tokenId);
     if (!tok) return;
 
-    await this.patchToken(tok.id, {
-      current_ap: tok.max_ap,
-      shield_raised: false,
-    });
-
     await this.patchScene(sc.id, {
       active_turn_token_id: tok.id,
       initiative_order: this.allEnrolledCombatTokens().map((t) => t.id),
@@ -8930,8 +9089,8 @@ export class VttStore {
 
     await this.postLog({
       kind: 'round',
-      title: `Round ${sc.round_number} — ${tok.name}'s Turn`,
-      detail: `Active turn set by GM · AP refreshed to ${tok.max_ap}`,
+      title: `Round ${sc.round_number} · ${tok.name}'s Turn`,
+      detail: null,
     });
   }
 
@@ -8941,15 +9100,18 @@ export class VttStore {
 
     const toReset = this.sceneTokens().filter(
       (t) =>
+        t.shield_raised ||
         t.npc_stats?.__in_combat !== undefined ||
         t.npc_stats?.__initiative !== undefined ||
         t.npc_stats?.__initiative_mod !== undefined
     );
     for (const tok of toReset) {
       await this.patchToken(tok.id, {
+        shield_raised: false,
         npc_stats: this.stripCombatInitiativeFields(tok.npc_stats),
       });
     }
+    await this.clearSceneCombatSkillCooldowns();
 
     this.combatTrackerDrawerOpen.set(false);
     await this.patchScene(sc.id, {
@@ -8963,7 +9125,7 @@ export class VttStore {
     await this.postLog({
       kind: 'round',
       title: 'Combat Ended',
-      detail: 'Initiative order cleared.',
+      detail: null,
     });
   }
 
@@ -8982,15 +9144,18 @@ export class VttStore {
     });
     this.enqueueDiceThrow(diceThrow, true);
 
-    const diceDetail =
-      roll.d3 !== undefined
-        ? `3d10 (${roll.d1}, ${roll.d2}, ${roll.d3} · ${mode})`
-        : `2d10 (${roll.d1}+${roll.d2})`;
     await this.postLog({
       kind: 'roll',
-      title: `${label} → ${roll.total}`,
-      detail: `${diceDetail} ${modifier >= 0 ? '+' : '−'} ${Math.abs(modifier)}`,
-      payload: { roll, chips: built.chips, diceThrow },
+      title: `${label} (${built.formula}) → ${roll.total}`,
+      detail: null,
+      payload: {
+        roll,
+        chips: built.chips,
+        formula: built.formula,
+        modifier,
+        total: roll.total,
+        diceThrow,
+      },
     });
   }
 
@@ -9600,7 +9765,7 @@ export class VttStore {
       if (!this.isGm()) {
         this.notifications.error(
           'Permission Denied',
-          'Only the Game Master can clear the campaign log.'
+          'Only the Game Master can clear chat.'
         );
         return { cleared: false };
       }
@@ -9663,7 +9828,7 @@ export class VttStore {
               a.created_at.localeCompare(b.created_at)
             )
       );
-      this.notifications.error('Unable to Delete Log', err);
+      this.notifications.error('Unable to Delete Message', err);
     }
   }
 
@@ -9677,7 +9842,7 @@ export class VttStore {
     const err = await this.vttService.clearCampaignLogs(camp.id);
     if (err) {
       this.logs.set(previous);
-      this.notifications.error('Unable to Clear Logs', err);
+      this.notifications.error('Unable to Clear Chat', err);
     }
   }
 

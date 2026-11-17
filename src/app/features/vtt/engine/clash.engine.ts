@@ -172,6 +172,47 @@ export function computeHitDamageCascade(
   };
 }
 
+export function formatClashOutcomeStatus(
+  reaction: VttDefenseChoice,
+  hitLanded: boolean,
+  flawless = false
+): string {
+  if (hitLanded) {
+    if (reaction === 'parry') return 'Attack Succeeded · Parry Failed';
+    if (reaction === 'dodge') return 'Attack Succeeded · Dodge Failed';
+    return 'Attack Succeeded';
+  }
+  if (reaction === 'parry') {
+    return flawless
+      ? 'Defense Succeeded · Flawless Parry'
+      : 'Defense Succeeded · Parried';
+  }
+  if (reaction === 'dodge') {
+    return flawless
+      ? 'Defense Succeeded · Flawless Dodge'
+      : 'Defense Succeeded · Dodged';
+  }
+  return 'Defense Succeeded';
+}
+
+export function formatClashDamageParts(
+  spDamage: number,
+  hpDamage: number,
+  counterSp = 0
+): string[] {
+  const parts: string[] = [];
+  if (spDamage > 0) {
+    parts.push(`−${spDamage} SP`);
+  }
+  if (hpDamage > 0) {
+    parts.push(`−${hpDamage} HP`);
+  }
+  if (counterSp > 0) {
+    parts.push(`Counter −${counterSp} SP`);
+  }
+  return parts;
+}
+
 export function resolveClashReaction(
   clash: VttPendingClash,
   reaction: VttDefenseChoice,
@@ -204,16 +245,9 @@ export function resolveClashReaction(
           ? Math.min(defender.currentSp, clash.defendedSpChip)
           : 0;
       const parts = [
-        flawless
-          ? `Flawless Parry (${defRoll.total} vs ${atkRoll.total})!`
-          : `Parried (${defRoll.total} vs ${atkRoll.total})!`,
+        formatClashOutcomeStatus('parry', false, flawless),
+        ...formatClashDamageParts(chipSp, 0, counterSp),
       ];
-      if (counterSp > 0) {
-        parts.push(`Flawless Counter deals ${counterSp} SP DMG to ${clash.attackerName}`);
-      }
-      if (chipSp > 0) {
-        parts.push(`${chipSp} SP chip taken`);
-      }
 
       return {
         reaction: 'parry',
@@ -235,6 +269,10 @@ export function resolveClashReaction(
     }
 
     const cascade = computeHitDamageCascade(clash, defender);
+    const dmgParts = formatClashDamageParts(
+      cascade.spDamageToDefender,
+      cascade.hpDamageToDefender
+    );
     return {
       reaction: 'parry',
       defenseRoll: defRoll,
@@ -250,7 +288,10 @@ export function resolveClashReaction(
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 0,
       shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-      summary: `Parry Broken (${defRoll.total} vs ${atkRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
+      summary: [
+        formatClashOutcomeStatus('parry', true, false),
+        ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+      ].join(' · '),
     };
   }
 
@@ -278,13 +319,15 @@ export function resolveClashReaction(
         pushFeet: 0,
         shiftDefenderFeet: 5,
         shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-        summary: flawless
-          ? `Flawless Dodge (${defRoll.total} vs ${atkRoll.total}) · 1 AP Refunded · Shift 5 ft`
-          : `Dodged (${defRoll.total} vs ${atkRoll.total}) · Shift 5 ft`,
+        summary: formatClashOutcomeStatus('dodge', false, flawless),
       };
     }
 
     const cascade = computeHitDamageCascade(clash, defender);
+    const dmgParts = formatClashDamageParts(
+      cascade.spDamageToDefender,
+      cascade.hpDamageToDefender
+    );
     return {
       reaction: 'dodge',
       defenseRoll: defRoll,
@@ -300,21 +343,18 @@ export function resolveClashReaction(
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 5,
       shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-      summary: `Caught Mid-Dodge (${defRoll.total} vs ${atkRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
+      summary: [
+        formatClashOutcomeStatus('dodge', true, false),
+        ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+      ].join(' · '),
     };
   }
 
   const cascade = computeHitDamageCascade(clash, defender);
-  const summaryParts = [
-    `Direct Hit (Roll ${atkRoll.total})`,
-    `${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
-  ];
-  if (cascade.shieldMitigated > 0) {
-    summaryParts.push(`Block −${cascade.shieldMitigated}`);
-  }
-  if (cascade.armorMitigated > 0) {
-    summaryParts.push(`Armor DR −${cascade.armorMitigated}`);
-  }
+  const dmgParts = formatClashDamageParts(
+    cascade.spDamageToDefender,
+    cascade.hpDamageToDefender
+  );
 
   return {
     reaction: 'take_hit',
@@ -331,6 +371,9 @@ export function resolveClashReaction(
     pushFeet: clash.pushFeet ?? 0,
     shiftDefenderFeet: 0,
     shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-    summary: summaryParts.join(' · '),
+    summary: [
+      formatClashOutcomeStatus('take_hit', true, false),
+      ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+    ].join(' · '),
   };
 }

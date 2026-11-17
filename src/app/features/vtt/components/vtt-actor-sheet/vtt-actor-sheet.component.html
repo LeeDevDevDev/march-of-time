@@ -602,7 +602,7 @@
                           @let awf1Btn = getWeaponFormula(char, aw1Btn, stats);
                           <button
                             type="button"
-                            (click)="rollSheetCheck(char.name, aw1Btn.name + ' Attack', awf1Btn.attackMod, awf1Btn.flatDamage + ' Flat DMG')"
+                            (click)="rollSheetCheck(char.name, aw1Btn.name + ' Attack', awf1Btn.attackMod, awf1Btn.flatDamage + ' DMG')"
                             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                           >
                             Roll {{ awf1Btn.rollFormula }}
@@ -610,7 +610,7 @@
                         } @else if (char.active_weapon_slot === 1) {
                           <button
                             type="button"
-                            (click)="rollSheetCheck(char.name, 'Unarmed Strike', stats.attackRollMod, stats.flatWeaponDamage + ' Flat DMG')"
+                            (click)="rollSheetCheck(char.name, 'Unarmed Strike', stats.attackRollMod, stats.flatWeaponDamage + ' DMG')"
                             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                           >
                             Roll {{ formatRollFormulaFromMod(stats.attackRollMod) }}
@@ -753,7 +753,7 @@
                           @let awf2Btn = getWeaponFormula(char, aw2Btn, stats);
                           <button
                             type="button"
-                            (click)="rollSheetCheck(char.name, aw2Btn.name + ' Attack', awf2Btn.attackMod, awf2Btn.flatDamage + ' Flat DMG')"
+                            (click)="rollSheetCheck(char.name, aw2Btn.name + ' Attack', awf2Btn.attackMod, awf2Btn.flatDamage + ' DMG')"
                             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                           >
                             Roll {{ awf2Btn.rollFormula }}
@@ -761,7 +761,7 @@
                         } @else if (char.active_weapon_slot === 2) {
                           <button
                             type="button"
-                            (click)="rollSheetCheck(char.name, 'Unarmed Strike', stats.attackRollMod, stats.flatWeaponDamage + ' Flat DMG')"
+                            (click)="rollSheetCheck(char.name, 'Unarmed Strike', stats.attackRollMod, stats.flatWeaponDamage + ' DMG')"
                             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                           >
                             Roll {{ formatRollFormulaFromMod(stats.attackRollMod) }}
@@ -866,7 +866,7 @@
                                   <button
                                     type="button"
                                     [disabled]="!art.meetsWeaponRequirement"
-                                    (click)="rollSheetCheck(char.name, art.baseNode.name, artMod, artDmg + ' Flat DMG')"
+                                    (click)="rollSheetCheck(char.name, art.baseNode.name, artMod, artDmg + ' DMG')"
                                     class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A] disabled:opacity-40"
                                   >
                                     Roll
@@ -1618,7 +1618,7 @@
                 <div class="flex items-center gap-1.5">
                   <button
                     type="button"
-                    (click)="rollSheetCheck(char.name, (stats.activeWeapon?.name || 'Unarmed') + ' Attack', stats.attackRollMod, stats.flatWeaponDamage + ' Flat DMG')"
+                    (click)="rollSheetCheck(char.name, (stats.activeWeapon?.name || 'Unarmed') + ' Attack', stats.attackRollMod, stats.flatWeaponDamage + ' DMG')"
                     class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                   >
                     Roll 2d10+{{ stats.attackRollMod }}
@@ -2782,7 +2782,7 @@
                     <div class="flex items-center gap-1.5">
                       <button
                         type="button"
-                        (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Unarmed') + ' Attack', npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' Flat DMG')"
+                        (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Unarmed') + ' Attack', npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' DMG')"
                         class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                       >
                         Roll {{ formatRollFormulaFromMod(npcStats.attack_mod ?? 2) }}
@@ -2854,7 +2854,7 @@
                         <div class="flex items-center gap-1.5">
                           <button
                             type="button"
-                            (click)="rollSheetCheck(getNpcName(), nArt.name, nArtMod, nArtDmg + ' Flat DMG')"
+                            (click)="rollSheetCheck(getNpcName(), nArt.name, nArtMod, nArtDmg + ' DMG')"
                             class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                           >
                             Roll
@@ -3390,7 +3390,7 @@
                 <div class="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
-                    (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Attack'), npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' Flat DMG')"
+                    (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Attack'), npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' DMG')"
                     class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                   >
                     Roll Attack (+{{ npcStats.attack_mod ?? 2 }})

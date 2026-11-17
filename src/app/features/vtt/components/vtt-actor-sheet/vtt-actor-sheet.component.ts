@@ -1550,6 +1550,14 @@ export class VttActorSheetComponent {
   }
 
   getCharacterArtCooldown(char: CharacterModel, perkId: string): number {
+    const tok = this.sheetToken();
+    if (
+      tok &&
+      typeof this.vttStore.isTokenInActiveCombat === 'function' &&
+      !this.vttStore.isTokenInActiveCombat(tok)
+    ) {
+      return 0;
+    }
     return Math.max(0, Number(char.active_cooldowns?.[perkId] ?? 0));
   }
 
@@ -1603,11 +1611,12 @@ export class VttActorSheetComponent {
       };
     });
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
         kind: 'system',
-        title: `${char.name} switched to ${nextWeaponName} (1 AP)`,
-        detail: `Active Slot ${nextSlot}`,
-        senderNameOverride: char.name,
+        title: `Switched to ${nextWeaponName}`,
+        detail: null,
+        senderNameOverride: pubName,
       });
     }
   }
@@ -1625,20 +1634,11 @@ export class VttActorSheetComponent {
       ...c,
       current_ap: Math.max(0, currAp - 1),
     }));
+    const pubName = this.getPublicSpeakerName();
     if (kind === 'parry') {
-      await this.rollSheetCheck(
-        char.name,
-        'Parry Reaction',
-        stats.parryMod,
-        `1 AP spent · Flawless (+5) deals ${stats.flawlessParryCounterSp} SP`
-      );
+      await this.rollSheetCheck(pubName, 'Parry Reaction', stats.parryMod);
     } else {
-      await this.rollSheetCheck(
-        char.name,
-        'Dodge Reaction',
-        stats.dodgeMod,
-        '1 AP spent · Shifts 5 ft · Flawless (+5) refunds 1 AP'
-      );
+      await this.rollSheetCheck(pubName, 'Dodge Reaction', stats.dodgeMod);
     }
   }
 
@@ -1648,6 +1648,7 @@ export class VttActorSheetComponent {
   ): Promise<void> {
     if (!this.canEdit() || !stats.usesRaiseShield) return;
     const currentlyRaised = this.isCharacterGuardRaised(char);
+    const pubName = this.getPublicSpeakerName();
     if (currentlyRaised) {
       await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => {
         const nextCd = { ...(c.active_cooldowns ?? {}) };
@@ -1660,9 +1661,9 @@ export class VttActorSheetComponent {
       if (typeof this.vttStore.postLog === 'function') {
         await this.vttStore.postLog({
           kind: 'system',
-          title: `${char.name} lowered Guard / Shield`,
-          detail: 'Guard stance ended.',
-          senderNameOverride: char.name,
+          title: 'Guard Lowered',
+          detail: null,
+          senderNameOverride: pubName,
         });
       }
       return;
@@ -1680,10 +1681,10 @@ export class VttActorSheetComponent {
     }));
     if (typeof this.vttStore.postLog === 'function') {
       await this.vttStore.postLog({
-        kind: 'roll',
-        title: `${char.name} raised Guard / Shield (1 AP)`,
-        detail: `Mitigates ${stats.shieldBlockTotal} DMG vs non-Piercing attacks until next turn.`,
-        senderNameOverride: char.name,
+        kind: 'system',
+        title: 'Guard Raised',
+        detail: `Block −${stats.shieldBlockTotal} DMG`,
+        senderNameOverride: pubName,
       });
     }
   }
@@ -1703,11 +1704,12 @@ export class VttActorSheetComponent {
       current_sp: nextSp,
     }));
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
-        kind: 'roll',
-        title: `${char.name} used Stance Recovery (1 AP)`,
-        detail: `Recovered +${nextSp - currSp} SP (now ${nextSp}/${stats.maxSp} SP)`,
-        senderNameOverride: char.name,
+        kind: 'system',
+        title: 'Stance Recovery',
+        detail: `+${nextSp - currSp} SP (${nextSp}/${stats.maxSp} SP)`,
+        senderNameOverride: pubName,
       });
     }
   }
@@ -1715,7 +1717,7 @@ export class VttActorSheetComponent {
   async spendCharacterTacticalAction(
     char: CharacterModel,
     actionLabel: string,
-    detailText: string,
+    _detailText?: string,
     apCost = 1
   ): Promise<void> {
     if (!this.canEdit()) return;
@@ -1726,11 +1728,12 @@ export class VttActorSheetComponent {
       current_ap: Math.max(0, currAp - apCost),
     }));
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
         kind: 'system',
-        title: `${char.name} used ${actionLabel} (${apCost} AP)`,
-        detail: detailText,
-        senderNameOverride: char.name,
+        title: `${pubName} used ${actionLabel} (${apCost} AP)`,
+        detail: null,
+        senderNameOverride: pubName,
       });
     }
   }
@@ -1771,23 +1774,13 @@ export class VttActorSheetComponent {
         current_ap: Math.max(0, tok.current_ap - 1),
       });
     }
-    const name = this.getNpcName();
+    const name = this.getPublicSpeakerName();
     if (kind === 'parry') {
       const mod = npcStats.parry_mod ?? 1;
-      await this.rollSheetCheck(
-        name,
-        'Parry Reaction',
-        mod,
-        tok ? '1 AP spent' : undefined
-      );
+      await this.rollSheetCheck(name, 'Parry Reaction', mod);
     } else {
       const mod = npcStats.dodge_mod ?? 1;
-      await this.rollSheetCheck(
-        name,
-        'Dodge Reaction',
-        mod,
-        tok ? '1 AP spent · Shifts 5 ft' : 'Shifts 5 ft'
-      );
+      await this.rollSheetCheck(name, 'Dodge Reaction', mod);
     }
   }
 
@@ -1810,13 +1803,9 @@ export class VttActorSheetComponent {
       const pubName = this.getPublicSpeakerName();
       const blockVal = this.getNpcArmorOrMove('shield_block');
       await this.vttStore.postLog({
-        kind: raised ? 'system' : 'roll',
-        title: raised
-          ? `${pubName} lowered Guard / Shield`
-          : `${pubName} raised Guard / Shield (1 AP)`,
-        detail: raised
-          ? 'Guard stance ended.'
-          : `Mitigates ${blockVal} DMG vs non-Piercing attacks until next turn.`,
+        kind: 'system',
+        title: raised ? 'Guard Lowered' : 'Guard Raised',
+        detail: raised ? null : `Block −${blockVal} DMG`,
         senderNameOverride: pubName,
       });
     }
@@ -1833,9 +1822,9 @@ export class VttActorSheetComponent {
     if (typeof this.vttStore.postLog === 'function') {
       const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
-        kind: 'roll',
-        title: `${pubName} used Stance Recovery (1 AP)`,
-        detail: 'Recovered +3 SP',
+        kind: 'system',
+        title: 'Stance Recovery',
+        detail: '+3 SP',
         senderNameOverride: pubName,
       });
     }
@@ -1843,7 +1832,7 @@ export class VttActorSheetComponent {
 
   async spendNpcTacticalAction(
     actionLabel: string,
-    detailText: string,
+    _detailText?: string,
     apCost = 1
   ): Promise<void> {
     if (!this.canEdit()) return;
@@ -1859,7 +1848,7 @@ export class VttActorSheetComponent {
       await this.vttStore.postLog({
         kind: 'system',
         title: `${pubName} used ${actionLabel} (${apCost} AP)`,
-        detail: detailText,
+        detail: null,
         senderNameOverride: pubName,
       });
     }

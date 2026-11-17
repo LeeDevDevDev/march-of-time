@@ -951,6 +951,7 @@
           >
             <button
               type="button"
+              data-sidebar-tab="chat"
               (click)="sidebarTab.set('log')"
               class="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 transition-colors"
               [class.bg-[var(--mot-surface)]]="sidebarTab() === 'log'"
@@ -961,7 +962,7 @@
               <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              <span class="truncate">Log</span>
+              <span class="truncate">Chat</span>
             </button>
 
             <button
@@ -1045,7 +1046,7 @@
               >
                 @if (visibleEntries.length === 0) {
                   <p class="py-8 text-center text-xs text-[var(--mot-muted)]">
-                    No rolls or clashes logged yet. Click any die below or type /r to roll!
+                    No messages yet. Type below, click a die, or use /r to roll.
                   </p>
                 } @else {
                   @for (entry of visibleEntries; track entry.id) {
@@ -1055,8 +1056,12 @@
                     @let speakerColor = getLogSpeakerColor(entry);
                     @let speakerVis = !oocCard ? vttStore.getLogSpeakerVisuals(entry) : null;
                     @let privacyBadge = getLogPrivacyBadge(entry);
+                    @let rollChips = getLogRollChips(entry);
+                    @let clashOutcome = getClashOutcomeCardView(entry);
+                    @let clashRoll = getClashRollCardView(entry);
+                    @let rollView = getRollCardView(entry);
                     <div
-                      class="group rounded-xl border p-2.5 space-y-1"
+                      class="group rounded-xl border p-2.5 space-y-1.5"
                       [class.border-[#8B5CF6]/60]="whisperCard"
                       [class.bg-[#8B5CF6]/10]="whisperCard"
                       [class.border-[#C4491A]]="!whisperCard && entry.kind === 'clash'"
@@ -1071,14 +1076,15 @@
                       <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--mot-muted)]">
                         <div class="flex min-w-0 items-center gap-1.5">
                           @if (speakerVis) {
-                            <div class="h-6 w-6 shrink-0">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center">
                               <app-token-avatar
+                                [sizePx]="20"
                                 [tokenImageUrl]="speakerVis.displayImageUrl"
                                 [appearance]="speakerVis.appearance"
                                 [icon]="speakerVis.icon"
                                 [color]="speakerVis.color"
                                 [faction]="speakerVis.faction"
-                                iconSizeClass="h-3 w-3"
+                                iconSizeClass="h-2.5 w-2.5"
                               />
                             </div>
                           } @else if (speakerColor && !oocCard) {
@@ -1119,8 +1125,8 @@
                             <button
                               type="button"
                               (click)="deleteLogEntry(entry.id)"
-                              title="Delete Log Entry"
-                              aria-label="Delete Log Entry"
+                              title="Delete Message"
+                              aria-label="Delete Message"
                               class="rounded px-1 py-0.5 text-[11px] leading-none font-bold text-[var(--mot-muted)] opacity-60 transition-opacity group-hover:opacity-100 hover:bg-[#F43F5E]/15 hover:text-[#F43F5E]"
                             >
                               &times;
@@ -1128,40 +1134,221 @@
                           }
                         </div>
                       </div>
-                      <div
-                        class="font-bold text-[var(--mot-text)] break-words"
-                        [class.italic]="isEmoteLog(entry)"
-                      >
-                        {{ entry.title }}
-                      </div>
-                      @let rollChips = getLogRollChips(entry);
-                      @if (rollChips.length > 0) {
-                        <div class="flex flex-wrap items-center gap-1 pt-0.5">
-                          @for (chip of rollChips; track $index) {
-                            <span
-                              class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
-                              [class.opacity-45]="chip.dropped"
-                              [class.line-through]="chip.dropped"
-                              [class.border-[#38B29A]]="!chip.dropped && chip.isMax"
-                              [class.bg-[var(--mot-jade-bg)]]="!chip.dropped && chip.isMax"
-                              [class.text-[var(--mot-jade-text)]]="!chip.dropped && chip.isMax"
-                              [class.border-[var(--mot-hp)]]="!chip.dropped && !chip.isMax && chip.isMin"
-                              [class.bg-[var(--mot-hp-bg)]]="!chip.dropped && !chip.isMax && chip.isMin"
-                              [class.text-[var(--mot-hp-text)]]="!chip.dropped && !chip.isMax && chip.isMin"
-                              [class.border-[var(--mot-border)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
-                              [class.bg-[var(--mot-surface)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
-                              [class.text-[var(--mot-text)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
-                            >
-                              <span class="text-[9px] font-semibold uppercase text-[var(--mot-muted)]">{{ chip.dieType }}</span>
-                              <span>{{ chip.value }}</span>
+
+                      @if (clashOutcome) {
+                        <div data-chat-clash-outcome="true" class="space-y-1.5">
+                          <div class="flex flex-wrap items-center justify-between gap-1.5">
+                            <span class="font-display text-xs font-bold text-[var(--mot-text)]">
+                              {{ clashOutcome.attackerName }} &rarr; {{ clashOutcome.defenderName }}
                             </span>
+                            <span class="font-semibold text-[10px] text-[var(--mot-muted)]">
+                              {{ clashOutcome.actionName }}
+                            </span>
+                          </div>
+
+                          <div class="flex flex-wrap items-center justify-between gap-1.5">
+                            <span
+                              class="rounded-md border px-2 py-0.5 text-[10px] font-bold"
+                              [class.border-[var(--mot-hp)]]="clashOutcome.hitLanded"
+                              [class.bg-[var(--mot-surface)]]="clashOutcome.hitLanded"
+                              [class.text-[var(--mot-hp-text)]]="clashOutcome.hitLanded"
+                              [class.border-[var(--mot-jade-border)]]="!clashOutcome.hitLanded"
+                              [class.bg-[var(--mot-surface)]]="!clashOutcome.hitLanded"
+                              [class.text-[var(--mot-jade-text)]]="!clashOutcome.hitLanded"
+                            >
+                              {{ clashOutcome.statusLabel }}
+                            </span>
+
+                            <div class="flex flex-wrap items-center gap-1">
+                              @if (clashOutcome.spDamage > 0) {
+                                <span
+                                  data-clash-sp-dmg="true"
+                                  class="rounded-md border border-[#F59E0B]/55 bg-[#2B1D0E] px-2 py-0.5 font-mono-num text-[11px] font-extrabold text-[#FBBF24]"
+                                >
+                                  &minus;{{ clashOutcome.spDamage }} SP
+                                </span>
+                              }
+                              @if (clashOutcome.hpDamage > 0) {
+                                <span
+                                  data-clash-hp-dmg="true"
+                                  class="rounded-md border border-[var(--mot-hp)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-extrabold text-[var(--mot-hp-text)]"
+                                >
+                                  &minus;{{ clashOutcome.hpDamage }} HP
+                                </span>
+                              }
+                              @if (clashOutcome.counterSp > 0) {
+                                <span
+                                  data-clash-counter-sp="true"
+                                  class="rounded-md border border-[var(--mot-jade-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[11px] font-extrabold text-[var(--mot-jade-text)]"
+                                >
+                                  Counter &minus;{{ clashOutcome.counterSp }} SP
+                                </span>
+                              }
+                              @if (clashOutcome.hitLanded && clashOutcome.spDamage === 0 && clashOutcome.hpDamage === 0) {
+                                <span class="rounded-md border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-muted)]">
+                                  0 DMG
+                                </span>
+                              }
+                            </div>
+                          </div>
+
+                          @if (clashOutcome.statuses.length > 0) {
+                            <div class="flex flex-wrap items-center gap-1">
+                              @for (st of clashOutcome.statuses; track st) {
+                                <span class="rounded border border-[#FDA4AF]/45 bg-[#3B1822] px-1.5 py-0.25 text-[9px] font-bold text-[#FDA4AF]">
+                                  {{ st }}
+                                </span>
+                              }
+                            </div>
                           }
                         </div>
-                      }
-                      @if (entry.detail) {
-                        <div class="whitespace-pre-line font-mono-num text-[11px] text-[var(--mot-muted)]">
-                          {{ entry.detail }}
+                      } @else if (clashRoll) {
+                        <div data-chat-clash-roll="true" class="flex items-center justify-between gap-2">
+                          <div class="min-w-0 flex-1 space-y-1">
+                            <div class="truncate font-display text-xs font-bold text-[var(--mot-text)]">
+                              {{ clashRoll.attackerName }} &rarr; {{ clashRoll.defenderName }}
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1">
+                              <span class="text-[11px] font-semibold text-[var(--mot-muted)]">
+                                {{ clashRoll.actionName }}
+                              </span>
+                              @if (clashRoll.flatDamage !== null) {
+                                <span class="rounded border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-[1px] font-mono-num text-[10px] font-bold text-[var(--mot-accent-text)]">
+                                  {{ clashRoll.flatDamage }} DMG
+                                </span>
+                              }
+                            </div>
+                            <div
+                              class="text-[10px] font-bold"
+                              [class.text-[var(--mot-hp-text)]]="clashRoll.hitLanded"
+                              [class.text-[var(--mot-jade-text)]]="!clashRoll.hitLanded"
+                            >
+                              {{ clashRoll.statusLabel }}
+                            </div>
+                          </div>
+
+                          <div class="flex shrink-0 items-center gap-1.5">
+                            <div class="flex min-w-[44px] flex-col items-center rounded-lg border border-[#C4491A]/55 bg-[var(--mot-surface)] px-2 py-1">
+                              <span class="text-[8px] font-bold uppercase text-[var(--mot-accent-text)]">ATK</span>
+                              <span class="font-mono-num text-base leading-tight font-extrabold text-[var(--mot-text)]">
+                                {{ clashRoll.attackTotal }}
+                              </span>
+                            </div>
+                            <div class="flex min-w-[44px] flex-col items-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-1">
+                              <span class="text-[8px] font-bold uppercase text-[var(--mot-muted)]">
+                                {{ clashRoll.defenseLabel }}
+                              </span>
+                              <span class="font-mono-num text-base leading-tight font-extrabold text-[var(--mot-text)]">
+                                {{ clashRoll.defenseTotal !== null ? clashRoll.defenseTotal : '—' }}
+                              </span>
+                            </div>
+                          </div>
                         </div>
+                      } @else if (rollView) {
+                        <div data-chat-roll-card="true" class="flex items-center justify-between gap-2.5">
+                          <div class="min-w-0 flex-1 space-y-1">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                              <span class="font-display text-xs font-bold text-[var(--mot-text)] break-words">
+                                {{ rollView.label }}
+                              </span>
+                              @if (rollView.formula) {
+                                <span class="rounded bg-[var(--mot-surface)] px-1.5 py-[1px] font-mono-num text-[10px] font-semibold text-[var(--mot-muted)]">
+                                  {{ rollView.formula }}
+                                </span>
+                              }
+                            </div>
+
+                            @if (rollChips.length > 0 || rollView.flatDamage !== null || rollView.combatTags.length > 0) {
+                              <div class="flex flex-wrap items-center gap-1">
+                                @for (chip of rollChips; track $index) {
+                                  <span
+                                    class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                                    [class.opacity-45]="chip.dropped"
+                                    [class.line-through]="chip.dropped"
+                                    [class.border-[#38B29A]]="!chip.dropped && chip.isMax"
+                                    [class.bg-[var(--mot-jade-bg)]]="!chip.dropped && chip.isMax"
+                                    [class.text-[var(--mot-jade-text)]]="!chip.dropped && chip.isMax"
+                                    [class.border-[var(--mot-hp)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                    [class.bg-[var(--mot-hp-bg)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                    [class.text-[var(--mot-hp-text)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                    [class.border-[var(--mot-border)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                                    [class.bg-[var(--mot-surface)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                                    [class.text-[var(--mot-text)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                                  >
+                                    <span class="text-[9px] font-semibold uppercase text-[var(--mot-muted)]">{{ chip.dieType }}</span>
+                                    <span>{{ chip.value }}</span>
+                                  </span>
+                                }
+                                @if (rollView.flatDamage !== null) {
+                                  <span
+                                    data-roll-flat-dmg="true"
+                                    class="inline-flex items-center rounded-md border border-[#C4491A]/50 bg-[#C4491A]/15 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[var(--mot-accent-text)]"
+                                  >
+                                    {{ rollView.flatDamage }} DMG
+                                  </span>
+                                }
+                                @for (tag of rollView.combatTags; track tag) {
+                                  <span
+                                    class="rounded border px-1.5 py-0.5 text-[9px] font-bold"
+                                    [class]="tagBadgeClass(tag)"
+                                  >
+                                    {{ tag }}
+                                  </span>
+                                }
+                              </div>
+                            }
+
+                            @if (rollView.subNote) {
+                              <div class="font-mono-num text-[10px] text-[var(--mot-muted)]">
+                                {{ rollView.subNote }}
+                              </div>
+                            }
+                          </div>
+
+                          <div
+                            data-roll-total-badge="true"
+                            class="flex min-w-[52px] shrink-0 flex-col items-center justify-center rounded-xl border border-[#C4491A]/55 bg-[var(--mot-surface)] px-2.5 py-1.5 shadow-xs"
+                          >
+                            <span class="font-mono-num text-xl leading-none font-extrabold text-[var(--mot-text)]">
+                              {{ rollView.total }}
+                            </span>
+                          </div>
+                        </div>
+                      } @else {
+                        <div
+                          class="font-bold text-[var(--mot-text)] break-words"
+                          [class.italic]="isEmoteLog(entry)"
+                        >
+                          {{ entry.title }}
+                        </div>
+                        @if (rollChips.length > 0) {
+                          <div class="flex flex-wrap items-center gap-1 pt-0.5">
+                            @for (chip of rollChips; track $index) {
+                              <span
+                                class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono-num text-[10px] font-bold"
+                                [class.opacity-45]="chip.dropped"
+                                [class.line-through]="chip.dropped"
+                                [class.border-[#38B29A]]="!chip.dropped && chip.isMax"
+                                [class.bg-[var(--mot-jade-bg)]]="!chip.dropped && chip.isMax"
+                                [class.text-[var(--mot-jade-text)]]="!chip.dropped && chip.isMax"
+                                [class.border-[var(--mot-hp)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                [class.bg-[var(--mot-hp-bg)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                [class.text-[var(--mot-hp-text)]]="!chip.dropped && !chip.isMax && chip.isMin"
+                                [class.border-[var(--mot-border)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                                [class.bg-[var(--mot-surface)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                                [class.text-[var(--mot-text)]]="chip.dropped || (!chip.isMax && !chip.isMin)"
+                              >
+                                <span class="text-[9px] font-semibold uppercase text-[var(--mot-muted)]">{{ chip.dieType }}</span>
+                                <span>{{ chip.value }}</span>
+                              </span>
+                            }
+                          </div>
+                        }
+                        @if (entry.detail) {
+                          <div class="whitespace-pre-line font-mono-num text-[11px] text-[var(--mot-muted)]">
+                            {{ entry.detail }}
+                          </div>
+                        }
                       }
                     </div>
                   }
@@ -1171,7 +1358,7 @@
               <div class="shrink-0 border-t border-[var(--mot-border)] bg-[var(--mot-surface-raised)] p-3 space-y-2 text-xs">
                 @if (vttStore.isGm() && confirmClearLogs()) {
                   <div class="flex items-center justify-between gap-2 rounded-lg border border-[#F43F5E]/60 bg-[#F43F5E]/10 px-2.5 py-1.5 text-[11px]">
-                    <span class="font-bold text-[#F43F5E]">Clear all log entries?</span>
+                    <span class="font-bold text-[#F43F5E]">Clear chat history?</span>
                     <div class="flex shrink-0 items-center gap-1.5">
                       <button
                         type="button"
@@ -1192,16 +1379,22 @@
                 }
 
                 <div class="space-y-1.5">
-                  <div class="flex items-center justify-between gap-1.5 text-[10px]">
+                  <div
+                    data-chat-composer-toolbar="true"
+                    class="flex h-7 items-center justify-between gap-1.5 overflow-hidden text-[10px]"
+                  >
                     @if (vttStore.isGm()) {
                       @let activeChar = vttStore.activeCharacterSpeaker();
                       @let gmMode = vttStore.gmSpeakerMode();
-                      <div class="inline-flex min-w-0 items-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] p-0.5 font-bold">
+                      <div
+                        data-chat-speaker-toggle="gm"
+                        class="inline-flex h-7 min-w-0 flex-1 max-w-[196px] items-center rounded-lg border border-[var(--mot-border)] bg-[var(--mot-well)] p-0.5 font-bold"
+                      >
                         <button
                           type="button"
                           (click)="setGmSpeakerMode('user')"
                           title="Speak publicly as yourself (GM)"
-                          class="shrink-0 rounded-md px-2 py-0.5 transition-colors"
+                          class="inline-flex h-full shrink-0 items-center justify-center rounded-md px-2 leading-none transition-colors"
                           [class.bg-[var(--mot-surface)]]="gmMode === 'user'"
                           [class.text-[var(--mot-text)]]="gmMode === 'user'"
                           [class.shadow-xs]="gmMode === 'user'"
@@ -1211,9 +1404,10 @@
                         </button>
                         <button
                           type="button"
+                          data-gm-character-speaker-btn="true"
                           (click)="setGmSpeakerMode('character')"
                           [title]="activeChar ? 'Speak publicly as ' + activeChar.name : 'Select a token, action, or character to speak as them'"
-                          class="inline-flex min-w-0 items-center gap-1 rounded-md px-2 py-0.5 transition-colors"
+                          class="inline-flex h-full min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 leading-none transition-colors"
                           [class.bg-[var(--mot-surface)]]="gmMode === 'character'"
                           [class.text-[var(--mot-text)]]="gmMode === 'character'"
                           [class.shadow-xs]="gmMode === 'character'"
@@ -1221,8 +1415,9 @@
                         >
                           @if (activeChar) {
                             @let gmCompVis = getSpeakerComposerAppearance(activeChar);
-                            <span class="h-4 w-4 shrink-0">
+                            <span class="flex h-4 w-4 shrink-0 items-center justify-center">
                               <app-token-avatar
+                                [sizePx]="15"
                                 [tokenImageUrl]="gmCompVis.displayImageUrl"
                                 [appearance]="gmCompVis.appearance"
                                 [icon]="activeChar.icon || 'user'"
@@ -1232,7 +1427,7 @@
                               />
                             </span>
                           }
-                          <span class="max-w-[92px] truncate">
+                          <span class="min-w-0 truncate">
                             {{ activeChar ? activeChar.name : 'Character' }}
                           </span>
                         </button>
@@ -1240,11 +1435,15 @@
                     } @else {
                       @let effSpeaker = vttStore.effectivePublicSpeaker();
                       @let oocActive = activeSlashCommand()?.config?.action === 'ooc';
-                      <div class="flex min-w-0 items-center gap-1.5">
+                      <div
+                        data-chat-speaker-toggle="player"
+                        class="flex h-7 min-w-0 flex-1 items-center gap-1.5 overflow-hidden"
+                      >
                         @if (!oocActive && effSpeaker.mode === 'character') {
                           @let plCompVis = getSpeakerComposerAppearance(effSpeaker);
-                          <span class="h-4 w-4 shrink-0">
+                          <span class="flex h-4 w-4 shrink-0 items-center justify-center">
                             <app-token-avatar
+                              [sizePx]="15"
                               [tokenImageUrl]="plCompVis.displayImageUrl"
                               [appearance]="plCompVis.appearance"
                               [icon]="effSpeaker.icon || 'user'"
@@ -1255,7 +1454,7 @@
                           </span>
                         }
                         <span
-                          class="max-w-[104px] truncate text-[var(--mot-muted)]"
+                          class="min-w-0 max-w-[112px] truncate leading-none text-[var(--mot-muted)]"
                           [title]="'Speaking as ' + (oocActive ? (authStore.displayName() || 'Adventurer') : effSpeaker.name)"
                         >
                           As <strong class="text-[var(--mot-text)]">{{ oocActive ? (authStore.displayName() || 'Adventurer') : effSpeaker.name }}</strong>
@@ -1264,7 +1463,7 @@
                           type="button"
                           (click)="toggleOocComposer()"
                           title="Toggle Out-of-Character (/ooc)"
-                          class="shrink-0 rounded border px-1.5 py-0.5 font-bold transition-colors"
+                          class="inline-flex h-6 shrink-0 items-center justify-center rounded border px-1.5 leading-none font-bold transition-colors"
                           [class.border-[#38B29A]]="oocActive"
                           [class.bg-[var(--mot-jade-bg)]]="oocActive"
                           [class.text-[var(--mot-jade-text)]]="oocActive"
@@ -1278,13 +1477,13 @@
                       </div>
                     }
 
-                    <div class="flex shrink-0 items-center gap-1">
+                    <div class="flex h-7 shrink-0 items-center gap-1">
                       @if (customPoolTotalCount() > 0 || isRollComposerActive()) {
                         <button
                           type="button"
                           (click)="clearDicePool()"
                           title="Reset Roll Formula"
-                          class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                          class="inline-flex h-6 items-center justify-center rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 leading-none font-bold text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
                         >
                           Reset
                         </button>
@@ -1294,7 +1493,7 @@
                         (click)="openSlashCommandsMenu()"
                         title="Slash Commands"
                         aria-label="Slash Commands"
-                        class="rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-mono-num font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                        class="inline-flex h-6 items-center justify-center rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 font-mono-num leading-none font-bold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
                       >
                         /
                       </button>
@@ -1303,7 +1502,7 @@
                         (click)="openSettingsModal('dice')"
                         title="Customize 3D Dice Colors &amp; Texture"
                         aria-label="Customize 3D Dice Colors and Texture"
-                        class="inline-flex items-center gap-1 rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 py-0.5 font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
+                        class="inline-flex h-6 items-center justify-center gap-1 rounded border border-[var(--mot-border)] bg-[var(--mot-well)] px-1.5 leading-none font-semibold text-[var(--mot-muted)] hover:border-[#C4491A] hover:text-[var(--mot-text)]"
                       >
                         <span
                           class="h-2.5 w-2.5 rounded-full border border-white/25"
@@ -1315,9 +1514,9 @@
                         <button
                           type="button"
                           (click)="requestClearAllLogs()"
-                          title="Clear Log"
-                          aria-label="Clear Log"
-                          class="inline-flex items-center justify-center rounded border border-[var(--mot-border)] bg-[var(--mot-well)] p-1 text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
+                          title="Clear Chat"
+                          aria-label="Clear Chat"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--mot-border)] bg-[var(--mot-well)] text-[var(--mot-muted)] hover:border-[#F43F5E] hover:text-[#F43F5E]"
                         >
                           <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="3 6 5 6 21 6" />
@@ -1325,7 +1524,7 @@
                             <path d="M10 11v6M14 11v6" />
                             <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                           </svg>
-                          <span class="sr-only">Clear Log</span>
+                          <span class="sr-only">Clear Chat</span>
                         </button>
                       }
                     </div>
@@ -2814,7 +3013,7 @@
                 @if (vttStore.isGm()) {
                   <div class="space-y-2 border-t border-[var(--mot-border)] pt-3">
                     <div class="px-0.5 font-display text-[10px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
-                      Campaign Log
+                      Campaign Chat
                     </div>
 
                     @if (!confirmClearLogs()) {
@@ -2826,7 +3025,7 @@
                       >
                         <div class="min-w-0">
                           <div class="font-display text-xs font-bold text-[var(--mot-text)]">
-                            Clear Log
+                            Clear Chat
                           </div>
                           <div class="truncate text-[11px] text-[var(--mot-muted)]">
                             Remove all chat and roll history for this campaign
@@ -2841,7 +3040,7 @@
                       </button>
                     } @else {
                       <div class="flex items-center justify-between gap-2 rounded-xl border border-[#F43F5E]/60 bg-[#F43F5E]/10 p-3">
-                        <span class="font-bold text-[#F43F5E]">Clear all log entries?</span>
+                        <span class="font-bold text-[#F43F5E]">Clear chat history?</span>
                         <div class="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"

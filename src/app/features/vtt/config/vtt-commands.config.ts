@@ -57,7 +57,7 @@ export const VTT_CHAT_COMMANDS: readonly VttChatCommandConfig[] = [
     primary: '/clear',
     aliases: ['/cls'],
     usage: '',
-    description: 'Clear all campaign log entries',
+    description: 'Clear chat history',
     gmOnly: true,
   },
   {

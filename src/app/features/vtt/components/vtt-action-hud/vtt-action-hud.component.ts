@@ -615,6 +615,12 @@ export class VttActionHudComponent {
   }
 
   getArtCooldown(art: ResolvedCombatArt): number {
+    if (
+      typeof this.vttStore.isTokenInActiveCombat === 'function' &&
+      !this.vttStore.isTokenInActiveCombat(this.token())
+    ) {
+      return 0;
+    }
     return this.vttStore.getPerkCooldown(this.char(), art.baseNode.id);
   }
 
@@ -1213,14 +1219,14 @@ export class VttActionHudComponent {
       await this.rollHudCheck(
         `${wepName} Attack`,
         st.attackRollMod,
-        `${st.flatWeaponDamage} Flat DMG`
+        `${st.flatWeaponDamage} DMG`
       );
       return;
     }
     const npcWep = tok.npc_stats?.weapon_name || 'Melee Strike';
     const npcMod = Number(tok.npc_stats?.attack_mod ?? 3);
     const npcDmg = Number(tok.npc_stats?.flat_damage ?? 4);
-    await this.rollHudCheck(`${npcWep} Attack`, npcMod, `${npcDmg} Flat DMG`);
+    await this.rollHudCheck(`${npcWep} Attack`, npcMod, `${npcDmg} DMG`);
   }
 
   async swapWeaponSlot(): Promise<void> {
@@ -1367,7 +1373,7 @@ export class VttActionHudComponent {
 
   async triggerTacticalAction(
     label: 'Move' | 'Aim' | 'Interact',
-    detailText: string
+    _detailText?: string
   ): Promise<void> {
     if (this.isMultiSelect()) {
       const eligible = this.controllableGroup().filter(
@@ -1385,8 +1391,8 @@ export class VttActionHudComponent {
         const names = eligible.map((t) => t.name).join(', ');
         await this.vttStore.postLog({
           kind: 'system',
-          title: `${eligible.length} tokens used ${label} (1 AP each)`,
-          detail: `${names} · ${detailText}`,
+          title: `${eligible.length} tokens used ${label} (1 AP)`,
+          detail: names,
         });
       }
       return;
@@ -1403,7 +1409,7 @@ export class VttActionHudComponent {
       await this.vttStore.postLog({
         kind: 'system',
         title: `${tok.name} used ${label} (1 AP)`,
-        detail: detailText,
+        detail: null,
         senderNameOverride: tok.name,
       });
     }
@@ -1419,7 +1425,7 @@ export class VttActionHudComponent {
         t,
         `${attr} Check`,
         val,
-        `2d10 + ${attr} (${val >= 0 ? '+' : ''}${val})`
+        `${attr} ${val >= 0 ? '+' : ''}${val}`
       );
     }
   }
@@ -1534,8 +1540,8 @@ export class VttActionHudComponent {
     if (typeof this.vttStore.postLog === 'function') {
       await this.vttStore.postLog({
         kind: 'system',
-        title: `${tok.name} used ${item.name} (1 AP)`,
-        detail: item.description || item.subcategory || 'Adventuring Gear',
+        title: `Used ${item.name}`,
+        detail: consumeOne ? '−1 qty' : null,
         senderNameOverride: tok.name,
       });
     }
