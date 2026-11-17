@@ -12,6 +12,7 @@ import {
 } from './core/assets/user-assets.model';
 import { UserAssetsService } from './core/assets/user-assets.service';
 import { UserAssetsStore } from './core/assets/user-assets.store';
+import { buildAppAbsoluteUrl } from './core/auth/auth.model';
 import { AuthService } from './core/auth/auth.service';
 import {
   ArmorModel,
@@ -14172,5 +14173,49 @@ describe('App', () => {
         'node-round-sunder'
       )
     ).toBe(0);
+  });
+
+  it('includes the GitHub Pages base href in Google OAuth redirect URLs and campaign invite links', async () => {
+    TestBed.resetTestingModule();
+    let capturedGoogleRedirect = '';
+
+    await TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthService,
+          useValue: {
+            getSessionUser: async () => null,
+            onAuthStateChange: () => undefined,
+            fetchProfile: async () => null,
+            signInWithGoogle: async (redirectToUrl: string) => {
+              capturedGoogleRedirect = redirectToUrl;
+              return null;
+            },
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const baseEl = document.createElement('base');
+    baseEl.setAttribute('href', '/march-of-time/');
+    document.head.appendChild(baseEl);
+
+    try {
+      expect(buildAppAbsoluteUrl('')).toBe(
+        `${window.location.origin}/march-of-time/`
+      );
+      expect(buildAppAbsoluteUrl('dashboard?invite=JOIN77')).toBe(
+        `${window.location.origin}/march-of-time/dashboard?invite=JOIN77`
+      );
+
+      const authStore = TestBed.inject(AuthStore);
+      await authStore.signInWithGoogle();
+      expect(capturedGoogleRedirect).toBe(
+        `${window.location.origin}/march-of-time/`
+      );
+    } finally {
+      baseEl.remove();
+    }
   });
 });

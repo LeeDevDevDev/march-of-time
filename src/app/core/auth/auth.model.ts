@@ -18,3 +18,24 @@ export function sanitizeHandle(raw: string): string {
     .replace(/[^a-z0-9_]/g, '')
     .slice(0, 24);
 }
+
+export function buildAppAbsoluteUrl(relativePath = ''): string {
+  const cleanRel = relativePath.replace(/^\/+/, '');
+  if (typeof window === 'undefined') {
+    return `/${cleanRel}`;
+  }
+  const origin = window.location?.origin ?? '';
+  const rawBase =
+    typeof document !== 'undefined'
+      ? (document.querySelector('base')?.getAttribute('href') ?? '/')
+      : '/';
+  if (rawBase.startsWith('http://') || rawBase.startsWith('https://')) {
+    const normalizedAbsBase = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+    return `${normalizedAbsBase}${cleanRel}`;
+  }
+  const withLeading = rawBase.startsWith('/') ? rawBase : `/${rawBase}`;
+  const normalizedBase = withLeading.endsWith('/')
+    ? withLeading
+    : `${withLeading}/`;
+  return `${origin}${normalizedBase}${cleanRel}`;
+}

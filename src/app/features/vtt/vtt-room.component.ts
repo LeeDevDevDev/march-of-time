@@ -19,6 +19,7 @@ import {
   formatAssetByteSize,
 } from '../../core/assets/user-assets.model';
 import { UserAssetsStore } from '../../core/assets/user-assets.store';
+import { buildAppAbsoluteUrl } from '../../core/auth/auth.model';
 import { AuthStore } from '../../core/auth/auth.store';
 import {
   ActiveCombatTag,
@@ -534,11 +535,7 @@ export class VttRoomComponent {
   readonly campaignInviteLink = computed<string>(() => {
     const code = this.vttStore.campaign()?.invite_code;
     if (!code) return '';
-    const origin =
-      typeof window !== 'undefined' && window.location?.origin
-        ? window.location.origin
-        : '';
-    return `${origin}/dashboard?invite=${encodeURIComponent(code)}`;
+    return buildAppAbsoluteUrl(`dashboard?invite=${encodeURIComponent(code)}`);
   });
 
   readonly visibleHotkeyBindings = computed<VttHotkeyBindingMeta[]>(() =>

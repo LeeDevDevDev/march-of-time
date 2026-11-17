@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
 import { SupabaseService } from '../supabase/supabase.service';
-import { UserProfile } from './auth.model';
+import { UserProfile, buildAppAbsoluteUrl } from './auth.model';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -73,6 +73,7 @@ export class AuthService {
       email: input.email,
       password: input.password,
       options: {
+        emailRedirectTo: buildAppAbsoluteUrl(''),
         data: {
           full_name: input.displayName || input.email.split('@')[0],
           handle: input.cleanHandle,

@@ -2,7 +2,11 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { User } from '@supabase/supabase-js';
 import { ThemeStore } from '../theme/theme.store';
-import { UserProfile, sanitizeHandle } from './auth.model';
+import {
+  UserProfile,
+  buildAppAbsoluteUrl,
+  sanitizeHandle,
+} from './auth.model';
 import { AuthService } from './auth.service';
 
 interface AuthState {
@@ -244,7 +248,7 @@ export class AuthStore {
   async signInWithGoogle(): Promise<void> {
     this.#state.update((s) => ({ ...s, error: null }));
     const err = await this.authService.signInWithGoogle(
-      `${window.location.origin}/dashboard`
+      buildAppAbsoluteUrl('')
     );
     if (err) {
       this.#state.update((s) => ({ ...s, error: err }));
