@@ -74,6 +74,7 @@ import {
 } from '../characters/models/character.model';
 import { CharacterStore } from '../characters/store/character.store';
 import { CollectionsStore } from '../collections/collections.store';
+import { VttActionHudComponent } from './components/vtt-action-hud/vtt-action-hud.component';
 import { VttActorSheetComponent } from './components/vtt-actor-sheet/vtt-actor-sheet.component';
 import { VttCanvasComponent } from './components/vtt-canvas/vtt-canvas.component';
 import { VttDiceOverlayComponent } from './components/vtt-dice-overlay/vtt-dice-overlay.component';
@@ -240,6 +241,7 @@ export interface EditingMapDraft {
     ColorPickerComponent,
     CompendiumIconComponent,
     TokenAvatarComponent,
+    VttActionHudComponent,
     VttActorSheetComponent,
     VttCanvasComponent,
     VttDiceOverlayComponent,
@@ -2852,6 +2854,16 @@ export class VttRoomComponent {
   readonly multiSelectedTokens = computed<VttTokenModel[]>(() => {
     const list = this.vttStore.controllableSelectedTokens();
     return list.length > 1 ? list : [];
+  });
+
+  readonly hudSelectedTokens = computed<readonly VttTokenModel[]>(() => {
+    const multi = this.multiSelectedTokens();
+    if (multi.length > 1) return multi;
+    const single = this.vttStore.selectedToken();
+    if (single && (this.vttStore.isGm() || this.vttStore.canControlToken(single))) {
+      return [single];
+    }
+    return [];
   });
 
   readonly multiSelectedAllHidden = computed<boolean>(() => {

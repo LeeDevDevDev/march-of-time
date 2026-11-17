@@ -83,6 +83,7 @@ import { CharacterStore } from './store/character.store';
 export type CharacterSheetViewTab =
   | 'actions'
   | 'character'
+  | 'field_skills'
   | 'loadout'
   | 'perks'
   | 'all';

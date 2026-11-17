@@ -325,7 +325,7 @@
       <nav
         aria-label="Character Sheet Sections"
         data-char-sheet-tabs="true"
-        class="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1.5 text-xs font-bold sm:grid-cols-5"
+        class="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-1.5 text-xs font-bold sm:grid-cols-6"
       >
         <button
           type="button"
@@ -347,7 +347,18 @@
           [class.text-[var(--mot-muted)]]="sTab !== 'character'"
           [class.hover:text-[var(--mot-text)]]="sTab !== 'character'"
         >
-          Character &amp; Skills
+          Attributes &amp; Combat
+        </button>
+        <button
+          type="button"
+          data-char-sheet-tab="field_skills"
+          (click)="sheetTab.set('field_skills')"
+          class="rounded-lg px-3 py-2 transition-colors"
+          [class.btn-copper]="sTab === 'field_skills'"
+          [class.text-[var(--mot-muted)]]="sTab !== 'field_skills'"
+          [class.hover:text-[var(--mot-text)]]="sTab !== 'field_skills'"
+        >
+          Field Skills
         </button>
         <button
           type="button"
@@ -358,7 +369,7 @@
           [class.text-[var(--mot-muted)]]="sTab !== 'loadout'"
           [class.hover:text-[var(--mot-text)]]="sTab !== 'loadout'"
         >
-          Loadout &amp; Inventory ({{ getTotalCategorizedCount(char, stats) }})
+          Loadout ({{ getTotalCategorizedCount(char, stats) }})
         </button>
         <button
           type="button"
@@ -375,7 +386,7 @@
           type="button"
           data-char-sheet-tab="all"
           (click)="sheetTab.set('all')"
-          class="col-span-2 rounded-lg px-3 py-2 transition-colors sm:col-span-1"
+          class="rounded-lg px-3 py-2 transition-colors"
           [class.btn-copper]="sTab === 'all'"
           [class.text-[var(--mot-muted)]]="sTab !== 'all'"
           [class.hover:text-[var(--mot-text)]]="sTab !== 'all'"
@@ -1160,7 +1171,11 @@
       @if (sTab !== 'actions') {
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
         @if (sTab === 'character' || sTab === 'all') {
-        <div class="space-y-6 lg:col-span-5">
+        <div
+          class="space-y-6"
+          [class.lg:col-span-5]="sTab === 'all'"
+          [class.lg:col-span-12]="sTab === 'character'"
+        >
           <section
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
           >
@@ -1188,7 +1203,7 @@
           >
             <div class="flex items-center justify-between gap-2">
               <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
-                Combat Skills (5) &amp; Active Defenses
+                Combat Skills &amp; Active Defenses
               </h2>
               <span class="font-mono-num text-xs text-[var(--mot-muted)]">
                 {{ stats.combatSkillSpent }} / {{ stats.combatSkillBudget }} pts
@@ -1438,10 +1453,11 @@
         </div>
         }
 
+        @if (sTab !== 'character') {
         <div
           class="space-y-6"
-          [class.lg:col-span-7]="sTab === 'character' || sTab === 'all'"
-          [class.lg:col-span-12]="sTab === 'loadout' || sTab === 'perks'"
+          [class.lg:col-span-7]="sTab === 'all'"
+          [class.lg:col-span-12]="sTab === 'field_skills' || sTab === 'loadout' || sTab === 'perks'"
         >
           @if (sTab === 'loadout' || sTab === 'all') {
           <section
@@ -2089,13 +2105,14 @@
           </section>
           }
 
-          @if (sTab === 'character' || sTab === 'all') {
+          @if (sTab === 'field_skills' || sTab === 'all') {
           <section
+            data-char-field-skills="true"
             class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-surface)] p-5 tabular-nums"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <h2 class="font-display text-base font-bold text-[var(--mot-text)]">
-                10 Field Skills
+                Field Skills
               </h2>
               <span class="font-mono-num text-xs text-[var(--mot-muted)]">
                 Click any skill to roll 2d10 + MAX(Attr A, Attr B) + Rank
@@ -2914,6 +2931,7 @@
           </section>
           }
         </div>
+        }
       </div>
       }
 

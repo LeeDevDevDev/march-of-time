@@ -24,6 +24,7 @@ import {
 } from '../../../shared/floating-window-stack';
 import {
   ActorInventoryItem,
+  AttributeName,
   CharacterModel,
   DerivedCharacterStats,
   PerkNodeModel,
@@ -131,6 +132,7 @@ import {
   cloneDetachedVttCharacterSheet,
   enrichNpcStatsWithVisuals,
   makeDetachedVttCharacterId,
+  normalizeNpcAttributes,
   normalizeTokenAppearance,
   normalizeTokenRotation,
   parseCharacterIdFromUrlOrInput,
@@ -4684,6 +4686,32 @@ export class VttStore {
         dodge_mod: 1,
         can_dodge: true,
         enables_martial_parry: false,
+        attributes: {
+          Brawn: 0,
+          Agility: 0,
+          Technique: 0,
+          Iron: 0,
+          Cunning: 0,
+        },
+        combat_skills: {
+          Strike: 0,
+          Shoot: 0,
+          Parry: 0,
+          Dodge: 0,
+          Block: 0,
+        },
+        field_skills: {
+          Athletics: 0,
+          Menace: 0,
+          Stealth: 0,
+          Tinkering: 0,
+          Medicine: 0,
+          Survival: 0,
+          Resolve: 0,
+          Perception: 0,
+          Sway: 0,
+          Lore: 0,
+        },
         __darkvision_feet: DEFAULT_VTT_DARKVISION_FEET,
         __inventory: [],
       },
@@ -5567,6 +5595,98 @@ export class VttStore {
     });
 
     await this.patchToken(tokenId, patch);
+    if (affectsVisibility) {
+      this.syncExploredFogFromObservers();
+    }
+  }
+
+  async recordablePatchTokensBatch(
+    entries: readonly { tokenId: string; patch: Partial<VttTokenModel> }[],
+    label: string
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    if (entries.length === 1) {
+      await this.recordablePatchToken(
+        entries[0].tokenId,
+        entries[0].patch,
+        label
+      );
+      return;
+    }
+
+    const undoPatches: {
+      tokenId: string;
+      previousTokenPatch: Partial<VttTokenModel>;
+    }[] = [];
+    const toApply: {
+      tok: VttTokenModel;
+      patch: Partial<VttTokenModel>;
+    }[] = [];
+    let affectsVisibility = false;
+
+    for (const entry of entries) {
+      const existing = this.tokens().find((t) => t.id === entry.tokenId);
+      if (!existing || !this.canControlToken(existing)) continue;
+
+      const previousTokenPatch: Partial<VttTokenModel> = {};
+      let hasChange = false;
+      for (const key of Object.keys(entry.patch) as (keyof VttTokenModel)[]) {
+        const nextVal = entry.patch[key];
+        const prevVal = existing[key];
+        if (nextVal !== prevVal) {
+          hasChange = true;
+          if (Array.isArray(prevVal)) {
+            (previousTokenPatch as Record<string, unknown>)[key] = [...prevVal];
+          } else if (prevVal && typeof prevVal === 'object') {
+            (previousTokenPatch as Record<string, unknown>)[key] = {
+              ...(prevVal as Record<string, unknown>),
+            };
+          } else {
+            (previousTokenPatch as Record<string, unknown>)[key] = prevVal;
+          }
+        }
+      }
+      if (!hasChange) continue;
+
+      if (
+        entry.patch.light_bright_feet !== undefined ||
+        entry.patch.light_dim_feet !== undefined ||
+        entry.patch.vision_feet !== undefined ||
+        entry.patch.darkvision_feet !== undefined ||
+        entry.patch.is_hidden !== undefined
+      ) {
+        affectsVisibility = true;
+      }
+
+      undoPatches.push({ tokenId: existing.id, previousTokenPatch });
+      toApply.push({ tok: existing, patch: entry.patch });
+    }
+
+    if (toApply.length === 0) return;
+    if (toApply.length === 1) {
+      await this.recordablePatchToken(
+        toApply[0].tok.id,
+        toApply[0].patch,
+        label
+      );
+      return;
+    }
+
+    const sceneId = toApply[0].tok.encounter_id;
+    const sc = this.scenes().find((s) => s.id === sceneId);
+    const prevFog =
+      affectsVisibility && sc ? cloneExploredFog(sc.explored_fog) : undefined;
+
+    this.pushUndoEntry(sceneId, label, {
+      kind: 'tokens_batch',
+      patches: undoPatches,
+      previousExploredFog: prevFog,
+      selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+    });
+
+    await Promise.all(
+      toApply.map(({ tok, patch }) => this.patchToken(tok.id, patch))
+    );
     if (affectsVisibility) {
       this.syncExploredFogFromObservers();
     }
@@ -7338,22 +7458,172 @@ export class VttStore {
     await this.patchScene(sc.id, { pending_clash: null });
   }
 
+  resolveTokenInitiativeInfo(tok: VttTokenModel): {
+    mod: number;
+    govAttr: AttributeName;
+  } {
+    const ch = this.resolveCharacterForToken(tok);
+    if (ch) {
+      return {
+        mod: ch.attributes.Cunning ?? 0,
+        govAttr: 'Cunning',
+      };
+    }
+    const actor = this.resolveRosterActorForToken(tok);
+    const attrs = normalizeNpcAttributes(
+      actor?.npc_stats?.attributes ?? tok.npc_stats?.attributes
+    );
+    return {
+      mod: attrs.Cunning ?? 0,
+      govAttr: 'Cunning',
+    };
+  }
+
+  private buildInitiativeOrderForTokens(
+    visibleTokens: readonly VttTokenModel[]
+  ): string[] {
+    const hasAnyRolled = visibleTokens.some(
+      (t) => typeof t.npc_stats?.__initiative === 'number'
+    );
+    if (!hasAnyRolled) {
+      const allies = visibleTokens.filter((t) => t.faction === 'ally');
+      const others = visibleTokens.filter((t) => t.faction !== 'ally');
+      const interleaved: string[] = [];
+      const maxLen = Math.max(allies.length, others.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (allies[i]) interleaved.push(allies[i].id);
+        if (others[i]) interleaved.push(others[i].id);
+      }
+      return interleaved;
+    }
+
+    const rolled = visibleTokens
+      .filter((t) => typeof t.npc_stats?.__initiative === 'number')
+      .slice()
+      .sort((a, b) => {
+        const scoreDiff =
+          Number(b.npc_stats?.__initiative ?? 0) -
+          Number(a.npc_stats?.__initiative ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const modDiff =
+          Number(b.npc_stats?.__initiative_mod ?? 0) -
+          Number(a.npc_stats?.__initiative_mod ?? 0);
+        if (modDiff !== 0) return modDiff;
+        if (a.faction !== b.faction) {
+          return a.faction === 'ally' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+    const unrolled = visibleTokens.filter(
+      (t) => typeof t.npc_stats?.__initiative !== 'number'
+    );
+    return [...rolled.map((t) => t.id), ...unrolled.map((t) => t.id)];
+  }
+
+  async rollInitiativeForTokens(tokenIds: readonly string[]): Promise<void> {
+    const sc = this.activeScene();
+    if (!sc) return;
+    const uniqueIds = Array.from(new Set(tokenIds));
+    const targets = uniqueIds
+      .map((id) => this.sceneTokens().find((t) => t.id === id))
+      .filter(
+        (t): t is VttTokenModel =>
+          t !== undefined && (this.isGm() || this.canControlToken(t))
+      );
+    if (targets.length === 0) return;
+
+    const manual = this.manualRollOverride();
+    let playedCue = false;
+
+    for (const tok of targets) {
+      const { mod, govAttr } = this.resolveTokenInitiativeInfo(tok);
+      const roll =
+        manual !== null
+          ? createManualRoll(manual, mod)
+          : roll2d10Check(mod, this.attackRollMode());
+      const built = buildPhysicalDiceFrom2d10Roll(roll);
+      const vis = this.resolveTokenVisuals(tok);
+      const fullLabel = `${tok.name} · Initiative`;
+
+      await this.patchToken(tok.id, {
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __initiative: roll.total,
+          __initiative_mod: mod,
+        },
+      });
+
+      const speakerVisualExtras: Record<string, unknown> = {
+        speaker_color: tok.color || '#38B29A',
+        speaker_icon: tok.icon || 'greatsword',
+        speaker_faction: tok.faction,
+        ...(vis.portraitUrl ? { speaker_portrait_url: vis.portraitUrl } : {}),
+        ...(vis.tokenImageUrl
+          ? { speaker_token_image_url: vis.tokenImageUrl }
+          : {}),
+        ...(vis.tokenAppearance
+          ? { speaker_token_appearance: vis.tokenAppearance }
+          : {}),
+      };
+
+      const diceThrow =
+        manual === null
+          ? this.createDiceThrowPayload({
+              label: fullLabel,
+              formula: built.formula,
+              total: roll.total,
+              dice: built.physicalDice,
+              senderNameOverride: tok.name,
+            })
+          : undefined;
+
+      if (diceThrow && !playedCue) {
+        playedCue = true;
+        this.settingsStore.playUiCue('dice');
+        this.enqueueDiceThrow(diceThrow, true);
+      }
+
+      await this.postLog({
+        kind: 'roll',
+        title: `${fullLabel} (${built.formula}) → ${roll.total}`,
+        detail: `${govAttr} ${mod >= 0 ? '+' : ''}${mod}`,
+        senderNameOverride: tok.name,
+        payload: {
+          roll,
+          chips: built.chips,
+          formula: built.formula,
+          modifier: mod,
+          total: roll.total,
+          ...(diceThrow ? { diceThrow } : {}),
+          speaker_mode: 'character',
+          ...speakerVisualExtras,
+        },
+      });
+    }
+
+    if (this.isGm()) {
+      const visible = this.sceneTokens().filter((t) => !t.is_hidden);
+      if (visible.length > 0) {
+        const nextOrder = this.buildInitiativeOrderForTokens(visible);
+        await this.patchScene(sc.id, {
+          initiative_order: nextOrder,
+          ...(sc.combat_active && !sc.active_turn_token_id
+            ? { active_turn_token_id: nextOrder[0] ?? null }
+            : {}),
+        });
+      }
+    }
+  }
+
   async startCombatEncounter(): Promise<void> {
     const sc = this.activeScene();
     if (!sc || !this.isGm()) return;
     const visible = this.sceneTokens().filter((t) => !t.is_hidden);
     if (visible.length === 0) return;
 
-    const allies = visible.filter((t) => t.faction === 'ally');
-    const others = visible.filter((t) => t.faction !== 'ally');
-    const interleaved: string[] = [];
-    const maxLen = Math.max(allies.length, others.length);
-    for (let i = 0; i < maxLen; i++) {
-      if (allies[i]) interleaved.push(allies[i].id);
-      if (others[i]) interleaved.push(others[i].id);
-    }
-
-    const firstId = interleaved[0] ?? null;
+    const orderedIds = this.buildInitiativeOrderForTokens(visible);
+    const firstId = orderedIds[0] ?? null;
     for (const tok of visible) {
       await this.patchToken(tok.id, {
         current_ap: tok.max_ap,
@@ -7364,20 +7634,27 @@ export class VttStore {
     await this.patchScene(sc.id, {
       combat_active: true,
       round_number: 1,
-      initiative_order: interleaved,
+      initiative_order: orderedIds,
       active_turn_token_id: firstId,
     });
     this.enforceApOnMove.set(true);
     await this.postLog({
       kind: 'round',
       title: 'Combat Started — Round 1',
-      detail: `${interleaved.length} combatants ready · All AP refreshed`,
+      detail: `${orderedIds.length} combatants ready · All AP refreshed`,
     });
   }
 
   async advanceTurn(): Promise<void> {
     const sc = this.activeScene();
-    if (!sc || !this.isGm()) return;
+    if (!sc) return;
+    const activeTok = sc.active_turn_token_id
+      ? (this.sceneTokens().find((t) => t.id === sc.active_turn_token_id) ??
+        null)
+      : null;
+    if (!this.isGm() && (!activeTok || !this.canControlToken(activeTok))) {
+      return;
+    }
 
     const order = this.initiativeTokens().filter((t) => t.current_hp > 0);
     if (order.length === 0) return;

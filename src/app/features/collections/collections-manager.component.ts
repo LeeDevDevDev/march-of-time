@@ -20,7 +20,15 @@ import {
   TokenizerEditorComponent,
   TokenizerVisualsPayload,
 } from '../../shared/token-avatar/tokenizer-editor.component';
-import { CharacterModel } from '../characters/models/character.model';
+import {
+  ATTRIBUTE_LIST,
+  AttributeName,
+  COMBAT_SKILL_LIST,
+  CharacterModel,
+  CombatSkillName,
+  FIELD_SKILL_LIST,
+  FieldSkillName,
+} from '../characters/models/character.model';
 import {
   DirectoryFolderNode,
   DirectoryFolderOption,
@@ -43,6 +51,9 @@ import {
   enrichNpcStatsWithVisuals,
   hasCustomTokenAppearance,
   normalizeInventoryItems,
+  normalizeNpcAttributes,
+  normalizeNpcCombatSkills,
+  normalizeNpcFieldSkills,
   normalizeTokenAppearance,
   resolveActorDarkvisionFeet,
   resolveEntityPortraitUrl,
@@ -97,6 +108,9 @@ export interface CollectionActorFormState {
   parryMod: number;
   dodgeMod: number;
   canDodge: boolean;
+  attributes: Record<AttributeName, number>;
+  combatSkills: Record<CombatSkillName, number>;
+  fieldSkills: Record<FieldSkillName, number>;
   inventory: ActorInventoryItem[];
   newItemName: string;
   newItemQuantity: number;
@@ -123,6 +137,9 @@ export class CollectionsManagerComponent implements OnInit {
 
   readonly collectionsStore = inject(CollectionsStore);
 
+  readonly attributeList = ATTRIBUTE_LIST;
+  readonly combatSkillList = COMBAT_SKILL_LIST;
+  readonly fieldSkillList = FIELD_SKILL_LIST;
   readonly folderSwatches = FOLDER_COLOR_SWATCHES;
   readonly actorColorSwatches = VTT_ACTOR_COLOR_SWATCHES;
   readonly iconPresets = COMPENDIUM_ICON_PRESETS;
@@ -406,6 +423,9 @@ export class CollectionsManagerComponent implements OnInit {
       parryMod: 2,
       dodgeMod: 2,
       canDodge: true,
+      attributes: normalizeNpcAttributes(null),
+      combatSkills: normalizeNpcCombatSkills(null),
+      fieldSkills: normalizeNpcFieldSkills(null),
       inventory: [],
       newItemName: '',
       newItemQuantity: 1,
@@ -475,6 +495,9 @@ export class CollectionsManagerComponent implements OnInit {
       parryMod: actor.npc_stats.parry_mod ?? 2,
       dodgeMod: actor.npc_stats.dodge_mod ?? 2,
       canDodge: actor.npc_stats.can_dodge !== false,
+      attributes: normalizeNpcAttributes(actor.npc_stats.attributes),
+      combatSkills: normalizeNpcCombatSkills(actor.npc_stats.combat_skills),
+      fieldSkills: normalizeNpcFieldSkills(actor.npc_stats.field_skills),
       inventory: normalizeInventoryItems(actor.npc_stats.__inventory),
       newItemName: '',
       newItemQuantity: 1,
@@ -558,6 +581,11 @@ export class CollectionsManagerComponent implements OnInit {
     const normalizedInventory = normalizeInventoryItems(form.inventory);
     const normalizedAppearance = normalizeTokenAppearance(form.tokenAppearance);
 
+    const existingActor = form.actorId
+      ? (this.collectionsStore.actors().find((a) => a.id === form.actorId) ??
+        null)
+      : null;
+
     const draft: ActorTemplateDraft = {
       folder_id: form.folderId || null,
       source_character_id: form.sourceCharacterId,
@@ -588,6 +616,7 @@ export class CollectionsManagerComponent implements OnInit {
       token_appearance: normalizedAppearance,
       npc_stats: enrichNpcStatsWithVisuals(
         {
+          ...(existingActor?.npc_stats ?? {}),
           weapon_name: form.weaponName.trim() || 'Unarmed',
           attack_ap: Math.max(0, Number(form.attackAp) || 1),
           attack_mod: Number(form.attackMod) || 0,
@@ -597,6 +626,9 @@ export class CollectionsManagerComponent implements OnInit {
           parry_mod: Number(form.parryMod) || 0,
           dodge_mod: Number(form.dodgeMod) || 0,
           can_dodge: form.canDodge,
+          attributes: normalizeNpcAttributes(form.attributes),
+          combat_skills: normalizeNpcCombatSkills(form.combatSkills),
+          field_skills: normalizeNpcFieldSkills(form.fieldSkills),
           ...(normalizedInventory.length > 0 || form.mode === 'edit'
             ? { __inventory: normalizedInventory }
             : {}),

@@ -1,0 +1,1894 @@
+@let tok = token();
+@let groupList = selectedTokens();
+@let multi = isMultiSelect();
+@let ch = char();
+@let st = stats();
+@let vis = visuals();
+@let portrait = displayPortraitUrl();
+@let controllable = canControl();
+@let canActGroup = canControlAny();
+@let flyout = activeFlyout();
+@let hover = hoveredTile();
+
+<div
+  data-vtt-action-hud="true"
+  [attr.data-vtt-multi-hud]="multi ? 'true' : null"
+  class="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-190px)] flex-col items-start text-xs text-[#EBF5F3] select-none"
+>
+  @if (flyout !== null) {
+    <div
+      [attr.data-hud-flyout]="flyout"
+      (wheel)="$event.stopPropagation()"
+      class="mb-2 max-h-[360px] w-[min(90vw,460px)] overflow-y-auto rounded-2xl border border-[#355650] bg-[#0B1413]/98 p-3 shadow-2xl backdrop-blur-md tabular-nums"
+    >
+      @if (flyout === 'skills') {
+        @let attrs = resolvedAttributes();
+        @let cSkills = resolvedCombatSkills();
+        @let fsTotals = resolvedFieldSkillTotals();
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+            <div>
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                Attributes &amp; Skills
+              </span>
+              <span class="ml-2 text-[10px] text-[#8AB0AB]">
+                {{ multi ? 'Roll 2d10 check for all ' + groupList.length + ' selected' : 'Click to roll 2d10 check' }}
+              </span>
+            </div>
+            <button
+              type="button"
+              (click)="activeFlyout.set(null)"
+              class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+            >
+              &times;
+            </button>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="font-mono-num text-[10px] font-bold uppercase text-[#8AB0AB]">
+              Attributes
+            </div>
+            <div class="grid grid-cols-5 gap-1.5">
+              @for (attr of attributeList; track attr.name) {
+                @let attrVal = attrs[attr.name] ?? 0;
+                <button
+                  type="button"
+                  [attr.data-hud-attr-roll]="attr.name"
+                  (click)="rollAttributeCheck(attr.name)"
+                  class="flex flex-col items-center rounded-xl border border-[#243B37] bg-[#122220] px-1.5 py-1.5 transition-colors hover:border-[#C4491A] hover:bg-[#192D2A]"
+                >
+                  <span class="text-[10px] font-semibold text-[#8AB0AB]">{{ attr.name }}</span>
+                  <span class="font-mono-num text-xs font-bold text-[#FDBA74]">
+                    {{ multi ? getGroupAttributeModLabel(attr.name) : formatSignedMod(attrVal) }}
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="space-y-1.5 border-t border-[#243B37] pt-2">
+            <div class="font-mono-num text-[10px] font-bold uppercase text-[#8AB0AB]">
+              Combat Skills
+            </div>
+            <div class="grid grid-cols-5 gap-1.5">
+              @for (cs of combatSkillList; track cs.name) {
+                @let csRank = cSkills[cs.name] ?? 0;
+                <button
+                  type="button"
+                  [attr.data-hud-combat-skill-roll]="cs.name"
+                  (click)="rollCombatSkillCheck(cs.name)"
+                  class="flex flex-col items-center rounded-xl border border-[#243B37] bg-[#122220] px-1.5 py-1.5 transition-colors hover:border-[#38B29A] hover:bg-[#192D2A]"
+                >
+                  <span class="text-[10px] font-semibold text-[#EBF5F3]">{{ cs.name }}</span>
+                  <span class="font-mono-num text-xs font-bold text-[#5EEAD4]">
+                    {{ multi ? getGroupCombatSkillRankLabel(cs.name) : '+' + csRank }}
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="space-y-1.5 border-t border-[#243B37] pt-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-mono-num text-[10px] font-bold uppercase text-[#8AB0AB]">
+                Field Skills
+              </span>
+              <span class="text-[9px] text-[#8AB0AB]">2d10 + MAX(Attr A, Attr B) + Rank</span>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              @for (fs of fieldSkillList; track fs.name) {
+                @if (fsTotals[fs.name]; as fsInfo) {
+                  <button
+                    type="button"
+                    [attr.data-hud-skill-roll]="fs.name"
+                    (click)="rollFieldSkillCheck(fs.name)"
+                    class="flex items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-left transition-colors hover:border-[#C4491A] hover:bg-[#192D2A]"
+                  >
+                    <div class="min-w-0">
+                      <div class="truncate text-[11px] font-bold text-white">{{ fs.name }}</div>
+                      <div class="text-[9px] text-[#8AB0AB]">
+                        @if (multi) {
+                          {{ fs.attrA }} / {{ fs.attrB }}
+                        } @else {
+                          {{ fsInfo.govAttr }} {{ formatSignedMod(fsInfo.govVal) }} &middot; {{ fsInfo.rank }}
+                        }
+                      </div>
+                    </div>
+                    <span class="shrink-0 rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#FDBA74]">
+                      {{ multi ? getGroupFieldSkillFormulaLabel(fs.name) : '2d10' + formatSignedMod(fsInfo.total) }}
+                    </span>
+                  </button>
+                }
+              }
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (flyout === 'items') {
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+            <div>
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                Carried Items &amp; Gear
+              </span>
+              <span class="ml-2 text-[10px] text-[#8AB0AB]">Spend 1 AP to use or manage quantities</span>
+            </div>
+            <button
+              type="button"
+              (click)="activeFlyout.set(null)"
+              class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+            >
+              &times;
+            </button>
+          </div>
+
+          @if (gearItems().length === 0 && carriedWeapons().length === 0) {
+            <div class="rounded-xl border border-dashed border-[#243B37] bg-[#122220] px-3 py-4 text-center text-[11px] text-[#8AB0AB]">
+              No carried items or backup weapons in inventory.
+            </div>
+          } @else {
+            @if (gearItems().length > 0) {
+              <div class="space-y-1.5">
+                @for (item of gearItems(); track item.id) {
+                  @let gVis = getGearVisuals(item);
+                  <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] p-2">
+                    <div class="flex min-w-0 flex-1 items-center gap-2">
+                      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                        <app-compendium-icon
+                          [icon]="gVis.icon"
+                          [color]="gVis.color"
+                          [tintCustom]="gVis.tintCustom"
+                          sizeClass="h-3.5 w-3.5"
+                        />
+                      </span>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-1.5">
+                          <span class="truncate text-[11px] font-bold text-white">{{ item.name }}</span>
+                          <span class="rounded bg-[#09100F] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#7DD3FC]">
+                            &times;{{ item.quantity }}
+                          </span>
+                        </div>
+                        @if (item.description) {
+                          <div class="truncate text-[10px] text-[#8AB0AB]">{{ item.description }}</div>
+                        }
+                      </div>
+                    </div>
+
+                    @if (controllable) {
+                      <div class="flex shrink-0 items-center gap-1">
+                        <div class="flex items-center rounded-lg border border-[#243B37] bg-[#09100F] px-1 py-0.5 font-mono-num text-[10px]">
+                          <button
+                            type="button"
+                            (click)="adjustInventoryItemQty(item.id, -1)"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                          >
+                            &minus;
+                          </button>
+                          <button
+                            type="button"
+                            (click)="adjustInventoryItemQty(item.id, 1)"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          [disabled]="tok.current_ap < 1"
+                          (click)="useInventoryItem(item, false)"
+                          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A] disabled:opacity-40"
+                        >
+                          1 AP: Use
+                        </button>
+                        <button
+                          type="button"
+                          [disabled]="tok.current_ap < 1"
+                          (click)="useInventoryItem(item, true)"
+                          title="Spend 1 AP and consume 1 charge/unit"
+                          class="btn-copper rounded-lg px-2 py-1 font-mono-num text-[10px] font-bold disabled:opacity-40"
+                        >
+                          Consume
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+
+            @if (carriedWeapons().length > 0 && ch) {
+              <div class="space-y-1.5 border-t border-[#243B37] pt-2">
+                <div class="font-mono-num text-[10px] font-bold uppercase text-[#8AB0AB]">
+                  Stowed Pack Weapons
+                </div>
+                @for (wItem of carriedWeapons(); track wItem.id) {
+                  @let wVis = getCarriedWeaponVisuals(wItem);
+                  <div class="flex items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] p-2">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                        <app-compendium-icon
+                          [icon]="wVis.icon"
+                          [color]="wVis.color"
+                          [tintCustom]="wVis.tintCustom"
+                          sizeClass="h-3.5 w-3.5"
+                        />
+                      </span>
+                      <span class="truncate text-[11px] font-bold text-white">{{ wItem.name }}</span>
+                    </div>
+                    @if (controllable && wItem.compendium_id) {
+                      <div class="flex items-center gap-1">
+                        <button
+                          type="button"
+                          (click)="equipCarriedWeaponToSlot(wItem, 1)"
+                          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                        >
+                          Equip S1
+                        </button>
+                        <button
+                          type="button"
+                          (click)="equipCarriedWeaponToSlot(wItem, 2)"
+                          class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
+                        >
+                          Equip S2
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          }
+
+          <div class="flex justify-end border-t border-[#243B37] pt-2">
+            <button
+              type="button"
+              (click)="openSheet()"
+              class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1 text-[10px] font-bold text-[#5EEAD4] hover:border-[#38B29A]"
+            >
+              Manage Full Inventory in Sheet &rarr;
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (flyout === 'statuses') {
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+            <div>
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDA4AF]">
+                Combat Statuses &amp; Stances
+              </span>
+              <span class="ml-2 text-[10px] text-[#8AB0AB]">
+                {{ multi ? 'Toggle conditions across ' + groupList.length + ' selected tokens' : 'Toggle active conditions on ' + tok.name }}
+              </span>
+            </div>
+            <button
+              type="button"
+              (click)="activeFlyout.set(null)"
+              class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+            >
+              &times;
+            </button>
+          </div>
+
+          @if (multi ? groupAllCanRaiseGuard() : tok.shield_block > 0) {
+            @let guardOn = multi ? groupAllGuardRaised() : tok.shield_raised;
+            <div
+              class="flex items-center justify-between gap-2 rounded-xl border p-2.5"
+              [class.border-[#38BDF8]]="guardOn"
+              [class.bg-[#0E3342]/60]="guardOn"
+              [class.border-[#243B37]]="!guardOn"
+              [class.bg-[#122220]]="!guardOn"
+            >
+              <div>
+                <div class="text-[11px] font-bold text-white">Guard / Shield Raised</div>
+                <div class="text-[10px] text-[#8AB0AB]">
+                  @if (multi) {
+                    Mitigates at least {{ groupMinShieldBlock() }} DMG vs non-Piercing attacks
+                  } @else {
+                    Mitigates {{ tok.shield_block }} DMG vs non-Piercing attacks until next turn
+                  }
+                </div>
+              </div>
+              <button
+                type="button"
+                [disabled]="multi ? (!canActGroup || (!guardOn && !groupAnyHasAp())) : (!controllable || (!tok.shield_raised && tok.current_ap < 1))"
+                (click)="toggleRaiseGuard()"
+                class="shrink-0 rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#7DD3FC] hover:border-[#38BDF8] disabled:opacity-40"
+              >
+                {{ guardOn ? 'Lower Guard' : '1 AP: Raise' }}
+              </button>
+            </div>
+          }
+
+          <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            @for (stOpt of statusCatalog; track stOpt.id) {
+              @let isOn = isHudStatusActive(stOpt.id);
+              @let countOn = getGroupStatusCount(stOpt.id);
+              <button
+                type="button"
+                [attr.data-hud-status-toggle]="stOpt.id"
+                [disabled]="multi ? !canActGroup : !controllable"
+                (click)="toggleHudStatus(stOpt.id)"
+                class="flex flex-col items-start justify-between gap-1 rounded-xl border p-2.5 text-left transition-colors disabled:opacity-50"
+                [class.border-[#F43F5E]]="isOn || (multi && countOn > 0)"
+                [class.bg-[#3B1822]]="isOn || (multi && countOn > 0)"
+                [class.border-[#243B37]]="!isOn && !(multi && countOn > 0)"
+                [class.bg-[#122220]]="!isOn && !(multi && countOn > 0)"
+                [class.hover:border-[#F43F5E]/60]="!isOn"
+              >
+                <div class="flex w-full items-center justify-between gap-1.5">
+                  <span
+                    class="font-display text-xs font-bold"
+                    [class.text-[#FDA4AF]]="isOn || (multi && countOn > 0)"
+                    [class.text-white]="!isOn && !(multi && countOn > 0)"
+                  >
+                    {{ stOpt.id }}
+                  </span>
+                  <span
+                    class="rounded px-1.5 py-0.5 font-mono-num text-[9px] font-bold uppercase"
+                    [class.bg-[#E11D48]]="isOn || (multi && countOn > 0)"
+                    [class.text-white]="isOn || (multi && countOn > 0)"
+                    [class.bg-[#09100F]]="!isOn && !(multi && countOn > 0)"
+                    [class.text-[#8AB0AB]]="!isOn && !(multi && countOn > 0)"
+                  >
+                    @if (multi) {
+                      {{ countOn > 0 ? countOn + '/' + groupList.length : 'Off' }}
+                    } @else {
+                      {{ isOn ? 'Active' : 'Off' }}
+                    }
+                  </span>
+                </div>
+                <span class="text-[10px] text-[#8AB0AB]">{{ stOpt.summary }}</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      @if (flyout === 'utility') {
+        @if (multi) {
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#5EEAD4]">
+                Arrange &amp; Visibility ({{ groupList.length }} Tokens)
+              </span>
+              <button
+                type="button"
+                (click)="activeFlyout.set(null)"
+                class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+              @if (vttStore.isGm()) {
+                <button
+                  type="button"
+                  (click)="toggleGroupHidden()"
+                  class="rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors"
+                  [class.border-[#FBBF24]]="groupAllHidden()"
+                  [class.bg-[#2B1D0E]]="groupAllHidden()"
+                  [class.text-[#FDE68A]]="groupAllHidden()"
+                  [class.border-[#243B37]]="!groupAllHidden()"
+                  [class.bg-[#122220]]="!groupAllHidden()"
+                  [class.text-[#EBF5F3]]="!groupAllHidden()"
+                  [class.hover:border-[#FBBF24]]="!groupAllHidden()"
+                >
+                  {{ groupAllHidden() ? 'Reveal All' : 'Make Invisible' }}
+                </button>
+              }
+
+              <button
+                type="button"
+                (click)="flipGroupHorizontal()"
+                class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+              >
+                Flip H
+              </button>
+
+              <button
+                type="button"
+                (click)="flipGroupVertical()"
+                class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+              >
+                Flip V
+              </button>
+
+              <button
+                type="button"
+                (click)="rotateGroupBy(90)"
+                class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
+              >
+                Rotate 90&deg;
+              </button>
+
+              @if (groupAnyRotated()) {
+                <button
+                  type="button"
+                  (click)="resetGroupRotation()"
+                  class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+                >
+                  Reset 0&deg;
+                </button>
+              }
+
+              <button
+                type="button"
+                (click)="bringGroupToFront()"
+                class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+              >
+                Front
+              </button>
+
+              <button
+                type="button"
+                (click)="sendGroupToBack()"
+                class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1.5 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
+              >
+                Back
+              </button>
+
+              <button
+                type="button"
+                (click)="removeGroupTokens()"
+                class="rounded-lg border border-[#6E293B] bg-[#3B1822] px-2.5 py-1.5 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        } @else {
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#5EEAD4]">
+                {{ vttStore.isGm() ? 'GM Controls &amp; Senses' : 'Senses &amp; Token Controls' }}
+              </span>
+              <button
+                type="button"
+                (click)="activeFlyout.set(null)"
+                class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 font-mono-num text-[11px]">
+              <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
+                <div class="text-[9px] uppercase text-[#8AB0AB]">Effective Sight</div>
+                <div class="mt-0.5 font-bold text-[#A7F3D0]">{{ getEffectiveSightLabel() }}</div>
+              </div>
+              <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
+                <div class="text-[9px] uppercase text-[#8AB0AB]">Mobility &amp; Armor</div>
+                <div class="mt-0.5 font-bold text-white">
+                  Move {{ tok.move_feet }} ft &middot; DR {{ tok.armor_dr }} &middot; Block {{ tok.shield_block }}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                (click)="openSheet()"
+                class="rounded-lg border border-[#C4491A]/70 bg-[#27160E] px-3 py-1.5 text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white"
+              >
+                Open Actor Sheet
+              </button>
+              @if (controllable) {
+                <button
+                  type="button"
+                  (click)="openTokenizer()"
+                  class="rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A]"
+                >
+                  Edit Token Art
+                </button>
+                <button
+                  type="button"
+                  (click)="vttStore.toggleTokenFlipX(tok.id)"
+                  class="rounded-lg border border-[#243B37] bg-[#122220] px-3 py-1.5 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
+                >
+                  Flip Token
+                </button>
+              }
+              @if (vttStore.isGm()) {
+                <button
+                  type="button"
+                  data-hud-toggle-hidden="true"
+                  (click)="vttStore.toggleTokenHidden(tok.id)"
+                  class="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition-colors"
+                  [class.border-[#FBBF24]]="tok.is_hidden"
+                  [class.bg-[#2B1D0E]]="tok.is_hidden"
+                  [class.text-[#FDE68A]]="tok.is_hidden"
+                  [class.border-[#243B37]]="!tok.is_hidden"
+                  [class.bg-[#122220]]="!tok.is_hidden"
+                  [class.text-[#8AB0AB]]="!tok.is_hidden"
+                >
+                  {{ tok.is_hidden ? 'Invisible (Reveal)' : 'Hide Token' }}
+                </button>
+              }
+            </div>
+          </div>
+        }
+      }
+    </div>
+  } @else if (hover) {
+    <div
+      data-hud-hover-preview="true"
+      class="pointer-events-none mb-2 max-w-[440px] rounded-xl border border-[#C4491A]/65 bg-[#0B1413]/96 px-3 py-2 shadow-xl backdrop-blur-md tabular-nums"
+    >
+      <div class="flex flex-wrap items-center gap-1.5">
+        <span class="font-display text-xs font-bold text-white">{{ hover.title }}</span>
+        <span class="rounded border border-[#784321] bg-[#27180B] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#FDBA74]">
+          {{ hover.apLabel }}
+        </span>
+        @if (hover.tags) {
+          @for (tag of hover.tags; track tag) {
+            <span [class]="'rounded border px-1.5 py-0.5 font-mono-num text-[9px] font-bold ' + getCombatTagBadgeClass(tag)">
+              {{ tag }}
+            </span>
+          }
+        }
+      </div>
+      <div class="mt-0.5 font-mono-num text-[11px] font-semibold text-[#5EEAD4]">
+        {{ hover.subtitle }}
+      </div>
+      @if (hover.description) {
+        <div class="mt-0.5 line-clamp-2 text-[10px] text-[#8AB0AB]">
+          {{ hover.description }}
+        </div>
+      }
+    </div>
+  }
+
+  <div
+    data-hud-flyout-bar="true"
+    class="mb-1 flex flex-wrap items-center gap-1"
+  >
+    <button
+      type="button"
+      data-hud-flyout-btn="skills"
+      (click)="toggleFlyout('skills')"
+      class="inline-flex items-center gap-1.5 rounded-t-xl rounded-b-md border px-2.5 py-1 text-[11px] font-bold shadow-md backdrop-blur-xs transition-colors"
+      [class.border-[#C4491A]]="flyout === 'skills'"
+      [class.bg-[#27160E]]="flyout === 'skills'"
+      [class.text-white]="flyout === 'skills'"
+      [class.border-[#243B37]]="flyout !== 'skills'"
+      [class.bg-[#0D1615]/95]="flyout !== 'skills'"
+      [class.text-[#8AB0AB]]="flyout !== 'skills'"
+      [class.hover:text-white]="flyout !== 'skills'"
+    >
+      <span>Attributes &amp; Skills</span>
+    </button>
+
+    @if (!multi) {
+      <button
+        type="button"
+        data-hud-flyout-btn="items"
+        (click)="toggleFlyout('items')"
+        class="inline-flex items-center gap-1.5 rounded-t-xl rounded-b-md border px-2.5 py-1 text-[11px] font-bold shadow-md backdrop-blur-xs transition-colors"
+        [class.border-[#C4491A]]="flyout === 'items'"
+        [class.bg-[#27160E]]="flyout === 'items'"
+        [class.text-white]="flyout === 'items'"
+        [class.border-[#243B37]]="flyout !== 'items'"
+        [class.bg-[#0D1615]/95]="flyout !== 'items'"
+        [class.text-[#8AB0AB]]="flyout !== 'items'"
+        [class.hover:text-white]="flyout !== 'items'"
+      >
+        <span>Items</span>
+        @if (totalFlyoutItemsCount() > 0) {
+          <span class="rounded bg-[#122220] px-1.5 py-0.25 font-mono-num text-[9px] text-[#5EEAD4]">
+            {{ totalFlyoutItemsCount() }}
+          </span>
+        }
+      </button>
+    }
+
+    <button
+      type="button"
+      data-hud-flyout-btn="statuses"
+      (click)="toggleFlyout('statuses')"
+      class="inline-flex items-center gap-1.5 rounded-t-xl rounded-b-md border px-2.5 py-1 text-[11px] font-bold shadow-md backdrop-blur-xs transition-colors"
+      [class.border-[#F43F5E]]="flyout === 'statuses' || activeStatusCount() > 0"
+      [class.bg-[#3B1822]]="flyout === 'statuses' || activeStatusCount() > 0"
+      [class.text-[#FDA4AF]]="flyout !== 'statuses' && activeStatusCount() > 0"
+      [class.text-white]="flyout === 'statuses'"
+      [class.border-[#243B37]]="flyout !== 'statuses' && activeStatusCount() === 0"
+      [class.bg-[#0D1615]/95]="flyout !== 'statuses' && activeStatusCount() === 0"
+      [class.text-[#8AB0AB]]="flyout !== 'statuses' && activeStatusCount() === 0"
+      [class.hover:text-white]="flyout !== 'statuses'"
+    >
+      <span>Statuses</span>
+      @if (activeStatusCount() > 0) {
+        <span class="rounded bg-black/40 px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-white">
+          {{ activeStatusCount() }}
+        </span>
+      }
+    </button>
+
+    <button
+      type="button"
+      data-hud-flyout-btn="utility"
+      (click)="toggleFlyout('utility')"
+      class="inline-flex items-center gap-1.5 rounded-t-xl rounded-b-md border px-2.5 py-1 text-[11px] font-bold shadow-md backdrop-blur-xs transition-colors"
+      [class.border-[#38B29A]]="flyout === 'utility'"
+      [class.bg-[#102B26]]="flyout === 'utility'"
+      [class.text-white]="flyout === 'utility'"
+      [class.border-[#FBBF24]]="flyout !== 'utility' && (multi ? groupAllHidden() : tok.is_hidden)"
+      [class.bg-[#2B1D0E]]="flyout !== 'utility' && (multi ? groupAllHidden() : tok.is_hidden)"
+      [class.text-[#FDE68A]]="flyout !== 'utility' && (multi ? groupAllHidden() : tok.is_hidden)"
+      [class.border-[#243B37]]="flyout !== 'utility' && !(multi ? groupAllHidden() : tok.is_hidden)"
+      [class.bg-[#0D1615]/95]="flyout !== 'utility' && !(multi ? groupAllHidden() : tok.is_hidden)"
+      [class.text-[#8AB0AB]]="flyout !== 'utility' && !(multi ? groupAllHidden() : tok.is_hidden)"
+      [class.hover:text-white]="flyout !== 'utility'"
+    >
+      <span>{{ multi ? 'Arrange &amp; Sight' : vttStore.isGm() ? 'GM &amp; Sight' : 'Sight' }}</span>
+      @if (multi ? groupAllHidden() : tok.is_hidden) {
+        <span class="rounded bg-black/40 px-1 text-[9px] font-bold uppercase text-[#FDE68A]">Hidden</span>
+      }
+    </button>
+
+    @if (multi) {
+      <button
+        type="button"
+        data-hud-clear-selection="true"
+        (click)="clearSelection()"
+        class="rounded-t-xl rounded-b-md border border-[#243B37] bg-[#0D1615]/95 px-2.5 py-1 text-[11px] font-bold text-[#8AB0AB] shadow-md hover:border-[#C4491A] hover:text-white"
+      >
+        Clear
+      </button>
+    } @else {
+      <button
+        type="button"
+        data-hud-open-sheet="true"
+        (click)="openSheet()"
+        class="rounded-t-xl rounded-b-md border border-[#C4491A]/70 bg-[#27160E]/95 px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] shadow-md hover:border-[#C4491A] hover:text-white"
+      >
+        Sheet
+      </button>
+    }
+
+    <button
+      type="button"
+      data-hud-collapse-toggle="true"
+      (click)="toggleCollapse()"
+      class="rounded-t-xl rounded-b-md border border-[#243B37] bg-[#0D1615]/95 px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] shadow-md hover:text-white"
+    >
+      {{ collapsed() ? 'Expand' : 'Minimize' }}
+    </button>
+  </div>
+
+  @if (collapsed()) {
+    <div
+      data-hud-compact-bar="true"
+      class="flex flex-wrap items-center gap-2.5 rounded-2xl border bg-[#0D1615]/96 px-3 py-2 shadow-2xl backdrop-blur-md tabular-nums"
+      [class.border-[#FBBF24]]="!multi && isActiveTurn()"
+      [class.border-[#38B29A]/70]="multi"
+      [class.border-[#243B37]]="!multi && !isActiveTurn()"
+    >
+      @if (multi) {
+        <div class="flex -space-x-2">
+          @for (mTok of groupList.slice(0, 4); track mTok.id) {
+            @let mVis = vttStore.resolveTokenVisuals(mTok);
+            <button
+              type="button"
+              (click)="focusSingleToken(mTok.id, $event)"
+              [title]="'Focus ' + mTok.name"
+              class="h-8 w-8 shrink-0 rounded-full ring-1 ring-[#09100F] transition-transform hover:z-10 hover:scale-110"
+            >
+              <app-token-avatar
+                [tokenImageUrl]="mVis.tokenImageUrl"
+                [appearance]="mVis.tokenAppearance"
+                [icon]="mTok.icon || 'greatsword'"
+                [color]="mTok.color || '#5EEAD4'"
+                [faction]="mTok.faction"
+                [isHidden]="mTok.is_hidden"
+                [grayscale]="mTok.current_hp <= 0"
+                iconSizeClass="h-3.5 w-3.5"
+              />
+            </button>
+          }
+        </div>
+        <div class="mr-1">
+          <div class="font-display text-sm font-bold text-white">
+            {{ groupList.length }} Tokens Selected
+          </div>
+          <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+            Move {{ groupMinMoveFeet() }}ft
+          </div>
+        </div>
+      } @else {
+        <button
+          type="button"
+          (click)="openSheet()"
+          title="Open Actor Sheet"
+          class="h-9 w-9 shrink-0 rounded-full transition-transform hover:scale-105"
+        >
+          <app-token-avatar
+            [tokenImageUrl]="vis.tokenImageUrl"
+            [appearance]="vis.tokenAppearance"
+            [icon]="tok.icon || 'greatsword'"
+            [color]="tok.color || '#5EEAD4'"
+            [faction]="tok.faction"
+            [isHidden]="tok.is_hidden"
+            [grayscale]="tok.current_hp <= 0"
+            iconSizeClass="h-4 w-4"
+          />
+        </button>
+
+        <div class="mr-1">
+          <div class="font-display text-sm font-bold text-white">{{ tok.name }}</div>
+          <div class="font-mono-num text-[10px] text-[#8AB0AB]">
+            Move {{ tok.move_feet }}ft &middot; DR {{ tok.armor_dr }}
+            @if (tok.shield_block > 0) {
+              &middot; Block {{ tok.shield_block }}
+            }
+          </div>
+        </div>
+      }
+
+      @if (editingVital() === 'current_hp' && (multi ? canActGroup : controllable)) {
+        <div
+          data-hud-vital-bar="current_hp"
+          class="flex items-center gap-1 rounded-lg border border-[#FB7185] bg-[#19090F] px-2 py-0.5 font-mono-num"
+        >
+          <span class="text-[10px] font-bold text-[#FDA4AF]">HP</span>
+          <input
+            type="text"
+            inputmode="text"
+            data-hud-vital-input="current_hp"
+            aria-label="Edit HP (number or +/- adjustment)"
+            [value]="vitalInputDraft()"
+            (input)="onVitalDraftInput($event)"
+            (keydown)="onVitalInputKeyDown($event, 'current_hp')"
+            (blur)="commitVitalEdit('current_hp')"
+            (click)="$event.stopPropagation()"
+            class="w-11 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-xs font-bold text-white outline-none ring-1 ring-[#FB7185]/60"
+          />
+          <span class="font-bold text-white/75">/{{ multi ? groupMaxHp() : tok.max_hp }}</span>
+        </div>
+      } @else {
+        <button
+          type="button"
+          data-hud-vital-bar="current_hp"
+          [disabled]="multi ? !canActGroup : !controllable"
+          [title]="(multi ? canActGroup : controllable) ? 'Click to enter new HP or +/- adjustment' : ''"
+          (click)="startVitalEdit('current_hp', $event)"
+          class="flex items-center gap-1.5 rounded-lg border border-[#6E293B] bg-[#251018] px-2 py-0.5 font-mono-num transition-colors enabled:cursor-pointer enabled:hover:border-[#FB7185] disabled:cursor-default"
+        >
+          <span class="text-[10px] font-bold text-[#FDA4AF]">HP</span>
+          <span class="font-bold text-white">
+            {{ multi ? groupCurrentHp() + '/' + groupMaxHp() : tok.current_hp + '/' + tok.max_hp }}
+          </span>
+        </button>
+      }
+
+      @if (editingVital() === 'current_sp' && (multi ? canActGroup : controllable)) {
+        <div
+          data-hud-vital-bar="current_sp"
+          class="flex items-center gap-1 rounded-lg border border-[#38BDF8] bg-[#07161D] px-2 py-0.5 font-mono-num"
+        >
+          <span class="text-[10px] font-bold text-[#7DD3FC]">SP</span>
+          <input
+            type="text"
+            inputmode="text"
+            data-hud-vital-input="current_sp"
+            aria-label="Edit SP (number or +/- adjustment)"
+            [value]="vitalInputDraft()"
+            (input)="onVitalDraftInput($event)"
+            (keydown)="onVitalInputKeyDown($event, 'current_sp')"
+            (blur)="commitVitalEdit('current_sp')"
+            (click)="$event.stopPropagation()"
+            class="w-11 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-xs font-bold text-white outline-none ring-1 ring-[#38BDF8]/60"
+          />
+          <span class="font-bold text-white/75">/{{ multi ? groupMaxSp() : tok.max_sp }}</span>
+        </div>
+      } @else {
+        <button
+          type="button"
+          data-hud-vital-bar="current_sp"
+          [disabled]="multi ? !canActGroup : !controllable"
+          [title]="(multi ? canActGroup : controllable) ? 'Click to enter new SP or +/- adjustment' : ''"
+          (click)="startVitalEdit('current_sp', $event)"
+          class="flex items-center gap-1.5 rounded-lg border border-[#1E5263] bg-[#0D222B] px-2 py-0.5 font-mono-num transition-colors enabled:cursor-pointer enabled:hover:border-[#38BDF8] disabled:cursor-default"
+        >
+          <span class="text-[10px] font-bold text-[#7DD3FC]">SP</span>
+          <span class="font-bold text-white">
+            {{ multi ? groupCurrentSp() + '/' + groupMaxSp() : tok.current_sp + '/' + tok.max_sp }}
+          </span>
+        </button>
+      }
+
+      @if (multi) {
+        <button
+          type="button"
+          data-hud-tile="roll-initiative"
+          [disabled]="!canActGroup"
+          (click)="rollInitiative()"
+          class="btn-copper rounded-lg px-2.5 py-1 text-[11px] font-bold disabled:opacity-40"
+        >
+          Roll Initiative
+        </button>
+      } @else {
+        <div class="flex items-center gap-1 rounded-lg border border-[#784321] bg-[#27180B] px-2 py-0.5 font-mono-num">
+          <span class="text-[10px] font-bold text-[#FDBA74]">AP</span>
+          @if (controllable) {
+            <button type="button" (click)="adjustVital('current_ap', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
+          }
+          <span class="font-bold text-white">{{ tok.current_ap }}/{{ tok.max_ap }}</span>
+          @if (controllable) {
+            <button type="button" (click)="adjustVital('current_ap', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
+          }
+        </div>
+
+        @if (canEndTurn()) {
+          <button
+            type="button"
+            data-hud-end-turn="true"
+            (click)="endActiveTurn()"
+            class="btn-copper rounded-lg px-2.5 py-1 text-[11px] font-bold"
+          >
+            End Turn &rarr;
+          </button>
+        }
+      }
+    </div>
+  } @else if (multi) {
+    <div
+      data-hud-argon-dock="true"
+      class="flex max-w-full flex-wrap items-stretch gap-2.5 rounded-2xl border border-[#38B29A]/70 bg-[#0B1413]/96 p-2.5 shadow-2xl backdrop-blur-md tabular-nums"
+    >
+      <div class="flex items-stretch gap-2.5">
+        <div class="flex h-[84px] min-w-[78px] flex-col items-center justify-center gap-1.5 rounded-xl border border-[#243B37] bg-[#070D0C] px-2">
+          <div class="flex -space-x-2.5">
+            @for (mTok of groupList.slice(0, 4); track mTok.id) {
+              @let mVis = vttStore.resolveTokenVisuals(mTok);
+              <button
+                type="button"
+                (click)="focusSingleToken(mTok.id, $event)"
+                [title]="'Focus ' + mTok.name"
+                class="h-8 w-8 shrink-0 rounded-full ring-2 ring-[#070D0C] transition-transform hover:z-10 hover:scale-110"
+              >
+                <app-token-avatar
+                  [tokenImageUrl]="mVis.tokenImageUrl"
+                  [appearance]="mVis.tokenAppearance"
+                  [icon]="mTok.icon || 'greatsword'"
+                  [color]="mTok.color || '#5EEAD4'"
+                  [faction]="mTok.faction"
+                  [isHidden]="mTok.is_hidden"
+                  [grayscale]="mTok.current_hp <= 0"
+                  iconSizeClass="h-3.5 w-3.5"
+                />
+              </button>
+            }
+          </div>
+          @if (groupList.length > 4) {
+            <span class="rounded bg-[#122220] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+              +{{ groupList.length - 4 }} more
+            </span>
+          } @else {
+            <span class="font-mono-num text-[9px] text-[#8AB0AB]">Click to focus</span>
+          }
+        </div>
+
+        <div class="flex min-w-[186px] flex-col justify-between py-0.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-display text-xs font-bold text-white">
+              {{ groupList.length }} Tokens Selected
+            </span>
+            <span class="rounded border border-[#243B37] bg-[#122220] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-[#8AB0AB]">
+              Move {{ groupMinMoveFeet() }}ft
+            </span>
+          </div>
+
+          <div class="space-y-1">
+            @if (editingVital() === 'current_hp' && canActGroup) {
+              <div
+                data-hud-vital-bar="current_hp"
+                class="relative flex h-5 items-center justify-between overflow-hidden rounded-md border border-[#FB7185] bg-[#19090F] px-1.5 font-mono-num text-[10px]"
+              >
+                <span class="font-bold text-[#FFE4E6]">Group HP</span>
+                <input
+                  type="text"
+                  inputmode="text"
+                  data-hud-vital-input="current_hp"
+                  aria-label="Edit Group HP (number or +/- adjustment)"
+                  [value]="vitalInputDraft()"
+                  (input)="onVitalDraftInput($event)"
+                  (keydown)="onVitalInputKeyDown($event, 'current_hp')"
+                  (blur)="commitVitalEdit('current_hp')"
+                  (click)="$event.stopPropagation()"
+                  class="w-16 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-[10px] font-bold text-white outline-none ring-1 ring-[#FB7185]/60"
+                />
+              </div>
+            } @else {
+              <button
+                type="button"
+                data-hud-vital-bar="current_hp"
+                [disabled]="!canActGroup"
+                [title]="canActGroup ? 'Click to apply +/- HP adjustment or set HP across selected tokens' : ''"
+                (click)="startVitalEdit('current_hp', $event)"
+                class="relative flex h-5 w-full items-center justify-between overflow-hidden rounded-md border border-[#6E293B] bg-[#210D14] px-1.5 font-mono-num text-[10px] transition-colors enabled:cursor-pointer enabled:hover:border-[#FB7185] disabled:cursor-default"
+              >
+                <div
+                  class="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-[#9F1239] to-[#E11D48]/85 transition-all"
+                  [style.width.%]="groupHpPercent()"
+                ></div>
+                <span class="relative z-10 font-bold text-[#FFE4E6]">HP</span>
+                <span class="relative z-10 font-bold text-white">{{ groupCurrentHp() }}/{{ groupMaxHp() }}</span>
+              </button>
+            }
+
+            @if (editingVital() === 'current_sp' && canActGroup) {
+              <div
+                data-hud-vital-bar="current_sp"
+                class="relative flex h-5 items-center justify-between overflow-hidden rounded-md border border-[#38BDF8] bg-[#07161D] px-1.5 font-mono-num text-[10px]"
+              >
+                <span class="font-bold text-[#E0F2FE]">Group SP</span>
+                <input
+                  type="text"
+                  inputmode="text"
+                  data-hud-vital-input="current_sp"
+                  aria-label="Edit Group SP (number or +/- adjustment)"
+                  [value]="vitalInputDraft()"
+                  (input)="onVitalDraftInput($event)"
+                  (keydown)="onVitalInputKeyDown($event, 'current_sp')"
+                  (blur)="commitVitalEdit('current_sp')"
+                  (click)="$event.stopPropagation()"
+                  class="w-16 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-[10px] font-bold text-white outline-none ring-1 ring-[#38BDF8]/60"
+                />
+              </div>
+            } @else {
+              <button
+                type="button"
+                data-hud-vital-bar="current_sp"
+                [disabled]="!canActGroup"
+                [title]="canActGroup ? 'Click to apply +/- SP adjustment or set SP across selected tokens' : ''"
+                (click)="startVitalEdit('current_sp', $event)"
+                class="relative flex h-5 w-full items-center justify-between overflow-hidden rounded-md border border-[#1E5263] bg-[#0B1C24] px-1.5 font-mono-num text-[10px] transition-colors enabled:cursor-pointer enabled:hover:border-[#38BDF8] disabled:cursor-default"
+              >
+                <div
+                  class="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-[#0369A1] to-[#0EA5E9]/85 transition-all"
+                  [style.width.%]="groupSpPercent()"
+                ></div>
+                <span class="relative z-10 font-bold text-[#E0F2FE]">SP</span>
+                <span class="relative z-10 font-bold text-white">{{ groupCurrentSp() }}/{{ groupMaxSp() }}</span>
+              </button>
+            }
+          </div>
+
+          <div class="flex items-center justify-between gap-1.5 pt-0.5 font-mono-num text-[10px]">
+            <span class="text-[#FDBA74]">
+              AP <strong class="text-white">{{ groupCurrentAp() }}/{{ groupMaxAp() }}</strong>
+            </span>
+            @if (canActGroup && groupCurrentAp() < groupMaxAp()) {
+              <button
+                type="button"
+                (click)="refillGroupAp()"
+                class="rounded border border-[#784321] bg-[#27180B] px-1.5 py-[1px] text-[9px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white"
+              >
+                Refill AP
+              </button>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="hidden w-px self-stretch bg-[#243B37] sm:block"></div>
+
+      <div data-hud-section="shared-actions" class="flex flex-wrap items-stretch gap-1.5">
+        <button
+          type="button"
+          data-hud-tile="roll-initiative"
+          [disabled]="!canActGroup"
+          (click)="rollInitiative()"
+          (mouseenter)="setHover({
+            title: 'Roll Group Initiative',
+            apLabel: '0 AP',
+            subtitle: '2d10 + Cunning for all ' + groupList.length + ' selected tokens',
+            description: 'Rolls Initiative for every selected token and orders the combat turn tracker.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] min-w-[92px] flex-col items-center justify-between rounded-xl border border-[#C4491A] bg-gradient-to-b from-[#29170E] to-[#111D1B] p-1.5 text-center transition-colors hover:border-[#FB923C] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">
+            {{ groupRolledInitiativeCount() > 0 ? groupRolledInitiativeCount() + '/' + groupList.length : '2d10' }}
+          </span>
+          <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[10px] font-bold text-white">Roll Initiative</div>
+            <div class="font-mono-num text-[8px] text-[#FDBA74]">
+              {{ groupRolledInitiativeCount() > 0 ? 'Re-roll All' : 'All Selected' }}
+            </div>
+          </div>
+        </button>
+
+        @if (groupAllCanRaiseGuard()) {
+          @let gRaised = groupAllGuardRaised();
+          <button
+            type="button"
+            data-hud-tile="raise-guard"
+            [disabled]="!canActGroup || (!gRaised && !groupAnyHasAp())"
+            (click)="toggleRaiseGuard()"
+            (mouseenter)="setHover({
+              title: gRaised ? 'Lower Group Guard' : 'Raise Group Guard',
+              apLabel: gRaised ? '0 AP' : '1 AP',
+              subtitle: 'Mitigates at least ' + groupMinShieldBlock() + ' DMG vs non-Piercing attacks',
+              description: 'Raises or lowers Guard across all selected tokens.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-colors disabled:opacity-40"
+            [class.border-[#38BDF8]]="gRaised"
+            [class.bg-[#0E3342]]="gRaised"
+            [class.border-[#243B37]]="!gRaised"
+            [class.bg-[#122220]]="!gRaised"
+            [class.hover:border-[#38BDF8]]="true"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">
+              {{ gRaised ? 'ACTIVE' : '1 AP' }}
+            </span>
+            <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="truncate text-[9px] font-bold text-white">
+                {{ gRaised ? 'Guard Up' : 'Guard' }}
+              </div>
+              <div class="font-mono-num text-[8px] text-[#7DD3FC]">&minus;{{ groupMinShieldBlock() }}+</div>
+            </div>
+          </button>
+        }
+
+        <button
+          type="button"
+          data-hud-tile="parry"
+          [disabled]="!canActGroup || !groupAnyHasAp()"
+          (click)="triggerReaction('parry')"
+          (mouseenter)="setHover({
+            title: 'Group Parry Reaction',
+            apLabel: '1 AP',
+            subtitle: 'Rolls 2d10 Parry (' + getGroupParryLabel() + ') for selected tokens',
+            description: 'Spends 1 AP on each selected token with available AP and rolls Parry.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38BDF8] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">1 AP</span>
+          <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+            <path d="M13 19l6-6" />
+            <path d="M16 16l4 4" />
+            <path d="M19 21l2-2" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Parry</div>
+            <div class="font-mono-num text-[8px] text-[#7DD3FC]">{{ getGroupParryLabel() }}</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-hud-tile="dodge"
+          [disabled]="!canActGroup || !groupAnyCanDodge() || !groupAnyHasAp()"
+          (click)="triggerReaction('dodge')"
+          (mouseenter)="setHover({
+            title: 'Group Dodge Reaction',
+            apLabel: '1 AP',
+            subtitle: groupAnyCanDodge() ? 'Rolls 2d10 Dodge (' + getGroupDodgeLabel() + ') · Shifts 5 ft' : 'Disabled by Heavy Armor / Tower Shield',
+            description: 'Spends 1 AP on each eligible selected token and rolls Dodge.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">1 AP</span>
+          <svg class="h-5 w-5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Dodge</div>
+            <div class="font-mono-num text-[8px] text-[#5EEAD4]">{{ getGroupDodgeLabel() }}</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-hud-tile="stance-recovery"
+          [disabled]="!canActGroup || !groupAnyMissingSp()"
+          (click)="triggerStanceRecovery()"
+          (mouseenter)="setHover({
+            title: 'Group Stance Recovery',
+            apLabel: '1 AP',
+            subtitle: 'Recovers SP on selected tokens missing SP',
+            description: 'Each eligible selected token spends 1 AP to recover Stance.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border border-[#1E5263] bg-[#0F2630] p-1.5 text-center transition-colors hover:border-[#38BDF8] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">1 AP</span>
+          <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Stance</div>
+            <div class="font-mono-num text-[8px] text-[#7DD3FC]">Recover</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-hud-tile="move"
+          [disabled]="!canActGroup || !groupAnyHasAp()"
+          (click)="triggerTacticalAction('Move', 'Group stride up to ' + groupMinMoveFeet() + ' ft (' + groupMinMoveTiles() + ' tiles)')"
+          (mouseenter)="setHover({
+            title: 'Group Move',
+            apLabel: '1 AP',
+            subtitle: 'Slowest speed: ' + groupMinMoveFeet() + ' ft (' + groupMinMoveTiles() + ' tiles)',
+            description: 'Spend 1 AP across selected tokens to log a group move, or drag the group directly on the map.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">1 AP</span>
+          <svg class="h-5 w-5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 4v16M7 4v16M3 8h4m6 0h8M3 16h8m6 0h4" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Move</div>
+            <div class="font-mono-num text-[8px] text-[#5EEAD4]">{{ groupMinMoveFeet() }} ft</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-hud-tile="aim"
+          [disabled]="!canActGroup || !groupAnyHasAp()"
+          (click)="triggerTacticalAction('Aim', 'Steadied ranged sights')"
+          (mouseenter)="setHover({
+            title: 'Group Aim',
+            apLabel: '1 AP',
+            subtitle: 'Steady Ranged Sights',
+            description: 'Spends 1 AP on each selected token with available AP to Aim.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[64px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#FDBA74] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">1 AP</span>
+          <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="8" />
+            <line x1="12" y1="2" x2="12" y2="6" />
+            <line x1="12" y1="18" x2="12" y2="22" />
+            <line x1="2" y1="12" x2="6" y2="12" />
+            <line x1="18" y1="12" x2="22" y2="12" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Aim</div>
+            <div class="font-mono-num text-[8px] text-[#8AB0AB]">Steady</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-hud-tile="interact"
+          [disabled]="!canActGroup || !groupAnyHasAp()"
+          (click)="triggerTacticalAction('Interact', 'Interacted with object or environment')"
+          (mouseenter)="setHover({
+            title: 'Group Interact',
+            apLabel: '1 AP',
+            subtitle: 'Object / Environment',
+            description: 'Spends 1 AP across selected tokens to interact with doors, levers, or gear.'
+          })"
+          (mouseleave)="setHover(null)"
+          class="flex h-[84px] w-[64px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#FDBA74] disabled:opacity-40"
+        >
+          <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">1 AP</span>
+          <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+            <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+            <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+            <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+          </svg>
+          <div class="w-full leading-tight">
+            <div class="text-[9px] font-bold text-white">Interact</div>
+            <div class="font-mono-num text-[8px] text-[#8AB0AB]">Use</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  } @else {
+    <div
+      data-hud-argon-dock="true"
+      class="flex max-w-full flex-wrap items-stretch gap-2.5 rounded-2xl border bg-[#0B1413]/96 p-2.5 shadow-2xl backdrop-blur-md tabular-nums"
+      [class.border-[#FBBF24]]="isActiveTurn()"
+      [class.ring-1]="isActiveTurn()"
+      [class.ring-[#FBBF24]/40]="isActiveTurn()"
+      [class.border-[#26403B]]="!isActiveTurn()"
+    >
+      <div class="flex items-stretch gap-2.5">
+        <button
+          type="button"
+          data-hud-portrait="true"
+          (click)="openSheet()"
+          title="Click to open Actor Sheet"
+          class="group relative flex h-[84px] w-[70px] shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-[#070D0C] shadow-inner transition-transform hover:scale-[1.02]"
+          [class.border-[#FBBF24]]="isActiveTurn()"
+          [class.border-[#38B29A]]="!isActiveTurn() && tok.faction === 'ally'"
+          [class.border-[#F43F5E]]="!isActiveTurn() && tok.faction === 'enemy'"
+          [class.border-[#F59E0B]]="!isActiveTurn() && tok.faction === 'neutral'"
+        >
+          @if (portrait) {
+            <img
+              [src]="portrait"
+              [alt]="tok.name + ' portrait'"
+              (error)="brokenPortraitUrl.set(portrait)"
+              class="h-full w-full object-cover object-top"
+              [class.grayscale]="tok.current_hp <= 0"
+            />
+            @if (hasCustomTokenArt()) {
+              <span class="pointer-events-none absolute right-1 bottom-1 h-6 w-6 rounded-full border border-[#243B37] bg-[#09100F] p-[1px] shadow">
+                <app-token-avatar
+                  [tokenImageUrl]="vis.tokenImageUrl"
+                  [appearance]="vis.tokenAppearance"
+                  [icon]="tok.icon || 'greatsword'"
+                  [color]="tok.color || '#5EEAD4'"
+                  [faction]="tok.faction"
+                  iconSizeClass="h-3 w-3"
+                />
+              </span>
+            }
+          } @else {
+            <div class="h-14 w-14">
+              <app-token-avatar
+                [tokenImageUrl]="vis.tokenImageUrl"
+                [appearance]="vis.tokenAppearance"
+                [icon]="tok.icon || 'greatsword'"
+                [color]="tok.color || '#5EEAD4'"
+                [faction]="tok.faction"
+                [isHidden]="tok.is_hidden"
+                [grayscale]="tok.current_hp <= 0"
+                iconSizeClass="h-7 w-7"
+              />
+            </div>
+          }
+
+          @if (isActiveTurn()) {
+            <span class="absolute top-0 inset-x-0 bg-[#FBBF24] py-[1px] text-center font-mono-num text-[8px] font-extrabold uppercase tracking-wider text-[#09100F]">
+              Active Turn
+            </span>
+          } @else if (tok.shield_raised) {
+            <span class="absolute top-1 left-1 rounded bg-[#0284C7] px-1 py-[1px] font-mono-num text-[8px] font-bold uppercase text-white shadow">
+              Guard
+            </span>
+          }
+
+          @if (tok.statuses.length > 0) {
+            <span class="absolute bottom-1 left-1 rounded bg-[#E11D48] px-1 py-[1px] font-mono-num text-[8px] font-bold text-white shadow">
+              {{ tok.statuses[0] }}{{ tok.statuses.length > 1 ? ' +' + (tok.statuses.length - 1) : '' }}
+            </span>
+          }
+        </button>
+
+        <div class="flex min-w-[178px] flex-col justify-between py-0.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="max-w-[126px] truncate font-display text-xs font-bold text-white">
+              {{ tok.name }}
+            </span>
+            <div class="flex items-center gap-1 font-mono-num text-[9px] font-bold">
+              <span class="rounded border border-[#243B37] bg-[#122220] px-1.5 py-[1px] text-[#8AB0AB]">
+                DR {{ tok.armor_dr }}
+              </span>
+              @if (tok.shield_block > 0) {
+                <span
+                  class="rounded border px-1.5 py-[1px]"
+                  [class.border-[#38BDF8]]="tok.shield_raised"
+                  [class.bg-[#0E3342]]="tok.shield_raised"
+                  [class.text-[#7DD3FC]]="tok.shield_raised"
+                  [class.border-[#243B37]]="!tok.shield_raised"
+                  [class.bg-[#122220]]="!tok.shield_raised"
+                  [class.text-[#8AB0AB]]="!tok.shield_raised"
+                >
+                  Blk {{ tok.shield_block }}
+                </span>
+              }
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            @if (editingVital() === 'current_hp' && controllable) {
+              <div
+                data-hud-vital-bar="current_hp"
+                class="relative flex h-5 items-center justify-between overflow-hidden rounded-md border border-[#FB7185] bg-[#19090F] px-1.5 font-mono-num text-[10px]"
+              >
+                <span class="font-bold text-[#FFE4E6]">HP</span>
+                <div class="flex items-center gap-0.5">
+                  <input
+                    type="text"
+                    inputmode="text"
+                    data-hud-vital-input="current_hp"
+                    aria-label="Edit HP (number or +/- adjustment)"
+                    [value]="vitalInputDraft()"
+                    (input)="onVitalDraftInput($event)"
+                    (keydown)="onVitalInputKeyDown($event, 'current_hp')"
+                    (blur)="commitVitalEdit('current_hp')"
+                    (click)="$event.stopPropagation()"
+                    class="w-11 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-[10px] font-bold text-white outline-none ring-1 ring-[#FB7185]/60"
+                  />
+                  <span class="font-bold text-white/75">/{{ tok.max_hp }}</span>
+                </div>
+              </div>
+            } @else {
+              <button
+                type="button"
+                data-hud-vital-bar="current_hp"
+                [disabled]="!controllable"
+                [title]="controllable ? 'Click to enter new HP or +/- adjustment' : ''"
+                (click)="startVitalEdit('current_hp', $event)"
+                class="relative flex h-5 w-full items-center justify-between overflow-hidden rounded-md border border-[#6E293B] bg-[#210D14] px-1.5 font-mono-num text-[10px] transition-colors enabled:cursor-pointer enabled:hover:border-[#FB7185] disabled:cursor-default"
+              >
+                <div
+                  class="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-[#9F1239] to-[#E11D48]/85 transition-all"
+                  [style.width.%]="hpPercent()"
+                ></div>
+                <span class="relative z-10 font-bold text-[#FFE4E6]">HP</span>
+                <span class="relative z-10 font-bold text-white">{{ tok.current_hp }}/{{ tok.max_hp }}</span>
+              </button>
+            }
+
+            @if (editingVital() === 'current_sp' && controllable) {
+              <div
+                data-hud-vital-bar="current_sp"
+                class="relative flex h-5 items-center justify-between overflow-hidden rounded-md border border-[#38BDF8] bg-[#07161D] px-1.5 font-mono-num text-[10px]"
+              >
+                <span class="font-bold text-[#E0F2FE]">SP</span>
+                <div class="flex items-center gap-0.5">
+                  <input
+                    type="text"
+                    inputmode="text"
+                    data-hud-vital-input="current_sp"
+                    aria-label="Edit SP (number or +/- adjustment)"
+                    [value]="vitalInputDraft()"
+                    (input)="onVitalDraftInput($event)"
+                    (keydown)="onVitalInputKeyDown($event, 'current_sp')"
+                    (blur)="commitVitalEdit('current_sp')"
+                    (click)="$event.stopPropagation()"
+                    class="w-11 rounded bg-black/50 px-1 py-0 text-right font-mono-num text-[10px] font-bold text-white outline-none ring-1 ring-[#38BDF8]/60"
+                  />
+                  <span class="font-bold text-white/75">/{{ tok.max_sp }}</span>
+                </div>
+              </div>
+            } @else {
+              <button
+                type="button"
+                data-hud-vital-bar="current_sp"
+                [disabled]="!controllable"
+                [title]="controllable ? 'Click to enter new SP or +/- adjustment' : ''"
+                (click)="startVitalEdit('current_sp', $event)"
+                class="relative flex h-5 w-full items-center justify-between overflow-hidden rounded-md border border-[#1E5263] bg-[#0B1C24] px-1.5 font-mono-num text-[10px] transition-colors enabled:cursor-pointer enabled:hover:border-[#38BDF8] disabled:cursor-default"
+              >
+                <div
+                  class="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-[#0369A1] to-[#0EA5E9]/85 transition-all"
+                  [style.width.%]="spPercent()"
+                ></div>
+                <span class="relative z-10 font-bold text-[#E0F2FE]">SP</span>
+                <span class="relative z-10 font-bold text-white">{{ tok.current_sp }}/{{ tok.max_sp }}</span>
+              </button>
+            }
+          </div>
+
+          <div class="flex items-center justify-between gap-1.5 pt-0.5">
+            <div class="flex items-center gap-1">
+              <span class="font-mono-num text-[9px] font-bold text-[#FDBA74]">AP</span>
+              <div class="flex items-center gap-1">
+                @for (pip of apPips(); track pip) {
+                  <button
+                    type="button"
+                    [disabled]="!controllable"
+                    [attr.aria-label]="'Set AP to ' + pip"
+                    (click)="setApFromPip(pip)"
+                    class="h-3 w-3 rounded-xs border transition-all disabled:cursor-default"
+                    [class.border-[#FB923C]]="pip <= tok.current_ap"
+                    [class.bg-[#EA580C]]="pip <= tok.current_ap"
+                    [class.shadow-[0_0_6px_rgba(249,115,22,0.65)]]="pip <= tok.current_ap"
+                    [class.border-[#355650]]="pip > tok.current_ap"
+                    [class.bg-[#09100F]]="pip > tok.current_ap"
+                  ></button>
+                }
+              </div>
+              <span class="font-mono-num text-[10px] font-bold text-white">
+                {{ tok.current_ap }}/{{ tok.max_ap }}
+              </span>
+            </div>
+
+            @if (canEndTurn()) {
+              <button
+                type="button"
+                data-hud-end-turn="true"
+                (click)="endActiveTurn()"
+                class="btn-copper rounded-md px-2 py-0.5 font-mono-num text-[9px] font-bold"
+              >
+                End Turn &rarr;
+              </button>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="hidden w-px self-stretch bg-[#243B37] sm:block"></div>
+
+      <div class="flex flex-wrap items-stretch gap-2">
+        @if (ch && st) {
+          @let activeWep = st.activeWeapon;
+          @let activeVis = getWeaponVisuals(activeWep);
+          @let activeAp = activeWep?.ap_cost ?? 1;
+          @let secSlot = getSecondarySlotNumber(ch);
+          @let secWep = getSecondarySlotWeapon(ch, st);
+          @let secVis = getWeaponVisuals(secWep);
+
+          <div data-hud-section="weapons" class="flex items-stretch gap-1.5">
+            <div
+              class="group relative flex h-[84px] min-w-[132px] flex-col justify-between rounded-xl border border-[#C4491A] bg-gradient-to-b from-[#29170E] to-[#111D1B] p-2 transition-all hover:border-[#FB923C]"
+              [class.opacity-45]="!controllable || tok.current_ap < activeAp"
+              (mouseenter)="setHover({
+                title: (activeWep?.name || 'Unarmed') + ' Strike',
+                apLabel: activeAp + ' AP',
+                subtitle: formatFormula(st.attackRollMod) + ' · ' + st.flatWeaponDamage + ' Flat DMG · Reach ' + getWeaponReachFeet(activeWep) + ' ft',
+                description: activeWep?.trait_description || 'Click to select a target on the battlemap, or use the die button to roll a check.'
+              })"
+              (mouseleave)="setHover(null)"
+            >
+              <div class="flex items-center justify-between gap-1">
+                <span class="font-mono-num text-[9px] font-bold uppercase text-[#FDBA74]">
+                  Slot {{ ch.active_weapon_slot }}
+                </span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    (click)="rollActiveWeaponCheck($event)"
+                    title="Roll 2d10 attack check directly"
+                    class="rounded border border-[#355650] bg-[#09100F]/90 px-1 py-[1px] font-mono-num text-[9px] font-bold text-[#8AB0AB] hover:border-[#FDBA74] hover:text-white"
+                  >
+                    2d10
+                  </button>
+                  <span class="rounded bg-[#C4491A] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-white">
+                    {{ activeAp }} AP
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                data-hud-tile="active-weapon"
+                [disabled]="!controllable || tok.current_ap < activeAp"
+                (click)="triggerActiveWeapon()"
+                class="flex flex-1 items-center gap-2 text-left disabled:cursor-not-allowed"
+              >
+                <span
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                  [style.border-color]="activeVis.color"
+                >
+                  <app-compendium-icon
+                    [icon]="activeVis.icon"
+                    [color]="activeVis.color"
+                    [tintCustom]="activeVis.tintCustom"
+                    sizeClass="h-4 w-4"
+                  />
+                </span>
+                <div class="min-w-0">
+                  <div class="max-w-[92px] truncate font-display text-[11px] font-bold text-white">
+                    {{ activeWep?.name || 'Unarmed' }}
+                  </div>
+                  <div class="font-mono-num text-[10px] font-bold text-[#FDBA74]">
+                    {{ formatSignedMod(st.attackRollMod) }} &middot; {{ st.flatWeaponDamage }} DMG
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              data-hud-tile="swap-weapon"
+              [disabled]="!controllable || tok.current_ap < 1"
+              (click)="swapWeaponSlot()"
+              (mouseenter)="setHover({
+                title: 'Switch to Slot ' + secSlot + ' (' + (secWep?.name || 'Unarmed') + ')',
+                apLabel: '1 AP',
+                subtitle: 'Swaps active weapon slot',
+                description: 'Readies ' + (secWep?.name || 'Unarmed') + ' as your active weapon.'
+              })"
+              (mouseleave)="setHover(null)"
+              class="flex h-[84px] w-[72px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#C4491A] disabled:opacity-40"
+            >
+              <div class="flex w-full items-center justify-between font-mono-num text-[8px] font-bold text-[#8AB0AB]">
+                <span>S{{ secSlot }}</span>
+                <span class="text-[#FDBA74]">1 AP &#8644;</span>
+              </div>
+              <app-compendium-icon
+                [icon]="secVis.icon"
+                [color]="secVis.color"
+                [tintCustom]="secVis.tintCustom"
+                sizeClass="h-5 w-5"
+              />
+              <span class="w-full truncate text-[9px] font-semibold text-[#EBF5F3]">
+                {{ secWep?.name || 'Unarmed' }}
+              </span>
+            </button>
+          </div>
+
+          @if (st.resolvedCombatArts.length > 0) {
+            <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
+            <div data-hud-section="combat-arts" class="flex flex-wrap items-stretch gap-1.5">
+              @for (art of st.resolvedCombatArts; track art.baseNode.id) {
+                @let artVis = getNodeVisuals(art.baseNode);
+                @let cd = getArtCooldown(art);
+                @let artLocked = cd > 0 || !art.meetsWeaponRequirement || !controllable || tok.current_ap < art.apCost;
+                <button
+                  type="button"
+                  [attr.data-hud-art]="art.baseNode.id"
+                  [disabled]="artLocked"
+                  (click)="triggerPcArt(art)"
+                  (mouseenter)="setHover({
+                    title: art.baseNode.name,
+                    apLabel: art.apCost + ' AP',
+                    subtitle: formatFormula(st.attackRollMod + art.bonusAttackMod) + ' · ' + (st.flatWeaponDamage + art.bonusFlatDamage) + ' DMG',
+                    description: !art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description,
+                    tags: art.combatTags
+                  })"
+                  (mouseleave)="setHover(null)"
+                  class="relative flex h-[84px] w-[72px] flex-col items-center justify-between overflow-hidden rounded-xl border border-[#784321] bg-[#1F140D] p-1.5 text-center transition-all hover:border-[#FB923C] disabled:opacity-45"
+                >
+                  <div class="flex w-full items-center justify-between gap-0.5 font-mono-num text-[8px] font-bold">
+                    @if (art.appliedUpgrades.length > 0) {
+                      <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
+                    } @else if (art.combatTags.length > 0) {
+                      <span class="truncate text-[#FDBA74]">{{ art.combatTags[0].slice(0, 3) }}</span>
+                    } @else {
+                      <span></span>
+                    }
+                    <span class="rounded bg-black/55 px-1 py-[1px] text-[#FDBA74]">
+                      {{ art.apCost }} AP
+                    </span>
+                  </div>
+
+                  <app-compendium-icon
+                    [icon]="artVis.icon"
+                    [color]="artVis.color"
+                    [tintCustom]="artVis.tintCustom"
+                    sizeClass="h-6 w-6"
+                  />
+
+                  <span class="w-full truncate text-[9px] font-bold text-white">
+                    {{ art.baseNode.name }}
+                  </span>
+
+                  @if (cd > 0) {
+                    <span class=" absolute inset-0 flex items-center justify-center bg-[#09100F]/85 font-mono-num text-[10px] font-extrabold text-[#FDA4AF]">
+                      CD {{ cd }}
+                    </span>
+                  } @else if (!art.meetsWeaponRequirement) {
+                    <span class="absolute inset-x-0 bottom-0 bg-[#3B1822]/95 py-0.5 font-mono-num text-[8px] font-bold text-[#FDA4AF]">
+                      Req Weapon
+                    </span>
+                  }
+                </button>
+              }
+            </div>
+          }
+        } @else {
+          @let npcAp = tok.npc_stats.attack_ap ?? 1;
+          @let npcMod = tok.npc_stats.attack_mod ?? 3;
+          @let npcDmg = tok.npc_stats.flat_damage ?? 4;
+          @let npcWepName = tok.npc_stats.weapon_name || 'Melee Strike';
+
+          <div data-hud-section="weapons" class="flex items-stretch gap-1.5">
+            <div
+              class="flex h-[84px] min-w-[136px] flex-col justify-between rounded-xl border border-[#C4491A] bg-gradient-to-b from-[#29170E] to-[#111D1B] p-2 transition-all hover:border-[#FB923C]"
+              [class.opacity-45]="!controllable || tok.current_ap < npcAp"
+              (mouseenter)="setHover({
+                title: npcWepName,
+                apLabel: npcAp + ' AP',
+                subtitle: formatFormula(npcMod) + ' · ' + npcDmg + ' Flat DMG · Reach ' + (tok.npc_stats.reach_feet ?? 5) + ' ft',
+                description: 'Click to select a target on the battlemap.'
+              })"
+              (mouseleave)="setHover(null)"
+            >
+              <div class="flex items-center justify-between gap-1">
+                <span class="font-mono-num text-[9px] font-bold uppercase text-[#FDBA74]">Attack</span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    (click)="rollActiveWeaponCheck($event)"
+                    title="Roll 2d10 attack check directly"
+                    class="rounded border border-[#355650] bg-[#09100F]/90 px-1 py-[1px] font-mono-num text-[9px] font-bold text-[#8AB0AB] hover:border-[#FDBA74] hover:text-white"
+                  >
+                    2d10
+                  </button>
+                  <span class="rounded bg-[#C4491A] px-1.5 py-[1px] font-mono-num text-[9px] font-bold text-white">
+                    {{ npcAp }} AP
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                data-hud-tile="npc-weapon"
+                [disabled]="!controllable || tok.current_ap < npcAp"
+                (click)="triggerActiveWeapon()"
+                class="flex flex-1 items-center gap-2 text-left disabled:cursor-not-allowed"
+              >
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#243B37] bg-[#09100F]">
+                  <app-compendium-icon
+                    [icon]="tok.icon || 'battleaxe'"
+                    [color]="tok.color || '#EF4444'"
+                    sizeClass="h-4 w-4"
+                  />
+                </span>
+                <div class="min-w-0">
+                  <div class="max-w-[96px] truncate font-display text-[11px] font-bold text-white">
+                    {{ npcWepName }}
+                  </div>
+                  <div class="font-mono-num text-[10px] font-bold text-[#FDBA74]">
+                    {{ formatSignedMod(npcMod) }} &middot; {{ npcDmg }} DMG
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          @if (npcCombatArts().length > 0) {
+            <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
+            <div data-hud-section="combat-arts" class="flex flex-wrap items-stretch gap-1.5">
+              @for (nArt of npcCombatArts(); track nArt.id) {
+                @let nVis = getNodeVisuals(nArt);
+                @let nAp = nArt.ap_cost ?? 1;
+                <button
+                  type="button"
+                  [attr.data-hud-art]="nArt.id"
+                  [disabled]="!controllable || tok.current_ap < nAp"
+                  (click)="triggerNpcArt(nArt)"
+                  (mouseenter)="setHover({
+                    title: nArt.name,
+                    apLabel: nAp + ' AP',
+                    subtitle: 'Special Combat Art',
+                    description: nArt.description
+                  })"
+                  (mouseleave)="setHover(null)"
+                  class="flex h-[84px] w-[72px] flex-col items-center justify-between rounded-xl border border-[#784321] bg-[#1F140D] p-1.5 text-center transition-all hover:border-[#FB923C] disabled:opacity-45"
+                >
+                  <div class="flex w-full justify-end font-mono-num text-[8px] font-bold">
+                    <span class="rounded bg-black/55 px-1 py-[1px] text-[#FDBA74]">{{ nAp }} AP</span>
+                  </div>
+                  <app-compendium-icon
+                    [icon]="nVis.icon"
+                    [color]="nVis.color"
+                    [tintCustom]="nVis.tintCustom"
+                    sizeClass="h-6 w-6"
+                  />
+                  <span class="w-full truncate text-[9px] font-bold text-white">{{ nArt.name }}</span>
+                </button>
+              }
+            </div>
+          }
+        }
+
+        <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
+
+        <div data-hud-section="tactical" class="flex flex-wrap items-stretch gap-1.5">
+          @if (tok.shield_block > 0) {
+            <button
+              type="button"
+              data-hud-tile="raise-guard"
+              [disabled]="!controllable || (!tok.shield_raised && tok.current_ap < 1)"
+              (click)="toggleRaiseGuard()"
+              (mouseenter)="setHover({
+                title: tok.shield_raised ? 'Lower Guard / Shield' : 'Raise Guard / Shield',
+                apLabel: tok.shield_raised ? '0 AP' : '1 AP',
+                subtitle: 'Mitigates ' + tok.shield_block + ' DMG vs non-Piercing attacks',
+                description: 'Remains active until the start of your next turn.'
+              })"
+              (mouseleave)="setHover(null)"
+              class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-colors disabled:opacity-40"
+              [class.border-[#38BDF8]]="tok.shield_raised"
+              [class.bg-[#0E3342]]="tok.shield_raised"
+              [class.border-[#243B37]]="!tok.shield_raised"
+              [class.bg-[#122220]]="!tok.shield_raised"
+              [class.hover:border-[#38BDF8]]="true"
+            >
+              <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">
+                {{ tok.shield_raised ? 'ACTIVE' : '1 AP' }}
+              </span>
+              <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              <div class="w-full leading-tight">
+                <div class="truncate text-[9px] font-bold text-white">
+                  {{ tok.shield_raised ? 'Guard Up' : 'Guard' }}
+                </div>
+                <div class="font-mono-num text-[8px] text-[#7DD3FC]">&minus;{{ tok.shield_block }} DMG</div>
+              </div>
+            </button>
+          }
+
+          <button
+            type="button"
+            data-hud-tile="parry"
+            [disabled]="!controllable || tok.current_ap < 1"
+            (click)="triggerReaction('parry')"
+            (mouseenter)="setHover({
+              title: 'Parry Reaction',
+              apLabel: '1 AP',
+              subtitle: 'Roll ' + formatFormula(parryMod()),
+              description: 'Negates incoming non-Crushing hit when defense roll beats attack roll.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38BDF8] disabled:opacity-40"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">1 AP</span>
+            <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
+              <path d="M13 19l6-6" />
+              <path d="M16 16l4 4" />
+              <path d="M19 21l2-2" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Parry</div>
+              <div class="font-mono-num text-[8px] text-[#7DD3FC]">{{ formatSignedMod(parryMod()) }}</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            data-hud-tile="dodge"
+            [disabled]="!controllable || !canDodge() || tok.current_ap < 1"
+            (click)="triggerReaction('dodge')"
+            (mouseenter)="setHover({
+              title: 'Dodge Reaction',
+              apLabel: '1 AP',
+              subtitle: canDodge() ? 'Roll ' + formatFormula(dodgeMod()) + ' · Shifts 5 ft' : 'Disabled by Heavy Armor / Tower Shield',
+              description: 'Flawless (+5) refunds 1 AP. Cannot Dodge Sweeping attacks.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">1 AP</span>
+            <svg class="h-5 w-5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Dodge</div>
+              <div class="font-mono-num text-[8px] text-[#5EEAD4]">
+                {{ canDodge() ? formatSignedMod(dodgeMod()) : 'Off' }}
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            data-hud-tile="stance-recovery"
+            [disabled]="!controllable || tok.current_ap < 1 || tok.current_sp >= tok.max_sp"
+            (click)="triggerStanceRecovery()"
+            (mouseenter)="setHover({
+              title: '1 AP: Stance Recovery',
+              apLabel: '1 AP',
+              subtitle: 'Restores +' + stanceRecoveryAmount() + ' SP',
+              description: 'Steady your breathing and posture on your turn to recover Stamina & Poise.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border border-[#1E5263] bg-[#0F2630] p-1.5 text-center transition-colors hover:border-[#38BDF8] disabled:opacity-40"
+          >
+            <span class="sr-only">1 AP: Stance Recovery</span>
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#7DD3FC]">1 AP</span>
+            <svg class="h-5 w-5 text-[#7DD3FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Stance</div>
+              <div class="font-mono-num text-[8px] text-[#7DD3FC]">+{{ stanceRecoveryAmount() }} SP</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            data-hud-tile="move"
+            [disabled]="!controllable || tok.current_ap < 1"
+            (click)="triggerTacticalAction('Move', 'Moved up to ' + tok.move_feet + ' ft (' + moveTiles() + ' tiles)')"
+            (mouseenter)="setHover({
+              title: 'Move',
+              apLabel: '1 AP',
+              subtitle: 'Up to ' + tok.move_feet + ' ft (' + moveTiles() + ' tiles)',
+              description: 'Spend 1 AP to log a stride, or drag your token directly on the map.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">1 AP</span>
+            <svg class="h-5 w-5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 4v16M7 4v16M3 8h4m6 0h8M3 16h8m6 0h4" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Move</div>
+              <div class="font-mono-num text-[8px] text-[#5EEAD4]">{{ tok.move_feet }} ft</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            data-hud-tile="aim"
+            [disabled]="!controllable || tok.current_ap < 1"
+            (click)="triggerTacticalAction('Aim', 'Steadied sights on target for ranged attack')"
+            (mouseenter)="setHover({
+              title: 'Aim',
+              apLabel: '1 AP',
+              subtitle: 'Steady Ranged Sights',
+              description: 'Allows Requires Aim ranged weapons to fire normally without Disadvantage.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[64px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#FDBA74] disabled:opacity-40"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">1 AP</span>
+            <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="8" />
+              <line x1="12" y1="2" x2="12" y2="6" />
+              <line x1="12" y1="18" x2="12" y2="22" />
+              <line x1="2" y1="12" x2="6" y2="12" />
+              <line x1="18" y1="12" x2="22" y2="12" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Aim</div>
+              <div class="font-mono-num text-[8px] text-[#8AB0AB]">Steady</div>
+            </div>
+          </button>
+
+          @let initInfo = singleInitiativeInfo();
+          @let rolledInit = tok.npc_stats?.__initiative;
+          <button
+            type="button"
+            data-hud-tile="roll-initiative"
+            [disabled]="!controllable && !vttStore.isGm()"
+            (click)="rollInitiative()"
+            (mouseenter)="setHover({
+              title: 'Roll Initiative',
+              apLabel: '0 AP',
+              subtitle: formatFormula(initInfo.mod) + ' (' + initInfo.govAttr + ')',
+              description: 'Rolls Initiative and updates combat turn order.'
+            })"
+            (mouseleave)="setHover(null)"
+            class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border border-[#784321] bg-[#1D120A] p-1.5 text-center transition-colors hover:border-[#FDBA74] disabled:opacity-40"
+          >
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">
+              {{ rolledInit !== undefined ? '#' + rolledInit : '2d10' }}
+            </span>
+            <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+            <div class="w-full leading-tight">
+              <div class="text-[9px] font-bold text-white">Initiative</div>
+              <div class="font-mono-num text-[8px] text-[#FDBA74]">{{ formatSignedMod(initInfo.mod) }}</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+</div>

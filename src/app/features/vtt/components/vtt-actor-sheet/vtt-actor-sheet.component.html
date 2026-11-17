@@ -392,7 +392,7 @@
 
       @if (mode === 'character') {
         @if (char && stats) {
-          <div class="grid grid-cols-5 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:text-[11px]">
+          <div class="grid grid-cols-3 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:grid-cols-5">
             <button
               type="button"
               data-vtt-pc-tab="actions"
@@ -424,7 +424,7 @@
               [class.text-white]="pcTab() === 'loadout'"
               [class.text-[#8AB0AB]]="pcTab() !== 'loadout'"
             >
-              Loadout &amp; Items ({{ getCharacterInventory(char).length }})
+              Loadout ({{ getCharacterInventory(char).length }})
             </button>
             <button
               type="button"
@@ -435,7 +435,7 @@
               [class.text-white]="pcTab() === 'perks'"
               [class.text-[#8AB0AB]]="pcTab() !== 'perks'"
             >
-              Perks &amp; Arts ({{ stats.perkSpent }}/{{ stats.perkBudget }})
+              Perks ({{ stats.perkSpent }}/{{ stats.perkBudget }})
             </button>
             <button
               type="button"
@@ -1227,7 +1227,7 @@
 
               <div class="space-y-2">
                 <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                  5 Attributes
+                  Attributes
                 </div>
                 <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-5">
                   @for (attr of attributeList; track attr.name) {
@@ -1271,10 +1271,10 @@
                 </div>
               </div>
 
-              <div class="space-y-2">
+              <div class="space-y-2 border-t border-[#243B37] pt-3">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                    5 Combat Skills
+                    Combat Skills
                   </span>
                   <div class="flex flex-wrap items-center gap-1.5">
                     <button
@@ -1329,9 +1329,14 @@
                 </div>
               </div>
 
-              <div class="space-y-2">
-                <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                  10 Field Skills
+              <div data-vtt-pc-field-skills="true" class="space-y-2.5 border-t border-[#243B37] pt-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Field Skills
+                  </span>
+                  <span class="text-[10px] text-[#8AB0AB]">
+                    Rolls 2d10 + MAX(Attr A, Attr B) + Rank
+                  </span>
                 </div>
                 <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   @for (fs of fieldSkillList; track fs.name) {
@@ -1356,7 +1361,7 @@
                               </button>
                             }
                             <span class="min-w-[1.25rem] text-center text-[11px] font-bold text-white">
-                              R{{ fsInfo.rank }}
+                              {{ fsInfo.rank }}
                             </span>
                             @if (editable) {
                               <button
@@ -2647,7 +2652,7 @@
         }
       } @else {
         @let npcStats = getNpcStats();
-        <div class="grid grid-cols-4 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:text-[11px]">
+        <div class="grid grid-cols-5 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:text-[11px]">
           <button
             type="button"
             data-vtt-npc-tab="actions"
@@ -2672,6 +2677,17 @@
           </button>
           <button
             type="button"
+            data-vtt-npc-tab="skills"
+            (click)="npcTab.set('skills')"
+            class="rounded-lg px-1.5 py-1.5 transition-colors"
+            [class.bg-[#09100F]]="npcTab() === 'skills'"
+            [class.text-white]="npcTab() === 'skills'"
+            [class.text-[#8AB0AB]]="npcTab() !== 'skills'"
+          >
+            Attributes &amp; Skills
+          </button>
+          <button
+            type="button"
             data-vtt-npc-tab="inventory"
             (click)="npcTab.set('inventory')"
             class="rounded-lg px-1.5 py-1.5 transition-colors"
@@ -2679,7 +2695,7 @@
             [class.text-white]="npcTab() === 'inventory'"
             [class.text-[#8AB0AB]]="npcTab() !== 'inventory'"
           >
-            Inventory &amp; Notes ({{ getNpcInventory().length }})
+            Inventory ({{ getNpcInventory().length }})
           </button>
           <button
             type="button"
@@ -2712,7 +2728,7 @@
                       Equipped Weapon &amp; Attacks
                     </span>
                     <p class="text-[10px] text-[#8AB0AB]">
-                      Roll checks directly or target an adversary on the battlemap.
+                      Roll checks directly or target an opponent on the battlemap.
                     </p>
                   </div>
                   <div class="flex items-center gap-1.5">
@@ -3521,6 +3537,159 @@
                 }
               </div>
             }
+          }
+
+          @if (npcTab() === 'skills') {
+            @let npcAttrs = getNpcAttributes();
+            @let npcCombatSkills = getNpcCombatSkills();
+            @let npcFsTotals = getNpcFieldSkillTotals();
+            <div data-vtt-npc-skills="true" class="space-y-3">
+              <div data-npc-attributes-section="true" class="space-y-2">
+                <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                  Attributes
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+                  @for (attr of attributeList; track attr.name) {
+                    @let nAttrVal = npcAttrs[attr.name] ?? 0;
+                    <div class="flex flex-col justify-between rounded-xl border border-[#243B37] bg-[#122220] p-2">
+                      <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] font-bold text-white">{{ attr.name }}</span>
+                        <button
+                          type="button"
+                          (click)="rollSheetCheck(getNpcName(), attr.name + ' Check', nAttrVal, '2d10 + ' + attr.name + ' (' + nAttrVal + ')')"
+                          class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                        >
+                          Roll
+                        </button>
+                      </div>
+                      <div class="mt-1.5 flex items-center justify-between rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                        @if (editable) {
+                          <button
+                            type="button"
+                            (click)="adjustNpcAttribute(attr.name, -1)"
+                            [disabled]="nAttrVal <= -2"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                          >
+                            &minus;
+                          </button>
+                        }
+                        <span class="mx-auto text-sm font-bold text-white">
+                          {{ nAttrVal >= 0 ? '+' + nAttrVal : nAttrVal }}
+                        </span>
+                        @if (editable) {
+                          <button
+                            type="button"
+                            (click)="adjustNpcAttribute(attr.name, 1)"
+                            [disabled]="nAttrVal >= 8"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                          >
+                            +
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div class="space-y-2 border-t border-[#243B37] pt-3">
+                <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                  Combat Skills
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+                  @for (cs of combatSkillList; track cs.name) {
+                    @let nRank = npcCombatSkills[cs.name] ?? 0;
+                    <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2">
+                      <div class="text-[11px] font-bold text-white">{{ cs.name }}</div>
+                      <div class="text-[9px] text-[#8AB0AB]">{{ cs.govHint }}</div>
+                      <div class="mt-1.5 flex items-center justify-between rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                        @if (editable) {
+                          <button
+                            type="button"
+                            (click)="adjustNpcCombatSkill(cs.name, -1)"
+                            [disabled]="nRank <= 0"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                          >
+                            &minus;
+                          </button>
+                        }
+                        <span class="mx-auto text-xs font-bold text-white">+{{ nRank }}</span>
+                        @if (editable) {
+                          <button
+                            type="button"
+                            (click)="adjustNpcCombatSkill(cs.name, 1)"
+                            [disabled]="nRank >= 6"
+                            class="px-1 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                          >
+                            +
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div data-vtt-npc-field-skills="true" class="space-y-2.5 border-t border-[#243B37] pt-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Field Skills
+                  </span>
+                  <span class="text-[10px] text-[#8AB0AB]">
+                    Rolls 2d10 + MAX(Attr A, Attr B) + Rank
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  @for (fs of fieldSkillList; track fs.name) {
+                    @if (npcFsTotals[fs.name]; as nfsInfo) {
+                      <div class="flex items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] px-2.5 py-1.5">
+                        <div class="min-w-0">
+                          <div class="truncate text-xs font-bold text-white">{{ fs.name }}</div>
+                          <div class="text-[10px] text-[#8AB0AB]">
+                            {{ nfsInfo.govAttr }} ({{ nfsInfo.govVal >= 0 ? '+' + nfsInfo.govVal : nfsInfo.govVal }})
+                          </div>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                          <div class="flex items-center gap-0.5 rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.5 font-mono-num">
+                            @if (editable) {
+                              <button
+                                type="button"
+                                (click)="adjustNpcFieldSkill(fs.name, -1)"
+                                [disabled]="nfsInfo.rank <= 0"
+                                class="px-0.5 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                              >
+                                &minus;
+                              </button>
+                            }
+                            <span class="min-w-[1.25rem] text-center text-[11px] font-bold text-white">
+                              {{ nfsInfo.rank }}
+                            </span>
+                            @if (editable) {
+                              <button
+                                type="button"
+                                (click)="adjustNpcFieldSkill(fs.name, 1)"
+                                [disabled]="nfsInfo.rank >= 6"
+                                class="px-0.5 font-bold text-[#8AB0AB] hover:text-white disabled:opacity-35"
+                              >
+                                +
+                              </button>
+                            }
+                          </div>
+                          <button
+                            type="button"
+                            (click)="rollSheetCheck(getNpcName(), fs.name + ' Check', nfsInfo.total, nfsInfo.govAttr + ' +' + nfsInfo.govVal + ', Rank ' + nfsInfo.rank)"
+                            class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                          >
+                            {{ formatRollFormulaFromMod(nfsInfo.total) }}
+                          </button>
+                        </div>
+                      </div>
+                    }
+                  }
+                </div>
+              </div>
+            </div>
           }
 
           @if (npcTab() === 'inventory') {

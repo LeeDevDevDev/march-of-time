@@ -1,11 +1,15 @@
 import {
   ActiveCombatTag,
+  AttributeName,
+  CombatSkillName,
   CombatStatusEffect,
 } from '../../../core/compendium/compendium.model';
 import {
   ActorInventoryItem,
   CharacterModel,
   DEFAULT_TOKEN_APPEARANCE,
+  FIELD_SKILL_LIST,
+  FieldSkillName,
   TokenAppearanceConfig,
   TokenFramePresetId,
   TokenShape,
@@ -267,6 +271,9 @@ export interface VttNpcStats {
   dodge_mod?: number;
   can_dodge?: boolean;
   enables_martial_parry?: boolean;
+  attributes?: Partial<Record<AttributeName, number>>;
+  combat_skills?: Partial<Record<CombatSkillName, number>>;
+  field_skills?: Partial<Record<FieldSkillName, number>>;
   __world_x?: number | null;
   __world_y?: number | null;
   __unsnapped?: boolean;
@@ -278,6 +285,8 @@ export interface VttNpcStats {
   __flip_y?: boolean;
   __z_index?: number;
   __rotation?: number;
+  __initiative?: number;
+  __initiative_mod?: number;
   __portrait_url?: string | null;
   __token_image_url?: string | null;
   __token_appearance?: TokenAppearanceConfig;
@@ -285,6 +294,75 @@ export interface VttNpcStats {
   __source_character_id?: string | null;
   __source_preset_id?: string | null;
   __character_sheet?: CharacterModel | null;
+}
+
+export function normalizeNpcAttributes(
+  raw?: Partial<Record<AttributeName, number>> | null
+): Record<AttributeName, number> {
+  return {
+    Brawn: Number(raw?.Brawn ?? 0),
+    Agility: Number(raw?.Agility ?? 0),
+    Technique: Number(raw?.Technique ?? 0),
+    Iron: Number(raw?.Iron ?? 0),
+    Cunning: Number(raw?.Cunning ?? 0),
+  };
+}
+
+export function normalizeNpcCombatSkills(
+  raw?: Partial<Record<CombatSkillName, number>> | null
+): Record<CombatSkillName, number> {
+  return {
+    Strike: Number(raw?.Strike ?? 0),
+    Shoot: Number(raw?.Shoot ?? 0),
+    Parry: Number(raw?.Parry ?? 0),
+    Dodge: Number(raw?.Dodge ?? 0),
+    Block: Number(raw?.Block ?? 0),
+  };
+}
+
+export function normalizeNpcFieldSkills(
+  raw?: Partial<Record<FieldSkillName, number>> | null
+): Record<FieldSkillName, number> {
+  return {
+    Athletics: Number(raw?.Athletics ?? 0),
+    Menace: Number(raw?.Menace ?? 0),
+    Stealth: Number(raw?.Stealth ?? 0),
+    Tinkering: Number(raw?.Tinkering ?? 0),
+    Medicine: Number(raw?.Medicine ?? 0),
+    Survival: Number(raw?.Survival ?? 0),
+    Resolve: Number(raw?.Resolve ?? 0),
+    Perception: Number(raw?.Perception ?? 0),
+    Sway: Number(raw?.Sway ?? 0),
+    Lore: Number(raw?.Lore ?? 0),
+  };
+}
+
+export function computeNpcFieldSkillTotals(
+  stats: VttNpcStats | null | undefined
+): Record<
+  FieldSkillName,
+  { total: number; govAttr: AttributeName; govVal: number; rank: number }
+> {
+  const attrs = normalizeNpcAttributes(stats?.attributes);
+  const ranks = normalizeNpcFieldSkills(stats?.field_skills);
+  const totals = {} as Record<
+    FieldSkillName,
+    { total: number; govAttr: AttributeName; govVal: number; rank: number }
+  >;
+  for (const fs of FIELD_SKILL_LIST) {
+    const valA = attrs[fs.attrA] ?? 0;
+    const valB = attrs[fs.attrB] ?? 0;
+    const govAttr = valA >= valB ? fs.attrA : fs.attrB;
+    const govVal = Math.max(valA, valB);
+    const rank = ranks[fs.name] ?? 0;
+    totals[fs.name] = {
+      total: govVal + rank,
+      govAttr,
+      govVal,
+      rank,
+    };
+  }
+  return totals;
 }
 
 export interface VisualBearingEntity {
@@ -580,6 +658,9 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       parry_mod: 2,
       dodge_mod: 2,
       can_dodge: true,
+      attributes: { Brawn: 2, Agility: 1, Technique: 1, Iron: 1, Cunning: 0 },
+      combat_skills: { Strike: 1, Shoot: 0, Parry: 1, Dodge: 1, Block: 0 },
+      field_skills: { Athletics: 1, Menace: 1, Survival: 1, Perception: 1 },
     },
   },
   {
@@ -606,6 +687,9 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       parry_mod: 3,
       dodge_mod: 1,
       can_dodge: true,
+      attributes: { Brawn: 1, Agility: 0, Technique: 2, Iron: 2, Cunning: 1 },
+      combat_skills: { Strike: 1, Shoot: 0, Parry: 1, Dodge: 1, Block: 2 },
+      field_skills: { Athletics: 1, Resolve: 2, Perception: 1 },
     },
   },
   {
@@ -632,6 +716,9 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       parry_mod: 1,
       dodge_mod: 3,
       can_dodge: true,
+      attributes: { Brawn: 0, Agility: 2, Technique: 2, Iron: 1, Cunning: 2 },
+      combat_skills: { Strike: 0, Shoot: 2, Parry: 0, Dodge: 1, Block: 0 },
+      field_skills: { Stealth: 1, Tinkering: 1, Perception: 2 },
     },
   },
   {
@@ -659,6 +746,9 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       dodge_mod: 4,
       can_dodge: true,
       enables_martial_parry: true,
+      attributes: { Brawn: 0, Agility: 3, Technique: 2, Iron: 1, Cunning: 2 },
+      combat_skills: { Strike: 1, Shoot: 0, Parry: 1, Dodge: 1, Block: 0 },
+      field_skills: { Athletics: 1, Stealth: 3, Perception: 2 },
     },
   },
   {
@@ -685,6 +775,9 @@ export const VTT_NPC_PRESETS: VttNpcPreset[] = [
       parry_mod: 3,
       dodge_mod: 0,
       can_dodge: false,
+      attributes: { Brawn: 3, Agility: 0, Technique: 2, Iron: 3, Cunning: 1 },
+      combat_skills: { Strike: 2, Shoot: 0, Parry: 1, Dodge: 0, Block: 2 },
+      field_skills: { Athletics: 2, Menace: 3, Resolve: 2 },
     },
   },
 ];
@@ -916,6 +1009,15 @@ export function cloneDetachedNpcStats(
 ): VttNpcStats {
   if (!stats || typeof stats !== 'object') return {};
   const next: VttNpcStats = { ...stats };
+  if (stats.attributes && typeof stats.attributes === 'object') {
+    next.attributes = { ...stats.attributes };
+  }
+  if (stats.combat_skills && typeof stats.combat_skills === 'object') {
+    next.combat_skills = { ...stats.combat_skills };
+  }
+  if (stats.field_skills && typeof stats.field_skills === 'object') {
+    next.field_skills = { ...stats.field_skills };
+  }
   if (stats.__inventory !== undefined) {
     next.__inventory = normalizeInventoryItems(stats.__inventory).map((it) => ({
       ...it,

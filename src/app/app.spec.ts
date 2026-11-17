@@ -10784,6 +10784,707 @@ describe('App', () => {
     charSkillsTabBtn!.click();
     harness.detectChanges();
     expect(sheetEl.textContent).toContain('Core Attributes');
-    expect(sheetEl.textContent).toContain('10 Field Skills');
+    expect(sheetEl.querySelector('[data-char-field-skills="true"]')).toBeNull();
+
+    const fieldSkillsTabBtn = sheetEl.querySelector(
+      'button[data-char-sheet-tab="field_skills"]'
+    ) as HTMLButtonElement | null;
+    expect(fieldSkillsTabBtn).toBeTruthy();
+    fieldSkillsTabBtn!.click();
+    harness.detectChanges();
+    const charFieldSkillsSec = sheetEl.querySelector(
+      '[data-char-field-skills="true"]'
+    ) as HTMLElement | null;
+    expect(charFieldSkillsSec).toBeTruthy();
+    expect(charFieldSkillsSec!.textContent).toContain('Field Skills');
+    expect(charFieldSkillsSec!.textContent).not.toContain('10 Field Skills');
+  });
+
+  it('should render the hybrid Argon Core Dock + Upward Flyout Action HUD when a controllable token is selected in VTT', async () => {
+    const duelistRapier: WeaponModel = {
+      id: 'wep-duelist-rapier',
+      slug: 'duelist-rapier',
+      name: 'Silverleaf Rapier',
+      category: 'Martial',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Technique',
+      gov_skill: 'Strike',
+      base_damage: 4,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      trait_name: 'Needle Point',
+      trait_description: 'Swift dueling blade.',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const throwingDagger: WeaponModel = {
+      id: 'wep-throwing-dagger',
+      slug: 'throwing-dagger',
+      name: 'Whisper Dagger',
+      category: 'Light',
+      ap_cost: 1,
+      requires_aim: false,
+      gov_attribute: 'Agility',
+      gov_skill: 'Strike',
+      base_damage: 3,
+      reach_tiles: 1,
+      thrown_range_tiles: 4,
+      trait_name: 'Balanced',
+      trait_description: 'Can be thrown up to 20 ft.',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const lungeArt: PerkNodeModel = {
+      id: 'perk-hud-lunge',
+      tree_id: 'tree-duelist',
+      slug: 'flashing-lunge',
+      name: 'Flashing Lunge',
+      tier: 1,
+      parent_node_id: null,
+      node_type: 'combat_art',
+      ap_cost: 2,
+      cooldown_rounds: 2,
+      perk_cost: 1,
+      combat_tag: 'Piercing',
+      description: 'Lunging thrust that bypasses shield block.',
+      rule_hooks: { disallow_defense: ['Block'] },
+    };
+
+    const hudCharacter: CharacterModel = {
+      id: 'char-hud-hybrid-1',
+      owner_id: 'gm-hud-1',
+      name: 'Lyra Vance',
+      level: 3,
+      attributes: {
+        Brawn: 1,
+        Agility: 2,
+        Technique: 3,
+        Iron: 2,
+        Cunning: 1,
+      },
+      combat_skills: {
+        Strike: 2,
+        Shoot: 0,
+        Parry: 2,
+        Dodge: 2,
+        Block: 1,
+      },
+      field_skills: {
+        Athletics: 1,
+        Menace: 0,
+        Stealth: 2,
+        Tinkering: 0,
+        Medicine: 1,
+        Survival: 0,
+        Resolve: 1,
+        Perception: 3,
+        Sway: 1,
+        Lore: 0,
+      },
+      equipped_armor: 'Light',
+      equipped_shield: 'Heater',
+      weapon_slot_1_id: duelistRapier.id,
+      weapon_slot_2_id: throwingDagger.id,
+      active_weapon_slot: 1,
+      unlocked_perk_ids: [lungeArt.id],
+      current_hp: 9,
+      current_sp: 6,
+      current_ap: 4,
+      active_cooldowns: {},
+      inventory: [
+        {
+          id: 'inv-poultice-1',
+          category: 'item',
+          subcategory: 'Medical',
+          name: 'Field Poultice',
+          quantity: 2,
+          description: 'Stabilizes wounds.',
+        },
+      ],
+      notes: '',
+    };
+
+    let rosterSeq = 1;
+    let logSeq = 1;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: () => ({ id: 'gm-hud-1', email: 'gm@hud.test' }),
+            isAdmin: () => true,
+            displayName: () => 'GM Hud',
+            handle: () => 'gmhud',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([duelistRapier, throwingDagger]),
+            weapons: signal([duelistRapier, throwingDagger]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([lungeArt]),
+            perkNodes: signal([lungeArt]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([hudCharacter]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: (id: string) =>
+              id === hudCharacter.id ? hudCharacter : undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CharacterService,
+          useValue: {
+            fetchCharacterById: async (id: string) => ({
+              data: id === hudCharacter.id ? hudCharacter : null,
+              error: id === hudCharacter.id ? null : 'Not found',
+            }),
+            updateCharacterRecord: async () => null,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: UserAssetsStore,
+          useValue: {
+            assets: signal([]),
+            folders: signal([]),
+            isLoading: signal(false),
+            isUploading: signal(false),
+            error: signal(null),
+            ensureLoaded: async () => undefined,
+            findAssetByUrl: () => null,
+            resolveTargetFolderId: () => null,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            createRosterActor: async (
+              input: Omit<
+                VttRosterActorModel,
+                'id' | 'created_at' | 'updated_at'
+              >
+            ) => ({
+              actor: {
+                ...input,
+                id: `roster-hud-${rosterSeq++}`,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              } as VttRosterActorModel,
+              error: null,
+            }),
+            updateRosterActor: async () => null,
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertToken: async (
+              input: Omit<VttTokenModel, 'id'> & { id?: string }
+            ) => ({
+              token: {
+                ...input,
+                id: input.id ?? `tok-hud-${input.name}`,
+              } as VttTokenModel,
+              error: null,
+              needsMigration: false,
+            }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-hud-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-hud-1',
+      gm_id: 'gm-hud-1',
+      name: 'Hybrid HUD Campaign',
+      cover_image_url: null,
+      invite_code: 'HUD101',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-hud-1',
+        campaign_id: 'camp-hud-1',
+        gm_id: 'gm-hud-1',
+        folder_id: null,
+        name: 'Dueling Hall',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#0D1615',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        round_number: 1,
+        combat_active: false,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-hud-1');
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const importedLyra = await vttStore.importCharacterToRoster(hudCharacter);
+    const lyraTok = await vttStore.deployRosterActor(importedLyra!.id);
+    vttStore.selectedTokenId.set(lyraTok!.id);
+    fixture.detectChanges();
+
+    const hudEl = rootEl.querySelector(
+      '[data-vtt-action-hud="true"]'
+    ) as HTMLElement | null;
+    expect(hudEl).toBeTruthy();
+    expect(
+      hudEl!.querySelector('[data-hud-argon-dock="true"]')
+    ).toBeTruthy();
+    expect(hudEl!.textContent).toContain('Silverleaf Rapier');
+    expect(hudEl!.textContent).toContain('Whisper Dagger');
+    expect(hudEl!.textContent).toContain('Flashing Lunge');
+    expect(hudEl!.textContent).toContain('Guard');
+    expect(hudEl!.textContent).toContain('Parry');
+    expect(hudEl!.textContent).toContain('Dodge');
+    expect(hudEl!.textContent).toContain('Move');
+    expect(hudEl!.textContent).toContain('Aim');
+
+    const hpBarBtn = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_hp"]'
+    ) as HTMLButtonElement | null;
+    expect(hpBarBtn).toBeTruthy();
+    hpBarBtn!.click();
+    fixture.detectChanges();
+
+    const hpInput1 = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_hp"]'
+    ) as HTMLInputElement | null;
+    expect(hpInput1).toBeTruthy();
+    hpInput1!.value = '5';
+    hpInput1!.dispatchEvent(new Event('input'));
+    hpInput1!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_hp).toBe(5);
+
+    const hpBarBtn2 = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_hp"]'
+    ) as HTMLButtonElement;
+    hpBarBtn2.click();
+    fixture.detectChanges();
+    const hpInput2 = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_hp"]'
+    ) as HTMLInputElement;
+    hpInput2.value = '-3';
+    hpInput2.dispatchEvent(new Event('input'));
+    hpInput2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_hp).toBe(2);
+
+    const hpBarBtn3 = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_hp"]'
+    ) as HTMLButtonElement;
+    hpBarBtn3.click();
+    fixture.detectChanges();
+    const hpInput3 = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_hp"]'
+    ) as HTMLInputElement;
+    hpInput3.value = '+4';
+    hpInput3.dispatchEvent(new Event('input'));
+    hpInput3.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_hp).toBe(6);
+
+    const settingsStore = TestBed.inject(VttSettingsStore);
+    settingsStore.resetPreferences();
+    expect(settingsStore.preferences().overflowSpDamageToHp).toBe(true);
+
+    const spSetBtn = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_sp"]'
+    ) as HTMLButtonElement | null;
+    expect(spSetBtn).toBeTruthy();
+    spSetBtn!.click();
+    fixture.detectChanges();
+    const spSetInput = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_sp"]'
+    ) as HTMLInputElement | null;
+    expect(spSetInput).toBeTruthy();
+    spSetInput!.value = '4';
+    spSetInput!.dispatchEvent(new Event('input'));
+    spSetInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_sp).toBe(4);
+    expect(vttStore.tokens()[0].current_hp).toBe(6);
+
+    const spOverflowBtn = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_sp"]'
+    ) as HTMLButtonElement;
+    spOverflowBtn.click();
+    fixture.detectChanges();
+    const spOverflowInput = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_sp"]'
+    ) as HTMLInputElement;
+    spOverflowInput.value = '-5';
+    spOverflowInput.dispatchEvent(new Event('input'));
+    spOverflowInput.dispatchEvent(new Event('blur'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_sp).toBe(0);
+    expect(vttStore.tokens()[0].current_hp).toBe(5);
+
+    settingsStore.updatePreferences({ overflowSpDamageToHp: false });
+    const spRefillBtn = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_sp"]'
+    ) as HTMLButtonElement;
+    spRefillBtn.click();
+    fixture.detectChanges();
+    const spRefillInput = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_sp"]'
+    ) as HTMLInputElement;
+    spRefillInput.value = '3';
+    spRefillInput.dispatchEvent(new Event('input'));
+    spRefillInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const spNoOverflowBtn = hudEl!.querySelector(
+      'button[data-hud-vital-bar="current_sp"]'
+    ) as HTMLButtonElement;
+    spNoOverflowBtn.click();
+    fixture.detectChanges();
+    const spNoOverflowInput = hudEl!.querySelector(
+      'input[data-hud-vital-input="current_sp"]'
+    ) as HTMLInputElement;
+    spNoOverflowInput.value = '-5';
+    spNoOverflowInput.dispatchEvent(new Event('input'));
+    spNoOverflowInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter' })
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_sp).toBe(0);
+    expect(vttStore.tokens()[0].current_hp).toBe(5);
+    settingsStore.resetPreferences();
+
+    fixture.componentInstance.openSettingsModal('general');
+    fixture.detectChanges();
+    expect(
+      rootEl.querySelector('input[data-vtt-pref-sp-overflow="true"]')
+    ).toBeTruthy();
+    fixture.componentInstance.closeSettingsModal();
+    fixture.detectChanges();
+
+    const swapBtn = hudEl!.querySelector(
+      'button[data-hud-tile="swap-weapon"]'
+    ) as HTMLButtonElement | null;
+    expect(swapBtn).toBeTruthy();
+    swapBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.selectedTokenCharacter()!.active_weapon_slot).toBe(2);
+    expect(vttStore.tokens()[0].current_ap).toBe(3);
+
+    const skillsFlyoutBtn = hudEl!.querySelector(
+      'button[data-hud-flyout-btn="skills"]'
+    ) as HTMLButtonElement | null;
+    expect(skillsFlyoutBtn).toBeTruthy();
+    skillsFlyoutBtn!.click();
+    fixture.detectChanges();
+
+    const skillsFlyout = hudEl!.querySelector(
+      '[data-hud-flyout="skills"]'
+    ) as HTMLElement | null;
+    expect(skillsFlyout).toBeTruthy();
+    expect(skillsFlyout!.textContent).toContain('Attributes');
+    expect(skillsFlyout!.textContent).toContain('Combat Skills');
+    expect(skillsFlyout!.textContent).toContain('Field Skills');
+    expect(skillsFlyout!.textContent).not.toContain('5 Attributes');
+    expect(skillsFlyout!.textContent).not.toContain('5 Combat Skills');
+    expect(skillsFlyout!.textContent).not.toContain('10 Field Skills');
+    expect(skillsFlyout!.textContent).not.toContain('R0');
+
+    const perceptionBtn = skillsFlyout!.querySelector(
+      'button[data-hud-skill-roll="Perception"]'
+    ) as HTMLButtonElement | null;
+    expect(perceptionBtn).toBeTruthy();
+    perceptionBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore.logs().some((l) => l.title.includes('Perception Check'))
+    ).toBe(true);
+
+    const itemsFlyoutBtn = hudEl!.querySelector(
+      'button[data-hud-flyout-btn="items"]'
+    ) as HTMLButtonElement | null;
+    itemsFlyoutBtn!.click();
+    fixture.detectChanges();
+
+    const itemsFlyout = hudEl!.querySelector(
+      '[data-hud-flyout="items"]'
+    ) as HTMLElement | null;
+    expect(itemsFlyout).toBeTruthy();
+    expect(itemsFlyout!.textContent).toContain('Field Poultice');
+    const consumeBtn = Array.from(
+      itemsFlyout!.querySelectorAll('button')
+    ).find((b) => (b.textContent ?? '').trim() === 'Consume')!;
+    consumeBtn.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].current_ap).toBe(2);
+    expect(
+      vttStore.selectedTokenCharacter()!.inventory?.[0]?.quantity
+    ).toBe(1);
+
+    const statusesFlyoutBtn = hudEl!.querySelector(
+      'button[data-hud-flyout-btn="statuses"]'
+    ) as HTMLButtonElement | null;
+    statusesFlyoutBtn!.click();
+    fixture.detectChanges();
+    const bleedingBtn = hudEl!.querySelector(
+      'button[data-hud-status-toggle="Bleeding"]'
+    ) as HTMLButtonElement | null;
+    expect(bleedingBtn).toBeTruthy();
+    bleedingBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(vttStore.tokens()[0].statuses).toContain('Bleeding');
+
+    await vttStore.startCombatEncounter();
+    fixture.detectChanges();
+    expect(
+      hudEl!.querySelector('button[data-hud-end-turn="true"]')
+    ).toBeTruthy();
+
+    const collapseBtn = hudEl!.querySelector(
+      'button[data-hud-collapse-toggle="true"]'
+    ) as HTMLButtonElement | null;
+    collapseBtn!.click();
+    fixture.detectChanges();
+    expect(
+      hudEl!.querySelector('[data-hud-compact-bar="true"]')
+    ).toBeTruthy();
+
+    collapseBtn!.click();
+    const scoutNpc = await vttStore.createVttActorQuick({
+      name: 'Borderland Scout',
+      actor_kind: 'npc',
+    });
+    expect(scoutNpc).toBeTruthy();
+    await vttStore.updateNpcFromVttSheet(scoutNpc!.id, null, {
+      npc_stats: {
+        ...scoutNpc!.npc_stats,
+        attributes: {
+          Brawn: 1,
+          Agility: 2,
+          Technique: 2,
+          Iron: 1,
+          Cunning: 3,
+        },
+        combat_skills: {
+          Strike: 1,
+          Shoot: 2,
+          Parry: 1,
+          Dodge: 2,
+          Block: 0,
+        },
+        field_skills: {
+          Athletics: 1,
+          Menace: 0,
+          Stealth: 2,
+          Tinkering: 0,
+          Medicine: 0,
+          Survival: 2,
+          Resolve: 1,
+          Perception: 2,
+          Sway: 0,
+          Lore: 1,
+        },
+      },
+    });
+    fixture.detectChanges();
+
+    const npcSkillsTabBtn = rootEl.querySelector(
+      'button[data-vtt-npc-tab="skills"]'
+    ) as HTMLButtonElement | null;
+    expect(npcSkillsTabBtn).toBeTruthy();
+    npcSkillsTabBtn!.click();
+    fixture.detectChanges();
+    const npcSkillsPanel = rootEl.querySelector(
+      '[data-vtt-npc-skills="true"]'
+    ) as HTMLElement | null;
+    expect(npcSkillsPanel).toBeTruthy();
+    expect(npcSkillsPanel!.textContent).toContain('Attributes');
+    expect(npcSkillsPanel!.textContent).toContain('Combat Skills');
+    expect(npcSkillsPanel!.textContent).toContain('Field Skills');
+    expect(npcSkillsPanel!.textContent).not.toContain('5 Attributes');
+    expect(npcSkillsPanel!.textContent).not.toContain('10 Field Skills');
+    expect(npcSkillsPanel!.textContent).not.toContain('R0');
+    expect(npcSkillsPanel!.textContent).toContain('Perception');
+    expect(npcSkillsPanel!.textContent).toContain('2d10 + 5');
+
+    const scoutTok = await vttStore.deployRosterActor(scoutNpc!.id);
+    vttStore.selectedTokenId.set(scoutTok!.id);
+    fixture.detectChanges();
+
+    const npcHudEl = rootEl.querySelector(
+      '[data-vtt-action-hud="true"]'
+    ) as HTMLElement;
+    const npcSkillsBtn = npcHudEl.querySelector(
+      'button[data-hud-flyout-btn="skills"]'
+    ) as HTMLButtonElement;
+    npcSkillsBtn.click();
+    fixture.detectChanges();
+    const npcSkillsFlyout = npcHudEl.querySelector(
+      '[data-hud-flyout="skills"]'
+    ) as HTMLElement;
+    expect(npcSkillsFlyout).toBeTruthy();
+    expect(npcSkillsFlyout.textContent).toContain('Attributes');
+    expect(npcSkillsFlyout.textContent).toContain('Field Skills');
+    expect(npcSkillsFlyout.textContent).toContain('Perception');
+    expect(npcSkillsFlyout.textContent).toContain('2d10+5');
+    expect(npcSkillsFlyout.textContent).not.toContain('R0');
+    expect(npcSkillsFlyout.textContent).not.toContain('Trained Check');
+
+    vttStore.setSelectedTokens([lyraTok!.id, scoutTok!.id]);
+    fixture.detectChanges();
+
+    const multiHudEl = rootEl.querySelector(
+      '[data-vtt-action-hud="true"][data-vtt-multi-hud="true"]'
+    ) as HTMLElement | null;
+    expect(multiHudEl).toBeTruthy();
+    expect(multiHudEl!.textContent).toContain('2 Tokens Selected');
+    expect(multiHudEl!.textContent).toContain('Roll Initiative');
+    expect(multiHudEl!.textContent).toContain('Parry');
+    expect(multiHudEl!.textContent).toContain('Dodge');
+    expect(multiHudEl!.textContent).toContain('Move');
+    expect(multiHudEl!.textContent).toContain('Aim');
+    expect(multiHudEl!.textContent).toContain('Interact');
+
+    const rollInitBtn = multiHudEl!.querySelector(
+      'button[data-hud-tile="roll-initiative"]'
+    ) as HTMLButtonElement | null;
+    expect(rollInitBtn).toBeTruthy();
+    rollInitBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const updatedLyraTok = vttStore
+      .tokens()
+      .find((t) => t.id === lyraTok!.id)!;
+    const updatedScoutTok = vttStore
+      .tokens()
+      .find((t) => t.id === scoutTok!.id)!;
+    expect(typeof updatedLyraTok.npc_stats?.__initiative).toBe('number');
+    expect(updatedLyraTok.npc_stats?.__initiative_mod).toBe(1);
+    expect(typeof updatedScoutTok.npc_stats?.__initiative).toBe('number');
+    expect(updatedScoutTok.npc_stats?.__initiative_mod).toBe(3);
+    const lyraInitLog = vttStore
+      .logs()
+      .find((l) => l.title.includes(`${updatedLyraTok.name} · Initiative`));
+    expect(lyraInitLog).toBeTruthy();
+    expect(lyraInitLog?.detail).toBe('Cunning +1');
+    expect(
+      vttStore
+        .logs()
+        .some((l) => l.title.includes(`${updatedScoutTok.name} · Initiative`))
+    ).toBe(true);
+    expect(vttStore.activeScene()!.initiative_order.length).toBe(2);
+
+    const groupSkillsBtn = multiHudEl!.querySelector(
+      'button[data-hud-flyout-btn="skills"]'
+    ) as HTMLButtonElement;
+    groupSkillsBtn.click();
+    fixture.detectChanges();
+    const groupStealthBtn = multiHudEl!.querySelector(
+      'button[data-hud-skill-roll="Stealth"]'
+    ) as HTMLButtonElement;
+    expect(groupStealthBtn).toBeTruthy();
+    groupStealthBtn.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore
+        .logs()
+        .filter((l) => l.title.includes('Stealth Check')).length
+    ).toBeGreaterThanOrEqual(2);
+
+    const lyraHpBefore = vttStore.tokens().find((t) => t.id === lyraTok!.id)!
+      .current_hp;
+    const scoutHpBefore = vttStore.tokens().find((t) => t.id === scoutTok!.id)!
+      .current_hp;
+    const groupHpBtn = multiHudEl!.querySelector(
+      'button[data-hud-vital-bar="current_hp"]'
+    ) as HTMLButtonElement;
+    groupHpBtn.click();
+    fixture.detectChanges();
+    const groupHpInput = multiHudEl!.querySelector(
+      'input[data-hud-vital-input="current_hp"]'
+    ) as HTMLInputElement;
+    groupHpInput.value = '-2';
+    groupHpInput.dispatchEvent(new Event('input'));
+    groupHpInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore.tokens().find((t) => t.id === lyraTok!.id)!.current_hp
+    ).toBe(Math.max(0, lyraHpBefore - 2));
+    expect(
+      vttStore.tokens().find((t) => t.id === scoutTok!.id)!.current_hp
+    ).toBe(Math.max(0, scoutHpBefore - 2));
   });
 });

@@ -38,6 +38,7 @@ import {
 } from '../../../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../../../core/compendium/compendium.store';
 import { NotificationStore } from '../../../../core/notifications/notification.store';
+import { VttSettingsStore } from '../../../../core/settings/vtt-settings.store';
 import { ColorPickerComponent } from '../../../../shared/color-picker/color-picker.component';
 import { CompendiumIconComponent } from '../../../../shared/compendium-icon/compendium-icon.component';
 import {
@@ -100,8 +101,12 @@ import {
   VttNpcStats,
   VttRosterActorModel,
   VttTokenModel,
+  computeNpcFieldSkillTotals,
   hasCustomTokenAppearance,
   hasRosterActorExternalSource,
+  normalizeNpcAttributes,
+  normalizeNpcCombatSkills,
+  normalizeNpcFieldSkills,
   resolveActorDarkvisionFeet,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
@@ -110,8 +115,18 @@ import {
 } from '../../models/vtt.model';
 import { VttOpenSheetTarget, VttStore } from '../../store/vtt.store';
 
-export type VttPcSheetTab = 'actions' | 'character' | 'loadout' | 'perks' | 'token';
-export type VttNpcSheetTab = 'actions' | 'statblock' | 'inventory' | 'token';
+export type VttPcSheetTab =
+  | 'actions'
+  | 'character'
+  | 'loadout'
+  | 'perks'
+  | 'token';
+export type VttNpcSheetTab =
+  | 'actions'
+  | 'statblock'
+  | 'skills'
+  | 'inventory'
+  | 'token';
 export type VttSheetDropZone = 'sheet' | 'slot-1' | 'slot-2' | 'inventory';
 
 function generateInventoryItemId(): string {
@@ -137,6 +152,7 @@ function generateInventoryItemId(): string {
 })
 export class VttActorSheetComponent {
   readonly vttStore = inject(VttStore);
+  readonly settingsStore = inject(VttSettingsStore);
   readonly authStore = inject(AuthStore);
   readonly characterStore = inject(CharacterStore);
   readonly compendiumStore = inject(CompendiumStore);
@@ -595,6 +611,21 @@ export class VttActorSheetComponent {
     delta: number
   ): Promise<void> {
     if (!this.canEdit()) return;
+    if (field === 'current_sp' && delta < 0) {
+      const unclampedSp = (char.current_sp ?? 0) + delta;
+      if (
+        unclampedSp < 0 &&
+        this.settingsStore.preferences().overflowSpDamageToHp
+      ) {
+        const overflow = Math.abs(unclampedSp);
+        await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
+          ...c,
+          current_sp: 0,
+          current_hp: Math.max(0, (c.current_hp ?? 0) - overflow),
+        }));
+        return;
+      }
+    }
     const max =
       field === 'current_hp'
         ? stats.maxHp
@@ -1839,6 +1870,64 @@ export class VttActorSheetComponent {
     return actor?.npc_stats ?? tok?.npc_stats ?? {};
   }
 
+  getNpcAttributes(): Record<AttributeName, number> {
+    return normalizeNpcAttributes(this.getNpcStats().attributes);
+  }
+
+  getNpcCombatSkills(): Record<CombatSkillName, number> {
+    return normalizeNpcCombatSkills(this.getNpcStats().combat_skills);
+  }
+
+  getNpcFieldSkills(): Record<FieldSkillName, number> {
+    return normalizeNpcFieldSkills(this.getNpcStats().field_skills);
+  }
+
+  getNpcFieldSkillTotals() {
+    return computeNpcFieldSkillTotals(this.getNpcStats());
+  }
+
+  async adjustNpcAttribute(attr: AttributeName, delta: number): Promise<void> {
+    if (!this.canEdit()) return;
+    const curr = this.getNpcAttributes();
+    const nextVal = Math.max(-2, Math.min(8, (curr[attr] ?? 0) + delta));
+    await this.patchNpcStatsField({
+      attributes: {
+        ...curr,
+        [attr]: nextVal,
+      },
+    });
+  }
+
+  async adjustNpcCombatSkill(
+    skill: CombatSkillName,
+    delta: number
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    const curr = this.getNpcCombatSkills();
+    const nextVal = Math.max(0, Math.min(6, (curr[skill] ?? 0) + delta));
+    await this.patchNpcStatsField({
+      combat_skills: {
+        ...curr,
+        [skill]: nextVal,
+      },
+    });
+  }
+
+  async adjustNpcFieldSkill(
+    skill: FieldSkillName,
+    delta: number
+  ): Promise<void> {
+    if (!this.canEdit()) return;
+    const curr = this.getNpcFieldSkills();
+    const nextVal = Math.max(0, Math.min(6, (curr[skill] ?? 0) + delta));
+    await this.patchNpcStatsField({
+      field_skills: {
+        ...curr,
+        [skill]: nextVal,
+      },
+    });
+  }
+
   getNpcInventory(): ActorInventoryItem[] {
     return normalizeInventoryItems(this.getNpcStats().__inventory);
   }
@@ -2001,6 +2090,20 @@ export class VttActorSheetComponent {
     delta: number
   ): Promise<void> {
     if (!this.canEdit()) return;
+    if (field === 'current_sp' && delta < 0) {
+      const unclampedSp = tok.current_sp + delta;
+      if (
+        unclampedSp < 0 &&
+        this.settingsStore.preferences().overflowSpDamageToHp
+      ) {
+        const overflow = Math.abs(unclampedSp);
+        await this.vttStore.patchToken(tok.id, {
+          current_sp: 0,
+          current_hp: Math.max(0, tok.current_hp - overflow),
+        });
+        return;
+      }
+    }
     const maxField =
       field === 'current_hp'
         ? tok.max_hp

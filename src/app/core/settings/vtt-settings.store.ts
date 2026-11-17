@@ -234,6 +234,7 @@ export interface VttGeneralPreferences {
   pingAndTurnSounds: boolean;
   showHotkeyBadges: boolean;
   tokenMoveSpeed: number;
+  overflowSpDamageToHp: boolean;
   enable3dDice: boolean;
   diceAppearance: VttDiceAppearance;
 }
@@ -245,6 +246,7 @@ export const DEFAULT_VTT_PREFERENCES: VttGeneralPreferences = {
   pingAndTurnSounds: true,
   showHotkeyBadges: true,
   tokenMoveSpeed: 30,
+  overflowSpDamageToHp: true,
   enable3dDice: true,
   diceAppearance: { ...DEFAULT_DICE_APPEARANCE },
 };
@@ -613,6 +615,10 @@ export class VttSettingsStore {
         tokenMoveSpeed: Number.isFinite(rawSpeed)
           ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
           : fallback.tokenMoveSpeed,
+        overflowSpDamageToHp:
+          typeof parsed.overflowSpDamageToHp === 'boolean'
+            ? parsed.overflowSpDamageToHp
+            : fallback.overflowSpDamageToHp,
         enable3dDice:
           typeof parsed.enable3dDice === 'boolean'
             ? parsed.enable3dDice
@@ -665,6 +671,10 @@ export class VttSettingsStore {
       tokenMoveSpeed: Number.isFinite(rawSpeed)
         ? Math.max(0, Math.min(120, Math.round(rawSpeed)))
         : cur.tokenMoveSpeed,
+      overflowSpDamageToHp:
+        typeof patch.overflowSpDamageToHp === 'boolean'
+          ? patch.overflowSpDamageToHp
+          : cur.overflowSpDamageToHp,
       enable3dDice:
         typeof patch.enable3dDice === 'boolean'
           ? patch.enable3dDice

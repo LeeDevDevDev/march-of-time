@@ -116,7 +116,9 @@
                 [class.text-[#8AB0AB]]="sc.active_turn_token_id !== tok.id"
                 [class.line-through]="tok.current_hp <= 0"
               >
-                {{ tok.name }}
+                {{ tok.name }}@if (tok.npc_stats?.__initiative !== undefined) {
+                  <span class="ml-1 font-mono-num text-[10px] opacity-80">({{ tok.npc_stats?.__initiative }})</span>
+                }
               </button>
             }
           </div>
@@ -895,355 +897,13 @@
           </div>
         }
 
-        @if (multiSelectedTokens().length > 1) {
-          <div
-            data-vtt-multi-hud="true"
-            class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#38B29A]/70 bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div class="flex items-center gap-2.5">
-                <div class="flex -space-x-2">
-                  @for (mTok of multiSelectedTokens().slice(0, 4); track mTok.id) {
-                    @let mVis = vttStore.resolveTokenVisuals(mTok);
-                    <div
-                      class="h-7 w-7 shrink-0 rounded-full ring-1 ring-[#09100F]"
-                    >
-                      <app-token-avatar
-                        [tokenImageUrl]="mVis.tokenImageUrl"
-                        [appearance]="mVis.tokenAppearance"
-                        [icon]="mTok.icon || 'greatsword'"
-                        [color]="mTok.color || '#5EEAD4'"
-                        [faction]="mTok.faction"
-                        [isHidden]="mTok.is_hidden"
-                        [grayscale]="mTok.current_hp <= 0"
-                        iconSizeClass="h-3.5 w-3.5"
-                      />
-                    </div>
-                  }
-                </div>
-                <div>
-                  <div class="font-display text-sm font-bold text-white">
-                    {{ multiSelectedTokens().length }} Tokens Selected
-                  </div>
-                  <div class="text-[10px] text-[#8AB0AB]">
-                    Drag group to move &middot; Shift+Scroll to rotate
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-1.5">
-                @if (vttStore.isGm()) {
-                  <button
-                    type="button"
-                    (click)="toggleMultiSelectedHidden()"
-                    class="rounded-md border px-2.5 py-1 text-[11px] font-bold transition-colors"
-                    [class.border-[#FBBF24]]="multiSelectedAllHidden()"
-                    [class.bg-[#2B1D0E]]="multiSelectedAllHidden()"
-                    [class.text-[#FDE68A]]="multiSelectedAllHidden()"
-                    [class.border-[#243B37]]="!multiSelectedAllHidden()"
-                    [class.bg-[#142220]]="!multiSelectedAllHidden()"
-                    [class.text-[#EBF5F3]]="!multiSelectedAllHidden()"
-                    [class.hover:border-[#FBBF24]]="!multiSelectedAllHidden()"
-                  >
-                    {{ multiSelectedAllHidden() ? 'Reveal All' : 'Make Invisible' }}
-                  </button>
-                }
-
-                <button
-                  type="button"
-                  (click)="flipMultiSelectedHorizontal()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
-                  title="Flip Horizontal"
-                >
-                  Flip H
-                </button>
-
-                <button
-                  type="button"
-                  (click)="flipMultiSelectedVertical()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
-                  title="Flip Vertical"
-                >
-                  Flip V
-                </button>
-
-                <button
-                  type="button"
-                  (click)="rotateMultiSelectedBy(90)"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#38B29A] hover:text-white"
-                  title="Rotate 90° Clockwise (or hold Shift + Mouse Wheel)"
-                >
-                  Rotate 90°
-                </button>
-
-                @if (multiSelectedAnyRotated()) {
-                  <button
-                    type="button"
-                    (click)="resetMultiSelectedRotation()"
-                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
-                    title="Reset Rotation to 0°"
-                  >
-                    Reset 0°
-                  </button>
-                }
-
-                <button
-                  type="button"
-                  (click)="bringMultiSelectedToFront()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
-                  title="Bring Selected Tokens to Front"
-                >
-                  Front
-                </button>
-
-                <button
-                  type="button"
-                  (click)="sendMultiSelectedToBack()"
-                  class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:border-[#38B29A] hover:text-white"
-                  title="Send Selected Tokens to Back"
-                >
-                  Back
-                </button>
-
-                <button
-                  type="button"
-                  (click)="removeMultiSelectedTokens()"
-                  class="rounded-md border border-[#6E293B] bg-[#3B1822] px-2.5 py-1 text-[11px] font-bold text-[#FDA4AF] hover:bg-[#E11D48] hover:text-white"
-                  [title]="'Remove Selected Tokens from Scene (' + settingsStore.badges().delete_tokens + ')'"
-                >
-                  Remove
-                </button>
-
-                <button
-                  type="button"
-                  (click)="vttStore.clearTokenSelection()"
-                  class="rounded-md border border-[#243B37] bg-[#09100F] px-2 py-1 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
-                  title="Clear Selection"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          </div>
-        } @else if (vttStore.selectedToken(); as tok) {
-          @if (vttStore.isGm() || vttStore.canControlToken(tok)) {
-            @let tokVis = vttStore.resolveTokenVisuals(tok);
-            <div
-              class="absolute bottom-3 left-3 z-20 max-w-[calc(100%-190px)] rounded-2xl border border-[#243B37] bg-[#0D1615]/95 p-3 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-xs"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    (click)="vttStore.openTokenSheet(tok.id)"
-                    title="Open Sheet"
-                    class="h-9 w-9 shrink-0 rounded-full transition-transform hover:scale-105"
-                  >
-                    <app-token-avatar
-                      [tokenImageUrl]="tokVis.tokenImageUrl"
-                      [appearance]="tokVis.tokenAppearance"
-                      [icon]="tok.icon || 'greatsword'"
-                      [color]="tok.color || '#5EEAD4'"
-                      [faction]="tok.faction"
-                      [isHidden]="tok.is_hidden"
-                      [grayscale]="tok.current_hp <= 0"
-                      iconSizeClass="h-4 w-4"
-                    />
-                  </button>
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-display text-sm font-bold text-white">{{ tok.name }}</span>
-                      <span class="font-mono-num text-[11px] text-[#8AB0AB]">
-                        Move {{ tok.move_feet }} ft &middot; DR {{ tok.armor_dr }}
-                        @if (tok.shield_block > 0) {
-                          &middot; Block {{ tok.shield_block }}
-                        }
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-2">
-                  <div class="flex items-center gap-1 rounded-lg border border-[#6E293B] bg-[#251018] px-2 py-0.5 font-mono-num">
-                    <span class="text-[10px] font-bold text-[#FDA4AF]">HP</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_hp', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
-                    <span class="font-bold text-white">{{ tok.current_hp }}/{{ tok.max_hp }}</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_hp', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
-                  </div>
-
-                  <div class="flex items-center gap-1 rounded-lg border border-[#1E5263] bg-[#0D222B] px-2 py-0.5 font-mono-num">
-                    <span class="text-[10px] font-bold text-[#7DD3FC]">SP</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_sp', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
-                    <span class="font-bold text-white">{{ tok.current_sp }}/{{ tok.max_sp }}</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_sp', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
-                  </div>
-
-                  <div class="flex items-center gap-1 rounded-lg border border-[#784321] bg-[#27180B] px-2 py-0.5 font-mono-num">
-                    <span class="text-[10px] font-bold text-[#FDBA74]">AP</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_ap', -1)" class="px-1 font-bold text-white hover:text-[#FDA4AF]">&minus;</button>
-                    <span class="font-bold text-white">{{ tok.current_ap }}/{{ tok.max_ap }}</span>
-                    <button type="button" (click)="adjustTokenStat(tok, 'current_ap', 1)" class="px-1 font-bold text-white hover:text-[#5EEAD4]">+</button>
-                  </div>
-
-                  @if (vttStore.isGm()) {
-                    <button
-                      type="button"
-                      (click)="vttStore.toggleTokenHidden(tok.id)"
-                      class="rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors"
-                      [class.border-[#FBBF24]]="tok.is_hidden"
-                      [class.bg-[#2B1D0E]]="tok.is_hidden"
-                      [class.text-[#FDE68A]]="tok.is_hidden"
-                      [class.border-[#243B37]]="!tok.is_hidden"
-                      [class.bg-[#142220]]="!tok.is_hidden"
-                      [class.text-[#8AB0AB]]="!tok.is_hidden"
-                      title="Toggle Token Visibility to Players (Stage invisible tokens in the scene padding)"
-                    >
-                      {{ tok.is_hidden ? 'Invisible (Reveal)' : 'Hide Token' }}
-                    </button>
-                  }
-
-                  <button
-                    type="button"
-                    (click)="vttStore.openTokenSheet(tok.id)"
-                    class="rounded-md border border-[#C4491A]/70 bg-[#27160E] px-2 py-0.5 text-[11px] font-bold text-[#FDBA74] hover:border-[#C4491A] hover:text-white"
-                  >
-                    Sheet
-                  </button>
-
-                  <button
-                    type="button"
-                    (click)="dockCollapsed.update(v => !v)"
-                    class="rounded-md border border-[#243B37] bg-[#142220] px-2 py-0.5 text-[11px] font-semibold text-[#8AB0AB] hover:text-white"
-                  >
-                    {{ dockCollapsed() ? 'Expand' : 'Minimize' }}
-                  </button>
-                </div>
-              </div>
-
-              @if (!dockCollapsed()) {
-                <div class="mt-2.5 space-y-2 border-t border-[#243B37] pt-2.5">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      [disabled]="tok.current_ap < 1 || tok.current_sp >= tok.max_sp"
-                      (click)="vttStore.performStanceRecovery(tok)"
-                      class="rounded-lg border border-[#1E5263] bg-[#112E38] px-2.5 py-1 text-[11px] font-bold text-[#7DD3FC] hover:border-[#38BDF8] disabled:opacity-45"
-                    >
-                      1 AP: Stance Recovery
-                    </button>
-
-                    @if (tok.shield_block > 0) {
-                      <button
-                        type="button"
-                        [disabled]="!tok.shield_raised && tok.current_ap < 1"
-                        (click)="vttStore.toggleTokenRaiseShield(tok)"
-                        class="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors disabled:opacity-45"
-                        [class.border-[#38BDF8]]="tok.shield_raised"
-                        [class.bg-[#0E3342]]="tok.shield_raised"
-                        [class.text-white]="tok.shield_raised"
-                        [class.border-[#243B37]]="!tok.shield_raised"
-                        [class.bg-[#142220]]="!tok.shield_raised"
-                        [class.text-[#BAE6FD]]="!tok.shield_raised"
-                      >
-                        {{ tok.shield_raised ? 'Guard Raised (Lower)' : '1 AP: Raise Guard' }}
-                      </button>
-                    }
-
-                    @if (vttStore.selectedTokenDerived(); as stats) {
-                      <button
-                        type="button"
-                        [disabled]="tok.current_ap < 1"
-                        (click)="vttStore.switchCharacterWeaponSlotInVtt(tok)"
-                        class="rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-semibold text-[#EBF5F3] hover:border-[#C4491A] disabled:opacity-45"
-                      >
-                        1 AP: Switch Slot
-                      </button>
-
-                      <button
-                        type="button"
-                        [disabled]="tok.current_ap < (stats.activeWeapon?.ap_cost ?? 1)"
-                        (click)="vttStore.beginWeaponTargetSelection(tok, stats.activeWeapon, stats)"
-                        class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
-                      >
-                        {{ stats.activeWeapon?.ap_cost ?? 1 }} AP: {{ stats.activeWeapon?.name || 'Unarmed' }} (+{{ stats.attackRollMod }} &middot; {{ stats.flatWeaponDamage }} DMG)
-                      </button>
-
-                      @for (art of stats.resolvedCombatArts; track art.baseNode.id) {
-                        @let cd = vttStore.getPerkCooldown(vttStore.selectedTokenCharacter(), art.baseNode.id);
-                        <button
-                          type="button"
-                          [disabled]="cd > 0 || tok.current_ap < art.apCost || !art.meetsWeaponRequirement"
-                          (click)="triggerArtFromDock(tok, art)"
-                          [title]="!art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description"
-                          class="flex items-center gap-1.5 rounded-lg border border-[#784321] bg-[#2B180C] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] hover:border-[#FB923C] disabled:opacity-40"
-                        >
-                          <span>{{ art.apCost }} AP: {{ art.baseNode.name }}</span>
-                          @if (art.appliedUpgrades.length > 0) {
-                            <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
-                          }
-                          @if (cd > 0) {
-                            <span class="rounded bg-black/50 px-1 font-mono-num text-[10px] text-[#FDA4AF]">
-                              CD {{ cd }}
-                            </span>
-                          } @else if (!art.meetsWeaponRequirement) {
-                            <span class="rounded bg-black/50 px-1 text-[10px] text-[#FDA4AF]">
-                              Req Weapon
-                            </span>
-                          }
-                        </button>
-                      }
-                    } @else {
-                      <button
-                        type="button"
-                        [disabled]="tok.current_ap < (tok.npc_stats.attack_ap ?? 1)"
-                        (click)="vttStore.beginWeaponTargetSelection(tok)"
-                        class="btn-copper rounded-lg px-3 py-1 text-[11px] font-bold disabled:opacity-45"
-                      >
-                        {{ tok.npc_stats.attack_ap ?? 1 }} AP: {{ tok.npc_stats.weapon_name || 'Melee Strike' }} (+{{ tok.npc_stats.attack_mod ?? 3 }} &middot; {{ tok.npc_stats.flat_damage ?? 4 }} DMG)
-                      </button>
-                      @for (npcArt of vttStore.getNpcStandaloneCombatArts(tok); track npcArt.id) {
-                        <button
-                          type="button"
-                          [disabled]="tok.current_ap < (npcArt.ap_cost ?? 1)"
-                          (click)="vttStore.beginNpcStandaloneArtTargetSelection(tok, npcArt)"
-                          class="inline-flex items-center gap-1 rounded-lg border border-[#243B37] bg-[#142220] px-2.5 py-1 text-[11px] font-bold text-[#FDBA74] transition-colors hover:border-[#C4491A] disabled:opacity-40"
-                        >
-                          <span>{{ npcArt.ap_cost ?? 1 }} AP: {{ npcArt.name }}</span>
-                        </button>
-                      }
-                    }
-                  </div>
-
-                  <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                    <div class="flex flex-wrap items-center gap-1">
-                      <span class="text-[#8AB0AB]">Statuses:</span>
-                      @for (st of statusOptions; track st) {
-                        <button
-                          type="button"
-                          (click)="vttStore.toggleTokenStatus(tok, st)"
-                          class="rounded border px-1.5 py-0.5 text-[10px] font-bold transition-colors"
-                          [class.border-[#F43F5E]]="tok.statuses.includes(st)"
-                          [class.bg-[#3B1822]]="tok.statuses.includes(st)"
-                          [class.text-[#FDA4AF]]="tok.statuses.includes(st)"
-                          [class.border-[#243B37]]="!tok.statuses.includes(st)"
-                          [class.bg-[#142220]]="!tok.statuses.includes(st)"
-                          [class.text-[#8AB0AB]]="!tok.statuses.includes(st)"
-                        >
-                          {{ st }}
-                        </button>
-                      }
-                    </div>
-
-                    <span
-                      class="rounded border border-[#243B37] bg-[#0B1413] px-2 py-0.5 font-mono-num text-[10px] font-semibold text-[#A7F3D0]"
-                    >
-                      Sight: {{ getTokenEffectiveSightLabel(tok) }}
-                    </span>
-                  </div>
-                </div>
-              }
-            </div>
-          }
+        @let hudTokens = hudSelectedTokens();
+        @if (hudTokens.length > 0) {
+          <app-vtt-action-hud
+            [token]="hudTokens[0]"
+            [tokens]="hudTokens"
+            [(collapsed)]="dockCollapsed"
+          />
         }
       </div>
 
@@ -4701,6 +4361,27 @@
                   type="checkbox"
                   [ngModel]="settingsStore.preferences().enable3dDice"
                   (ngModelChange)="updatePreference('enable3dDice', $event)"
+                  class="accent-[#C4491A]"
+                />
+              </label>
+            </section>
+
+            <section class="rounded-xl border border-[var(--mot-border)] bg-[var(--mot-well)] p-3.5 space-y-2.5">
+              <span class="font-display text-[11px] font-bold uppercase tracking-wider text-[var(--mot-muted)]">
+                Combat &amp; Vital Bars
+              </span>
+              <label class="flex items-center justify-between gap-3 font-semibold text-[var(--mot-text)]">
+                <div>
+                  <div>Overflow Excess SP Loss into HP</div>
+                  <div class="text-[11px] font-normal text-[var(--mot-muted)]">
+                    When subtracting more SP than your current SP, automatically subtract the overflow from HP.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  data-vtt-pref-sp-overflow="true"
+                  [ngModel]="settingsStore.preferences().overflowSpDamageToHp"
+                  (ngModelChange)="updatePreference('overflowSpDamageToHp', $event)"
                   class="accent-[#C4491A]"
                 />
               </label>
