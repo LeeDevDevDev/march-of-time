@@ -291,10 +291,23 @@ export interface VttNpcStats {
   __portrait_url?: string | null;
   __token_image_url?: string | null;
   __token_appearance?: TokenAppearanceConfig;
+  __token_name?: string | null;
+  __custom_token_name?: boolean;
   __standalone_perk_ids?: string[];
   __source_character_id?: string | null;
   __source_preset_id?: string | null;
   __character_sheet?: CharacterModel | null;
+}
+
+export function resolveActorTokenDisplayName(
+  actor: { name: string; npc_stats?: VttNpcStats | null } | null | undefined,
+  fallbackName?: string | null
+): string {
+  const custom = actor?.npc_stats?.__token_name?.trim();
+  if (custom) return custom;
+  const actorName = actor?.name?.trim();
+  if (actorName) return actorName;
+  return fallbackName?.trim() || 'Actor';
 }
 
 export const VTT_INITIATION_PHASE_SENTINEL = '__phase1_open__';

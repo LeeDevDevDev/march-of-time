@@ -18,6 +18,7 @@ import {
 import {
   TokenAppearanceConfig,
   VttFaction,
+  resolveActorTokenDisplayName,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
@@ -43,6 +44,8 @@ export class VttTokenizerWindowComponent {
   readonly activeAssetPickerRequest =
     signal<TokenizerAssetPickerRequest | null>(null);
 
+  readonly displayNameDraft = signal<string>('');
+
   readonly isOpen = computed<boolean>(() => {
     if (!this.vttStore.openTokenizerTarget()) return false;
     return Boolean(
@@ -67,13 +70,37 @@ export class VttTokenizerWindowComponent {
     return 'npc';
   });
 
-  readonly targetName = computed<string>(() => {
+  readonly sheetName = computed<string>(() => {
     return (
       this.vttStore.openTokenizerCharacter()?.name ??
       this.vttStore.openTokenizerRosterActor()?.name ??
       this.vttStore.openTokenizerToken()?.name ??
       'Actor'
     );
+  });
+
+  readonly displayTokenName = computed<string>(() => {
+    const tok = this.vttStore.openTokenizerToken();
+    if (tok) return tok.name;
+    const actor = this.vttStore.openTokenizerRosterActor();
+    const char = this.vttStore.openTokenizerCharacter();
+    if (actor) {
+      return resolveActorTokenDisplayName(actor, char?.name);
+    }
+    return char?.name ?? 'Actor';
+  });
+
+  readonly hasCustomDisplayName = computed<boolean>(() => {
+    const hasSheetIdentity = Boolean(
+      this.vttStore.openTokenizerCharacter() ||
+        this.vttStore.openTokenizerRosterActor()
+    );
+    if (!hasSheetIdentity) return false;
+    return this.displayTokenName().trim() !== this.sheetName().trim();
+  });
+
+  readonly targetName = computed<string>(() => {
+    return this.displayTokenName();
   });
 
   readonly resolvedVisuals = computed<{
@@ -126,6 +153,14 @@ export class VttTokenizerWindowComponent {
 
   constructor() {
     effect(() => {
+      const open = this.isOpen();
+      const liveName = this.displayTokenName();
+      if (open) {
+        this.displayNameDraft.set(liveName);
+      }
+    });
+
+    effect(() => {
       const tick = this.vttStore.openTokenizerFocusTick();
       const open = this.isOpen();
       if (!open) {
@@ -140,6 +175,23 @@ export class VttTokenizerWindowComponent {
         });
       }
     });
+  }
+
+  async commitDisplayName(): Promise<void> {
+    if (!this.canEdit()) return;
+    const trimmed = this.displayNameDraft().trim();
+    if (!trimmed) {
+      this.displayNameDraft.set(this.displayTokenName());
+      return;
+    }
+    if (trimmed === this.displayTokenName()) return;
+    await this.vttStore.updateTokenizerDisplayName(trimmed);
+  }
+
+  async resetDisplayName(): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.vttStore.resetTokenizerDisplayName();
+    this.displayNameDraft.set(this.displayTokenName());
   }
 
   openAssetPicker(req: TokenizerAssetPickerRequest): void {
@@ -184,7 +236,8 @@ export class VttTokenizerWindowComponent {
     );
   }
 
-  closeStudio(): void {
+  async closeStudio(): Promise<void> {
+    await this.commitDisplayName();
     this.activeAssetPickerRequest.set(null);
     this.vttStore.closeTokenizerStudio();
   }

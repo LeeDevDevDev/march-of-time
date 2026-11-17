@@ -108,6 +108,7 @@ import {
   normalizeNpcCombatSkills,
   normalizeNpcFieldSkills,
   resolveActorDarkvisionFeet,
+  resolveActorTokenDisplayName,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
@@ -1474,6 +1475,16 @@ export class VttActorSheetComponent {
     });
   }
 
+  getPublicSpeakerName(fallback?: string): string {
+    const tok = this.sheetToken();
+    if (tok?.name?.trim()) return tok.name.trim();
+    const actor = this.sheetRosterActor();
+    if (actor) {
+      return resolveActorTokenDisplayName(actor, fallback);
+    }
+    return fallback?.trim() || this.sheetCharacter()?.name || this.getNpcName();
+  }
+
   async rollSheetCheck(
     speakerName: string,
     label: string,
@@ -1482,7 +1493,7 @@ export class VttActorSheetComponent {
   ): Promise<void> {
     const vis = this.resolvedVisuals();
     await this.vttStore.rollActorSheetCheck({
-      speakerName,
+      speakerName: this.getPublicSpeakerName(speakerName),
       speakerColor: this.getDisplayColor(),
       speakerIcon: this.getDisplayIcon(),
       speakerFaction: this.getDisplayFaction(),
@@ -1796,16 +1807,17 @@ export class VttActorSheetComponent {
       } as VttNpcStats,
     });
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       const blockVal = this.getNpcArmorOrMove('shield_block');
       await this.vttStore.postLog({
         kind: raised ? 'system' : 'roll',
         title: raised
-          ? `${this.getNpcName()} lowered Guard / Shield`
-          : `${this.getNpcName()} raised Guard / Shield (1 AP)`,
+          ? `${pubName} lowered Guard / Shield`
+          : `${pubName} raised Guard / Shield (1 AP)`,
         detail: raised
           ? 'Guard stance ended.'
           : `Mitigates ${blockVal} DMG vs non-Piercing attacks until next turn.`,
-        senderNameOverride: this.getNpcName(),
+        senderNameOverride: pubName,
       });
     }
     void currStats;
@@ -1819,11 +1831,12 @@ export class VttActorSheetComponent {
       return;
     }
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
         kind: 'roll',
-        title: `${this.getNpcName()} used Stance Recovery (1 AP)`,
+        title: `${pubName} used Stance Recovery (1 AP)`,
         detail: 'Recovered +3 SP',
-        senderNameOverride: this.getNpcName(),
+        senderNameOverride: pubName,
       });
     }
   }
@@ -1842,11 +1855,12 @@ export class VttActorSheetComponent {
       });
     }
     if (typeof this.vttStore.postLog === 'function') {
+      const pubName = this.getPublicSpeakerName();
       await this.vttStore.postLog({
         kind: 'system',
-        title: `${this.getNpcName()} used ${actionLabel} (${apCost} AP)`,
+        title: `${pubName} used ${actionLabel} (${apCost} AP)`,
         detail: detailText,
-        senderNameOverride: this.getNpcName(),
+        senderNameOverride: pubName,
       });
     }
   }

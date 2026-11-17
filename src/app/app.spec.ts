@@ -12677,4 +12677,369 @@ describe('App', () => {
       )
     ).toBeNull();
   });
+
+  it('should render token image on drag landing silhouettes and allow editing Token Display Name for battlemap and log speech', async () => {
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-tok-1',
+      email: 'gm@test.com',
+    });
+    let logSeq = 1;
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateRosterActor: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-tok-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    const settingsStore = TestBed.inject(VttSettingsStore);
+    settingsStore.updatePreferences({ tokenMoveSpeed: 300 });
+
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-tok-ui',
+      gm_id: 'gm-tok-1',
+      name: 'Token UI Campaign',
+      cover_image_url: null,
+      invite_code: 'TOK001',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-tok-1',
+        campaign_id: 'camp-tok-ui',
+        gm_id: 'gm-tok-1',
+        folder_id: null,
+        name: 'Grand Ballroom',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: false,
+        round_number: 1,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-tok-1');
+
+    const vaneActor: VttRosterActorModel = {
+      id: 'actor-vane',
+      campaign_id: 'camp-tok-ui',
+      folder_id: null,
+      character_id: null,
+      collection_actor_id: null,
+      owner_id: null,
+      actor_kind: 'npc',
+      is_unique: true,
+      name: 'Lord Vane',
+      faction: 'enemy',
+      size: 1,
+      icon: 'greatsword',
+      color: '#F43F5E',
+      max_hp: 24,
+      max_sp: 8,
+      max_ap: 4,
+      armor_dr: 2,
+      shield_block: 0,
+      move_feet: 25,
+      vision_feet: 30,
+      darkvision_feet: 10,
+      light_bright_feet: 0,
+      light_dim_feet: 0,
+      light_color: '#FF9B42',
+      portrait_url: 'https://cdn.example.com/vane-portrait.png',
+      token_image_url: 'https://cdn.example.com/vane-token.png',
+      token_appearance: {
+        shape: 'circle',
+        frame: 'ornate',
+        frame_color: '#F43F5E',
+        custom_frame_url: null,
+        scale: 1.25,
+        offset_x: 0,
+        offset_y: 0,
+      },
+      npc_stats: {
+        attributes: {
+          Brawn: 2,
+          Agility: 3,
+          Technique: 4,
+          Iron: 2,
+          Cunning: 4,
+        },
+      },
+      notes: '',
+      sort_order: 0,
+    };
+    vttStore.rosterActors.set([vaneActor]);
+    vttStore.tokens.set([
+      {
+        id: 'tok-vane',
+        encounter_id: 'scene-tok-1',
+        character_id: null,
+        owner_id: null,
+        name: 'Lord Vane',
+        faction: 'enemy',
+        x: 2,
+        y: 2,
+        q: 2,
+        r: 2,
+        size: 1,
+        icon: 'greatsword',
+        color: '#F43F5E',
+        current_hp: 24,
+        max_hp: 24,
+        current_sp: 8,
+        max_sp: 8,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        portrait_url: 'https://cdn.example.com/vane-portrait.png',
+        token_image_url: 'https://cdn.example.com/vane-token.png',
+        token_appearance: {
+          shape: 'circle',
+          frame: 'ornate',
+          frame_color: '#F43F5E',
+          custom_frame_url: null,
+          scale: 1.25,
+          offset_x: 0,
+          offset_y: 0,
+        },
+        npc_stats: {
+          __roster_actor_id: 'actor-vane',
+        },
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    const canvasDebug = fixture.debugElement.children
+      .flatMap((d) => [d, ...d.children])
+      .find((d) => d.componentInstance instanceof VttCanvasComponent);
+    const canvasEl = rootEl.querySelector('app-vtt-canvas') as HTMLElement;
+    expect(canvasEl).toBeTruthy();
+
+    const tokEl = rootEl.querySelector(
+      '[data-token-id="tok-vane"]'
+    ) as HTMLElement | null;
+    expect(tokEl).toBeTruthy();
+    expect(rootEl.querySelector('[data-token-drag-ghost="tok-vane"]')).toBeNull();
+
+    tokEl!.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        button: 0,
+        buttons: 1,
+        clientX: 618,
+        clientY: 618,
+        bubbles: true,
+      })
+    );
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        button: 0,
+        buttons: 1,
+        clientX: 820,
+        clientY: 618,
+        bubbles: true,
+      })
+    );
+    fixture.detectChanges();
+
+    const dragGhostEl = rootEl.querySelector(
+      '[data-token-drag-ghost="tok-vane"]'
+    ) as HTMLElement | null;
+    expect(dragGhostEl).toBeTruthy();
+    const ghostImgEl = dragGhostEl!.querySelector(
+      'img[data-token-image="true"]'
+    ) as HTMLImageElement | null;
+    expect(ghostImgEl).toBeTruthy();
+    expect(ghostImgEl!.getAttribute('src')).toBe(
+      'https://cdn.example.com/vane-token.png'
+    );
+    expect(
+      dragGhostEl!.querySelector('[data-token-frame="ornate"]')
+    ).toBeTruthy();
+
+    window.dispatchEvent(
+      new PointerEvent('pointerup', {
+        button: 0,
+        buttons: 0,
+        clientX: 820,
+        clientY: 618,
+        bubbles: true,
+      })
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(rootEl.querySelector('[data-token-drag-ghost="tok-vane"]')).toBeNull();
+    void canvasDebug;
+
+    vttStore.openTokenizerForToken('tok-vane');
+    fixture.detectChanges();
+
+    const displayNameInput = rootEl.querySelector(
+      'input[data-tokenizer-display-name="true"]'
+    ) as HTMLInputElement | null;
+    expect(displayNameInput).toBeTruthy();
+    expect(displayNameInput!.value).toBe('Lord Vane');
+
+    displayNameInput!.value = 'Hooded Stranger';
+    displayNameInput!.dispatchEvent(new Event('input'));
+    displayNameInput!.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens().find((t) => t.id === 'tok-vane')?.name).toBe(
+      'Hooded Stranger'
+    );
+    expect(
+      vttStore.rosterActors().find((a) => a.id === 'actor-vane')?.name
+    ).toBe('Lord Vane');
+    expect(
+      rootEl.querySelector('button[data-tokenizer-reset-name="true"]')
+    ).toBeTruthy();
+    expect(
+      rootEl.querySelector('[data-token-id="tok-vane"]')?.textContent
+    ).toContain('Hooded Stranger');
+
+    await vttStore.updateRosterActor('actor-vane', { max_hp: 28 });
+    fixture.detectChanges();
+    expect(vttStore.tokens().find((t) => t.id === 'tok-vane')?.name).toBe(
+      'Hooded Stranger'
+    );
+
+    vttStore.selectedTokenId.set('tok-vane');
+    vttStore.setGmSpeakerMode('character');
+    fixture.detectChanges();
+    expect(vttStore.effectivePublicSpeaker().name).toBe('Hooded Stranger');
+
+    await vttStore.executeChatOrCommand('Step out into the torchlight.');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const tokenSpokenLog = vttStore
+      .logs()
+      .find((l) => l.title === 'Step out into the torchlight.');
+    expect(tokenSpokenLog).toBeTruthy();
+    expect(tokenSpokenLog!.sender_name).toBe('Hooded Stranger');
+
+    vttStore.selectRosterActorForSpeech('actor-vane');
+    fixture.detectChanges();
+    expect(vttStore.effectivePublicSpeaker().name).toBe('Hooded Stranger');
+
+    await vttStore.executeChatOrCommand('You do not know who I am.');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const actorSpokenLog = vttStore
+      .logs()
+      .find((l) => l.title === 'You do not know who I am.');
+    expect(actorSpokenLog).toBeTruthy();
+    expect(actorSpokenLog!.sender_name).toBe('Hooded Stranger');
+
+    const resetNameBtn = rootEl.querySelector(
+      'button[data-tokenizer-reset-name="true"]'
+    ) as HTMLButtonElement | null;
+    expect(resetNameBtn).toBeTruthy();
+    resetNameBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens().find((t) => t.id === 'tok-vane')?.name).toBe(
+      'Lord Vane'
+    );
+    expect(vttStore.effectivePublicSpeaker().name).toBe('Lord Vane');
+  });
 });

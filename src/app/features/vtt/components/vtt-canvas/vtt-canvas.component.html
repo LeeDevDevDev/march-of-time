@@ -139,6 +139,35 @@
       </div>
     }
 
+    @for (ghost of destinationGhosts(); track ghost.key) {
+      <div
+        [attr.data-token-drag-ghost]="ghost.token.id"
+        [style.left.px]="ghost.center.x"
+        [style.top.px]="ghost.center.y"
+        [style.width.px]="ghost.radiusPx * 2"
+        [style.height.px]="ghost.radiusPx * 2"
+        class="pointer-events-none absolute z-[8] -translate-x-1/2 -translate-y-1/2 select-none"
+      >
+        <div
+          class="pointer-events-none absolute -inset-1 rounded-full border-2 border-dashed shadow-[0_0_14px_rgba(0,0,0,0.65)]"
+          [style.border-color]="ghost.borderColor"
+        ></div>
+        <div class="h-full w-full opacity-55">
+          <app-token-avatar
+            [tokenImageUrl]="ghost.tokenImageUrl"
+            [appearance]="ghost.tokenAppearance"
+            [icon]="ghost.token.icon || 'greatsword'"
+            [color]="ghost.token.color || (ghost.token.faction === 'ally' ? '#5EEAD4' : '#FDA4AF')"
+            [faction]="ghost.token.faction"
+            [artTransform]="ghost.artTransform"
+            [isHidden]="ghost.token.is_hidden"
+            [grayscale]="ghost.token.current_hp <= 0"
+            iconSizeClass="h-1/2 w-1/2"
+          />
+        </div>
+      </div>
+    }
+
     @for (item of renderableTokens(); track item.token.id) {
       <div
         [attr.data-token-id]="item.token.id"

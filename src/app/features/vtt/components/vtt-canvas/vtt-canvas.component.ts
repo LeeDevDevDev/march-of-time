@@ -199,6 +199,17 @@ export interface RenderableVttToken {
   tokenAppearance: TokenAppearanceConfig;
 }
 
+export interface RenderableDestinationGhost {
+  key: string;
+  token: VttTokenModel;
+  center: VttPoint;
+  radiusPx: number;
+  borderColor: string;
+  artTransform: string;
+  tokenImageUrl: string | null;
+  tokenAppearance: TokenAppearanceConfig;
+}
+
 export interface RenderableDoorHandle {
   wall: VttWallSegment;
   x: number;
@@ -655,6 +666,131 @@ export class VttCanvasComponent implements AfterViewInit {
     }
 
     return results;
+  });
+
+  readonly destinationGhosts = computed<RenderableDestinationGhost[]>(() => {
+    const sc = this.vttStore.activeScene();
+    if (!sc || this.settingsStore.preferences().tokenMoveSpeed <= 0) {
+      return [];
+    }
+
+    const dragTok = this.dragTokenState();
+    const chain = this.chainedTokenMove();
+    if ((!dragTok || !dragTok.hasMoved) && (!chain || chain.legs.length === 0)) {
+      return [];
+    }
+
+    const geom = this.vttStore.gridGeometry();
+    const hexR = getHexRadius(geom.gridSizePx);
+    const sceneToks = this.vttStore.sceneTokens();
+    const ghosts: RenderableDestinationGhost[] = [];
+
+    const buildGhost = (
+      tok: VttTokenModel,
+      center: VttPoint,
+      borderColor: string
+    ): RenderableDestinationGhost => {
+      const sizeScale = Math.min(2, Math.max(1, tok.size || 1));
+      const radiusPx = Math.max(18, hexR * 0.82 * sizeScale);
+      const flipX = Boolean(tok.npc_stats?.__flip_x);
+      const flipY = Boolean(tok.npc_stats?.__flip_y);
+      const rotationDeg = normalizeTokenRotation(tok.npc_stats?.__rotation);
+      const flipPart =
+        flipX && flipY
+          ? 'scale(-1, -1)'
+          : flipX
+            ? 'scaleX(-1)'
+            : flipY
+              ? 'scaleY(-1)'
+              : '';
+      const rotPart = rotationDeg !== 0 ? `rotate(${rotationDeg}deg)` : '';
+      const artTransform =
+        rotPart && flipPart
+          ? `${rotPart} ${flipPart}`
+          : rotPart || flipPart || 'none';
+      const resolvedVisuals = this.vttStore.resolveTokenVisuals(tok);
+      return {
+        key: tok.id,
+        token: tok,
+        center,
+        radiusPx,
+        borderColor,
+        artTransform,
+        tokenImageUrl: resolvedVisuals.tokenImageUrl,
+        tokenAppearance: resolvedVisuals.tokenAppearance,
+      };
+    };
+
+    const hasActiveDragLeg = Boolean(
+      chain && dragTok && dragTok.tokenId === chain.tokenId && dragTok.hasMoved
+    );
+
+    if (chain && chain.legs.length > 0 && !hasActiveDragLeg) {
+      const chainTok = sceneToks.find((t) => t.id === chain.tokenId);
+      if (chainTok) {
+        const speedFeet = chainTok.move_feet ?? 20;
+        let chainStroke = '#38B29A';
+        if (chain.totalFeet > speedFeet * 2) {
+          chainStroke = '#FB7185';
+        } else if (chain.totalFeet > speedFeet) {
+          chainStroke = '#F59E0B';
+        }
+        const chainEndPt = chain.lastUnsnapped
+          ? chain.currentWorld
+          : hexToWorldCenter(chain.currentHex, geom);
+        ghosts.push(buildGhost(chainTok, chainEndPt, chainStroke));
+      }
+    }
+
+    if (dragTok && dragTok.hasMoved) {
+      const tok = sceneToks.find((t) => t.id === dragTok.tokenId);
+      const speedFeet = tok?.move_feet ?? 20;
+      const priorFeet =
+        chain && chain.tokenId === dragTok.tokenId ? chain.totalFeet : 0;
+
+      if (tok) {
+        if (dragTok.freeUnsnap) {
+          const totalFeet = priorFeet + dragTok.gridlessFeet;
+          let stroke = '#38B29A';
+          if (dragTok.gridlessBlocked && !dragTok.shiftOverride) {
+            stroke = '#F43F5E';
+          } else if (totalFeet > speedFeet * 2) {
+            stroke = '#FB7185';
+          } else if (totalFeet > speedFeet) {
+            stroke = '#F59E0B';
+          }
+          ghosts.push(buildGhost(tok, dragTok.currentWorld, stroke));
+        } else {
+          const pathRes = dragTok.pathResult;
+          const totalFeet = priorFeet + pathRes.feet;
+          let stroke = '#38B29A';
+          if (!pathRes.reachable && !dragTok.shiftOverride) {
+            stroke = '#F43F5E';
+          } else if (totalFeet > speedFeet * 2) {
+            stroke = '#FB7185';
+          } else if (totalFeet > speedFeet) {
+            stroke = '#F59E0B';
+          }
+          const endPt = hexToWorldCenter(dragTok.currentHex, geom);
+          ghosts.push(buildGhost(tok, endPt, stroke));
+        }
+      }
+
+      if (dragTok.companions.length > 0) {
+        for (const comp of dragTok.companions) {
+          const compTok = sceneToks.find((t) => t.id === comp.tokenId);
+          if (!compTok) continue;
+          const compStroke =
+            comp.reachable || dragTok.shiftOverride ? '#38B29A' : '#F43F5E';
+          const compEndPt = dragTok.freeUnsnap
+            ? comp.currentWorld
+            : hexToWorldCenter(comp.currentHex, geom);
+          ghosts.push(buildGhost(compTok, compEndPt, compStroke));
+        }
+      }
+    }
+
+    return ghosts;
   });
 
   readonly visibleDoorHandles = computed<RenderableDoorHandle[]>(() => {
@@ -3566,19 +3702,12 @@ export class VttCanvasComponent implements AfterViewInit {
         const chainEndPt = chain.lastUnsnapped
           ? chain.currentWorld
           : hexToWorldCenter(chain.currentHex, geom);
-        if (
-          chainTok &&
-          this.settingsStore.preferences().tokenMoveSpeed > 0
-        ) {
-          this.drawTokenDestinationGhost(
-            ctx,
-            chainEndPt,
-            chainTok,
-            chainStroke,
-            hexRadius,
-            z
-          );
-        }
+        const chainTokRadius = chainTok
+          ? Math.max(
+              18,
+              hexRadius * 0.82 * Math.min(2, Math.max(1, chainTok.size || 1))
+            )
+          : hexRadius;
         const movesNeeded = Math.max(
           1,
           Math.ceil(chain.totalFeet / Math.max(5, speedFeet))
@@ -3587,7 +3716,7 @@ export class VttCanvasComponent implements AfterViewInit {
         this.drawWorldPill(
           ctx,
           chainEndPt.x,
-          chainEndPt.y - hexRadius - 14 / z,
+          chainEndPt.y - Math.max(hexRadius, chainTokRadius) - 16 / z,
           chainLabel,
           chainStroke,
           z
@@ -3602,6 +3731,12 @@ export class VttCanvasComponent implements AfterViewInit {
       const speedFeet = tok?.move_feet ?? 20;
       const priorFeet =
         chain && chain.tokenId === dragTok.tokenId ? chain.totalFeet : 0;
+      const dragTokRadius = tok
+        ? Math.max(
+            18,
+            hexRadius * 0.82 * Math.min(2, Math.max(1, tok.size || 1))
+          )
+        : hexRadius;
 
       if (dragTok.freeUnsnap) {
         const legFeet = dragTok.gridlessFeet;
@@ -3622,16 +3757,6 @@ export class VttCanvasComponent implements AfterViewInit {
           stroke,
           z
         );
-        if (tok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
-          this.drawTokenDestinationGhost(
-            ctx,
-            dragTok.currentWorld,
-            tok,
-            stroke,
-            hexRadius,
-            z
-          );
-        }
 
         const freeBadge =
           dragTok.gridMode !== 'gridless' ? ' · Free (Shift)' : '';
@@ -3654,7 +3779,7 @@ export class VttCanvasComponent implements AfterViewInit {
         this.drawWorldPill(
           ctx,
           dragTok.currentWorld.x,
-          dragTok.currentWorld.y - hexRadius - 14 / z,
+          dragTok.currentWorld.y - Math.max(hexRadius, dragTokRadius) - 16 / z,
           label,
           stroke,
           z
@@ -3676,16 +3801,6 @@ export class VttCanvasComponent implements AfterViewInit {
         this.strokeHexPath(ctx, pathRes.path, geom, stroke, z, hexRadius);
 
         const endPt = hexToWorldCenter(dragTok.currentHex, geom);
-        if (tok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
-          this.drawTokenDestinationGhost(
-            ctx,
-            endPt,
-            tok,
-            stroke,
-            hexRadius,
-            z
-          );
-        }
         const movesNeeded = Math.max(
           1,
           Math.ceil(totalFeet / Math.max(5, speedFeet))
@@ -3702,7 +3817,7 @@ export class VttCanvasComponent implements AfterViewInit {
         this.drawWorldPill(
           ctx,
           endPt.x,
-          endPt.y - hexRadius - 14 / z,
+          endPt.y - Math.max(hexRadius, dragTokRadius) - 16 / z,
           label,
           stroke,
           z
@@ -3710,9 +3825,7 @@ export class VttCanvasComponent implements AfterViewInit {
       }
 
       if (dragTok.companions.length > 0) {
-        const sceneToks = this.vttStore.sceneTokens();
         for (const comp of dragTok.companions) {
-          const compTok = sceneToks.find((t) => t.id === comp.tokenId);
           const compStroke =
             comp.reachable || dragTok.shiftOverride ? '#38B29A' : '#F43F5E';
           this.strokeWorldRay(
@@ -3722,16 +3835,6 @@ export class VttCanvasComponent implements AfterViewInit {
             compStroke,
             z
           );
-          if (compTok && this.settingsStore.preferences().tokenMoveSpeed > 0) {
-            this.drawTokenDestinationGhost(
-              ctx,
-              comp.currentWorld,
-              compTok,
-              compStroke,
-              hexRadius,
-              z
-            );
-          }
         }
       }
     }
@@ -3866,46 +3969,6 @@ export class VttCanvasComponent implements AfterViewInit {
     ctx.lineWidth = 2.2 / z;
     ctx.stroke();
 
-    ctx.restore();
-  }
-
-  private drawTokenDestinationGhost(
-    ctx: CanvasRenderingContext2D,
-    center: VttPoint,
-    token: VttTokenModel,
-    borderColor: string,
-    hexRadius: number,
-    z: number
-  ): void {
-    const r = Math.max(
-      18,
-      hexRadius * 0.82 * Math.min(2, Math.max(1, token.size || 1))
-    );
-    const fillHex =
-      token.color ||
-      (token.faction === 'enemy'
-        ? '#E11D48'
-        : token.faction === 'neutral'
-          ? '#D97706'
-          : '#0D9488');
-
-    ctx.save();
-    ctx.fillStyle = hexToRgba(fillHex, 0.28);
-    ctx.strokeStyle = borderColor;
-    ctx.lineWidth = 2.4 / z;
-    ctx.setLineDash([6 / z, 4 / z]);
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const initials = (token.name || '?').trim().slice(0, 2).toUpperCase();
-    ctx.font = `700 ${Math.max(11, Math.round(r * 0.62))}px "Cinzel", serif`;
-    ctx.fillStyle = 'rgba(235, 245, 243, 0.82)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(initials, center.x, center.y + 1 / z);
     ctx.restore();
   }
 

@@ -141,6 +141,7 @@ import {
   parseCharacterIdFromUrlOrInput,
   parseCollectionActorIdFromUrlOrInput,
   resolveActorDarkvisionFeet,
+  resolveActorTokenDisplayName,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
@@ -1096,8 +1097,9 @@ export class VttStore {
       const actor = this.rosterActors().find((a) => a.id === rosterId) ?? null;
       if (actor && (gm || this.canDeployRosterActor(actor))) {
         const vis = this.resolveRosterActorVisuals(actor);
+        const linkedSheet = this.resolveRosterActorCharacterSheet(actor);
         return {
-          name: actor.name,
+          name: resolveActorTokenDisplayName(actor, linkedSheet?.name),
           tokenId: null,
           characterId: actor.character_id,
           color: actor.color || null,
@@ -1114,16 +1116,30 @@ export class VttStore {
     if (charId) {
       const ch = this.characterByIdMap().get(charId) ?? null;
       if (ch && this.canEditCharacterInVtt(charId)) {
+        const linkedActor =
+          this.findRosterActorsForCharacterId(charId)[0] ?? null;
+        const sceneTok =
+          this.sceneTokens().find(
+            (t) =>
+              t.character_id === charId ||
+              this.resolveCharacterForToken(t)?.id === charId
+          ) ?? null;
         return {
-          name: ch.name,
-          tokenId: null,
+          name:
+            sceneTok?.name ||
+            resolveActorTokenDisplayName(linkedActor, ch.name),
+          tokenId: sceneTok?.id ?? null,
           characterId: ch.id,
           color: '#38B29A',
           icon: 'user',
           faction: 'ally',
-          portraitUrl: resolveEntityPortraitUrl(ch),
-          tokenImageUrl: resolveEntityTokenImageUrl(ch),
-          tokenAppearance: resolveEntityTokenAppearance(ch),
+          portraitUrl: resolveEntityPortraitUrl(sceneTok, linkedActor, ch),
+          tokenImageUrl: resolveEntityTokenImageUrl(sceneTok, linkedActor, ch),
+          tokenAppearance: resolveEntityTokenAppearance(
+            sceneTok,
+            linkedActor,
+            ch
+          ),
         };
       }
     }
@@ -4288,11 +4304,20 @@ export class VttStore {
         Boolean(target.character_id && t.character_id === target.character_id)
     );
     if (linkedTokens.length > 0) {
+      const nextActorDisplayName = resolveActorTokenDisplayName({
+        name: normalizedPatch.name ?? target.name,
+        npc_stats: normalizedPatch.npc_stats ?? target.npc_stats,
+      });
+      const actorTokenNameChanged =
+        normalizedPatch.name !== undefined ||
+        (normalizedPatch.npc_stats !== undefined &&
+          normalizedPatch.npc_stats.__token_name !==
+            target.npc_stats?.__token_name);
       let needsFogSync = false;
       for (const tok of linkedTokens) {
         const tokenPatch: Partial<VttTokenModel> = {};
-        if (normalizedPatch.name !== undefined) {
-          tokenPatch.name = normalizedPatch.name;
+        if (actorTokenNameChanged && !tok.npc_stats?.__custom_token_name) {
+          tokenPatch.name = nextActorDisplayName;
         }
         if (normalizedPatch.faction !== undefined) {
           tokenPatch.faction = normalizedPatch.faction;
@@ -4381,6 +4406,9 @@ export class VttStore {
               : {}),
             ...(tok.npc_stats?.__rotation !== undefined
               ? { __rotation: tok.npc_stats.__rotation }
+              : {}),
+            ...(tok.npc_stats?.__custom_token_name !== undefined
+              ? { __custom_token_name: tok.npc_stats.__custom_token_name }
               : {}),
           };
           delete tokenPatch.npc_stats.__character_sheet;
@@ -4654,6 +4682,115 @@ export class VttStore {
 
   closeTokenizerStudio(): void {
     this.openTokenizerTarget.set(null);
+  }
+
+  async updateTokenizerDisplayName(rawName: string): Promise<void> {
+    if (!this.canEditOpenTokenizer()) return;
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
+
+    const tok = this.openTokenizerToken();
+    const actor = this.openTokenizerRosterActor();
+    const char = this.openTokenizerCharacter();
+    const sheetBaseName = (char?.name || actor?.name || '').trim();
+    const isUniqueActor = Boolean(
+      actor && (actor.is_unique || actor.actor_kind === 'character')
+    );
+
+    if (tok) {
+      if (actor && isUniqueActor) {
+        const nextActorTokenName =
+          sheetBaseName && trimmed !== sheetBaseName ? trimmed : null;
+        await this.patchToken(tok.id, {
+          name: trimmed,
+          npc_stats: {
+            ...(tok.npc_stats ?? {}),
+            __token_name: nextActorTokenName,
+            __custom_token_name: false,
+          },
+        });
+        await this.updateRosterActor(actor.id, {
+          npc_stats: {
+            ...actor.npc_stats,
+            __token_name: nextActorTokenName,
+          },
+        });
+        return;
+      }
+
+      const actorDefaultName = actor
+        ? resolveActorTokenDisplayName(actor, sheetBaseName)
+        : sheetBaseName;
+      const isCustom = Boolean(actorDefaultName && trimmed !== actorDefaultName);
+      await this.patchToken(tok.id, {
+        name: trimmed,
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __custom_token_name: isCustom,
+        },
+      });
+      return;
+    }
+
+    if (actor) {
+      const nextActorTokenName =
+        sheetBaseName && trimmed !== sheetBaseName ? trimmed : null;
+      await this.updateRosterActor(actor.id, {
+        npc_stats: {
+          ...actor.npc_stats,
+          __token_name: nextActorTokenName,
+        },
+      });
+      return;
+    }
+
+    if (char) {
+      const charTokens = this.tokens().filter(
+        (t) =>
+          t.character_id === char.id ||
+          this.resolveCharacterForToken(t)?.id === char.id
+      );
+      for (const ct of charTokens) {
+        await this.patchToken(ct.id, {
+          name: trimmed,
+          npc_stats: {
+            ...(ct.npc_stats ?? {}),
+            __custom_token_name: trimmed !== char.name,
+          },
+        });
+      }
+    }
+  }
+
+  async resetTokenizerDisplayName(): Promise<void> {
+    if (!this.canEditOpenTokenizer()) return;
+    const tok = this.openTokenizerToken();
+    const actor = this.openTokenizerRosterActor();
+    const char = this.openTokenizerCharacter();
+    const sheetBaseName = (char?.name || actor?.name || '').trim();
+    if (!sheetBaseName) return;
+
+    if (tok) {
+      await this.patchToken(tok.id, {
+        name: sheetBaseName,
+        npc_stats: {
+          ...(tok.npc_stats ?? {}),
+          __token_name: null,
+          __custom_token_name: false,
+        },
+      });
+    }
+    if (actor) {
+      const isUniqueActor = actor.is_unique || actor.actor_kind === 'character';
+      if (!tok || isUniqueActor) {
+        await this.updateRosterActor(actor.id, {
+          npc_stats: {
+            ...actor.npc_stats,
+            __token_name: null,
+          },
+        });
+      }
+    }
   }
 
   async createVttActorQuick(input: {
@@ -5121,9 +5258,15 @@ export class VttStore {
       );
       for (const tok of actorTokens) {
         patchedTokenIds.add(tok.id);
+        const resolvedTokenName = tok.npc_stats?.__custom_token_name
+          ? tok.name
+          : resolveActorTokenDisplayName(
+              { name: actorSheetCopy.name, npc_stats: actor.npc_stats },
+              actorSheetCopy.name
+            );
         await this.patchToken(tok.id, {
           character_id: null,
-          name: actorSheetCopy.name,
+          name: resolvedTokenName,
           max_hp: nextDerived.maxHp,
           current_hp: actorSheetCopy.current_hp,
           max_sp: nextDerived.maxSp,
@@ -5155,7 +5298,7 @@ export class VttStore {
     for (const tok of standaloneTokens) {
       await this.patchToken(tok.id, {
         character_id: null,
-        name: clamped.name,
+        name: tok.npc_stats?.__custom_token_name ? tok.name : clamped.name,
         max_hp: nextDerived.maxHp,
         current_hp: clamped.current_hp,
         max_sp: nextDerived.maxSp,
@@ -5448,15 +5591,21 @@ export class VttStore {
       shieldRaised = Boolean(linkedChar.active_cooldowns?.['__shield_raised']);
     }
 
-    let finalName = actor.name;
+    const baseDisplayName = resolveActorTokenDisplayName(
+      actor,
+      linkedChar?.name
+    );
+    let finalName = baseDisplayName;
+    let numberedCopy = false;
     const numberCopies =
       actor.actor_kind === 'npc' && !actor.is_unique && !actor.character_id;
     if (numberCopies) {
       const sameBaseCount = this.sceneTokens().filter((t) =>
-        t.name.startsWith(actor.name)
+        t.name.startsWith(baseDisplayName)
       ).length;
       if (sameBaseCount > 0) {
-        finalName = `${actor.name} ${sameBaseCount + 1}`;
+        finalName = `${baseDisplayName} ${sameBaseCount + 1}`;
+        numberedCopy = true;
       }
     }
 
@@ -5519,6 +5668,7 @@ export class VttStore {
           __roster_actor_id: actor.id,
           __unsnapped: spawn.unsnappedOnGrid,
           __z_index: topZ,
+          ...(numberedCopy ? { __custom_token_name: true } : {}),
         },
         portraitUrl,
         tokenImageUrl,

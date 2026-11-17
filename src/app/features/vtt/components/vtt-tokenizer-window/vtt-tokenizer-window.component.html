@@ -2,16 +2,75 @@
   @let vis = resolvedVisuals();
 
   <app-vtt-floating-window
-    eyebrow="Portrait &amp; Token Art"
-    [windowTitle]="targetName() + ' · Tokenizer Studio'"
-    subtitle="Keep a separate full-body Sheet Portrait and cropped circular Battlemap Token."
+    eyebrow="Token Settings &amp; Art"
+    [windowTitle]="targetName() + ' · Edit Token'"
+    subtitle="Configure the public Display Name, Sheet Portrait, and cropped circular Battlemap Token."
     ariaLabel="Tokenizer Studio"
     widthClass="w-[min(95vw,860px)]"
     [estimatedWidth]="860"
-    [estimatedHeight]="560"
+    [estimatedHeight]="620"
     (closed)="closeStudio()"
   >
-    <div class="min-h-0 flex-1 overflow-y-auto p-5">
+    <div class="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
+      <div class="rounded-xl border border-[#243B37] bg-[#122220] p-3.5 space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <label
+              for="tokenizerDisplayNameInput"
+              class="block font-display text-xs font-bold text-white"
+            >
+              Token / Display Name
+            </label>
+            <p class="text-[11px] text-[#8AB0AB]">
+              Shown on the battlemap, combat tracker, and in the VTT log when speaking or rolling as this character.
+            </p>
+          </div>
+
+          @if (hasCustomDisplayName()) {
+            <div class="flex items-center gap-2 text-[11px]">
+              <span class="rounded border border-[#243B37] bg-[#09100F] px-2 py-0.5 text-[#8AB0AB]">
+                Sheet Name: <strong class="text-white">{{ sheetName() }}</strong>
+              </span>
+              @if (canEdit()) {
+                <button
+                  type="button"
+                  data-tokenizer-reset-name="true"
+                  (click)="resetDisplayName()"
+                  class="rounded-md border border-[#38B29A]/50 bg-[#0D1E1B] px-2 py-0.5 font-semibold text-[#5EEAD4] transition-colors hover:bg-[#15312C]"
+                >
+                  Reset to Sheet Name
+                </button>
+              }
+            </div>
+          }
+        </div>
+
+        <div class="flex items-center gap-2">
+          <input
+            id="tokenizerDisplayNameInput"
+            type="text"
+            data-tokenizer-display-name="true"
+            [disabled]="!canEdit()"
+            [value]="displayNameDraft()"
+            (input)="displayNameDraft.set($any($event.target).value)"
+            (change)="commitDisplayName()"
+            (keydown.enter)="$event.preventDefault(); commitDisplayName()"
+            placeholder="Display name"
+            class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-3 py-2 font-display text-sm font-bold text-white placeholder-[#5B7D78] focus:border-[#C4491A] focus:outline-none disabled:opacity-50"
+          />
+          @if (canEdit() && displayNameDraft().trim() && displayNameDraft().trim() !== displayTokenName()) {
+            <button
+              type="button"
+              data-tokenizer-save-name="true"
+              (click)="commitDisplayName()"
+              class="btn-copper shrink-0 rounded-lg px-3.5 py-2 text-xs font-bold"
+            >
+              Apply
+            </button>
+          }
+        </div>
+      </div>
+
       <app-tokenizer-editor
         [portraitUrl]="vis.portraitUrl"
         [tokenImageUrl]="vis.tokenImageUrl"
@@ -29,7 +88,7 @@
 
     <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#243B37] bg-[#122220] px-5 py-3">
       <span class="text-[11px] text-[#8AB0AB]">
-        Changes sync automatically across Actor Sheets, Battlemap Tokens, and Chat.
+        Changes sync automatically across Battlemap Tokens, Combat Tracker, and VTT Log.
       </span>
       <button
         type="button"
