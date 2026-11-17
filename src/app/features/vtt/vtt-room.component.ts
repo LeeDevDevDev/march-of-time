@@ -810,6 +810,7 @@ export class VttRoomComponent {
       naturalImageWidth: draft.imageNaturalWidth,
       naturalImageHeight: draft.imageNaturalHeight,
       gridSizePx: Number(draft.grid_size_px) || DEFAULT_VTT_GRID_SIZE_PX,
+      gridMode: draft.grid_mode,
       padding:
         draft.padding !== undefined && draft.padding !== null
           ? Number(draft.padding)
@@ -1180,6 +1181,10 @@ export class VttRoomComponent {
       if (this.vttStore.canUndo()) {
         void this.vttStore.undoLastAction();
       }
+      return;
+    }
+
+    if (this.canvasComp()?.tryHandleKeyboardTokenMove(event)) {
       return;
     }
 
@@ -2412,6 +2417,7 @@ export class VttRoomComponent {
       sceneWidthPx: nextSceneWidth,
       sceneHeightPx: nextSceneHeight,
       gridSizePx: nextSizePx,
+      gridMode: draft.grid_mode,
       padding: nextPadding,
       offsetX: nextOffX,
       offsetY: nextOffY,

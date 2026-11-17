@@ -29,6 +29,7 @@ export interface SceneCanvasLayoutInput {
   naturalImageWidth?: number | null;
   naturalImageHeight?: number | null;
   gridSizePx: number;
+  gridMode?: VttGridMode | null;
   padding?: number | null;
   offsetX?: number;
   offsetY?: number;
@@ -49,6 +50,14 @@ export interface SceneCanvasLayout {
   gridRows: number;
   innerCols: number;
   innerRows: number;
+  innerStartCol: number;
+  innerEndCol: number;
+  innerStartRow: number;
+  innerEndRow: number;
+  mapGridLeft: number;
+  mapGridRight: number;
+  mapGridTop: number;
+  mapGridBottom: number;
   geometry: HexGridGeometry;
 }
 
@@ -123,24 +132,39 @@ export function getHexStepPixels(gridSizePx: number): number {
 export function computeSceneCanvasLayout(
   input: SceneCanvasLayoutInput
 ): SceneCanvasLayout {
-  const safeGridSizePx = Math.max(
-    20,
-    Math.min(400, Math.round(Number(input.gridSizePx) || DEFAULT_VTT_GRID_SIZE_PX))
-  );
-
-  const innerWidth =
+  const rawInnerWidth =
     input.sceneWidthPx && input.sceneWidthPx > 0
       ? Math.max(200, Math.round(input.sceneWidthPx))
       : input.naturalImageWidth && input.naturalImageWidth > 0
         ? Math.max(200, Math.round(input.naturalImageWidth))
         : DEFAULT_VTT_SCENE_WIDTH_PX;
 
-  const innerHeight =
+  const rawInnerHeight =
     input.sceneHeightPx && input.sceneHeightPx > 0
       ? Math.max(200, Math.round(input.sceneHeightPx))
       : input.naturalImageHeight && input.naturalImageHeight > 0
         ? Math.max(200, Math.round(input.naturalImageHeight))
         : DEFAULT_VTT_SCENE_HEIGHT_PX;
+
+  const safeGridSizePx = Math.max(
+    20,
+    Math.min(
+      400,
+      rawInnerWidth,
+      rawInnerHeight,
+      Math.round(Number(input.gridSizePx) || DEFAULT_VTT_GRID_SIZE_PX)
+    )
+  );
+
+  const isGridless = input.gridMode === 'gridless';
+  const snappedMapCols = Math.max(1, Math.round(rawInnerWidth / safeGridSizePx));
+  const snappedMapRows = Math.max(1, Math.round(rawInnerHeight / safeGridSizePx));
+  const innerWidth = isGridless
+    ? rawInnerWidth
+    : snappedMapCols * safeGridSizePx;
+  const innerHeight = isGridless
+    ? rawInnerHeight
+    : snappedMapRows * safeGridSizePx;
 
   const rawPadding =
     input.padding !== null &&
@@ -150,31 +174,56 @@ export function computeSceneCanvasLayout(
       : DEFAULT_VTT_SCENE_PADDING;
   const padding = Math.max(0, Math.min(1, Number(rawPadding.toFixed(2))));
 
-  const padX =
-    padding > 0
-      ? Math.ceil((innerWidth * padding) / safeGridSizePx) * safeGridSizePx
-      : 0;
-  const padY =
-    padding > 0
-      ? Math.ceil((innerHeight * padding) / safeGridSizePx) * safeGridSizePx
-      : 0;
+  const rawOffX = Math.round(Number(input.offsetX) || 0);
+  const rawOffY = Math.round(Number(input.offsetY) || 0);
+  let innerOffX = ((rawOffX % safeGridSizePx) + safeGridSizePx) % safeGridSizePx;
+  let innerOffY = ((rawOffY % safeGridSizePx) + safeGridSizePx) % safeGridSizePx;
+  if (innerWidth - innerOffX < safeGridSizePx) {
+    innerOffX = Math.max(0, innerWidth - safeGridSizePx);
+  }
+  if (innerHeight - innerOffY < safeGridSizePx) {
+    innerOffY = Math.max(0, innerHeight - safeGridSizePx);
+  }
+
+  const padCols =
+    padding > 0 ? Math.ceil((innerWidth * padding) / safeGridSizePx) : 0;
+  const padRows =
+    padding > 0 ? Math.ceil((innerHeight * padding) / safeGridSizePx) : 0;
+  const padX = padCols * safeGridSizePx;
+  const padY = padRows * safeGridSizePx;
 
   const sceneX = Math.round(padX);
   const sceneY = Math.round(padY);
   const totalWidth = Math.round(innerWidth + sceneX * 2);
   const totalHeight = Math.round(innerHeight + sceneY * 2);
 
-  const offX = Number(input.offsetX) || 0;
-  const offY = Number(input.offsetY) || 0;
+  const innerCols = Math.max(
+    1,
+    Math.floor((innerWidth - innerOffX) / safeGridSizePx)
+  );
+  const innerRows = Math.max(
+    1,
+    Math.floor((innerHeight - innerOffY) / safeGridSizePx)
+  );
 
-  const spanW = Math.max(totalWidth, totalWidth - offX);
-  const spanH = Math.max(totalHeight, totalHeight - offY);
+  const gridCols = Math.max(
+    innerCols,
+    Math.floor((totalWidth - innerOffX) / safeGridSizePx)
+  );
+  const gridRows = Math.max(
+    innerRows,
+    Math.floor((totalHeight - innerOffY) / safeGridSizePx)
+  );
 
-  const gridCols = Math.max(4, Math.ceil(spanW / safeGridSizePx));
-  const gridRows = Math.max(4, Math.ceil(spanH / safeGridSizePx));
+  const innerStartCol = padCols;
+  const innerEndCol = padCols + innerCols - 1;
+  const innerStartRow = padRows;
+  const innerEndRow = padRows + innerRows - 1;
 
-  const innerCols = Math.max(1, Math.ceil(innerWidth / safeGridSizePx));
-  const innerRows = Math.max(1, Math.ceil(innerHeight / safeGridSizePx));
+  const mapGridLeft = innerOffX + innerStartCol * safeGridSizePx;
+  const mapGridRight = innerOffX + (innerEndCol + 1) * safeGridSizePx;
+  const mapGridTop = innerOffY + innerStartRow * safeGridSizePx;
+  const mapGridBottom = innerOffY + (innerEndRow + 1) * safeGridSizePx;
 
   return {
     innerWidth,
@@ -191,14 +240,117 @@ export function computeSceneCanvasLayout(
     gridRows,
     innerCols,
     innerRows,
+    innerStartCol,
+    innerEndCol,
+    innerStartRow,
+    innerEndRow,
+    mapGridLeft,
+    mapGridRight,
+    mapGridTop,
+    mapGridBottom,
     geometry: {
       gridWidth: gridCols,
       gridHeight: gridRows,
       gridSizePx: safeGridSizePx,
-      offsetX: offX,
-      offsetY: offY,
+      offsetX: innerOffX,
+      offsetY: innerOffY,
     },
   };
+}
+
+export function isHexStraddlingMapBorder(
+  coord: HexCoord,
+  layout: SceneCanvasLayout
+): boolean {
+  const step = getTileSizePx(layout.geometry.gridSizePx);
+  const x1 = layout.geometry.offsetX + coord.col * step;
+  const x2 = x1 + step;
+  const y1 = layout.geometry.offsetY + coord.row * step;
+  const y2 = y1 + step;
+
+  if (
+    x1 < -0.01 ||
+    x2 > layout.totalWidth + 0.01 ||
+    y1 < -0.01 ||
+    y2 > layout.totalHeight + 0.01
+  ) {
+    return true;
+  }
+
+  const mapLeft = layout.sceneX;
+  const mapRight = layout.sceneX + layout.innerWidth;
+  const mapTop = layout.sceneY;
+  const mapBottom = layout.sceneY + layout.innerHeight;
+
+  const overlapsMapInterior =
+    x1 < mapRight - 0.01 &&
+    x2 > mapLeft + 0.01 &&
+    y1 < mapBottom - 0.01 &&
+    y2 > mapTop + 0.01;
+  if (!overlapsMapInterior) {
+    return false;
+  }
+
+  const fullyInsideMap =
+    x1 >= mapLeft - 0.01 &&
+    x2 <= mapRight + 0.01 &&
+    y1 >= mapTop - 0.01 &&
+    y2 <= mapBottom + 0.01;
+  return !fullyInsideMap;
+}
+
+export function clampHexToSceneLayout(
+  coord: HexCoord,
+  layout: SceneCanvasLayout,
+  worldHint?: VttPoint | null
+): HexCoord {
+  let col = Math.max(0, Math.min(Math.max(1, layout.gridCols) - 1, coord.col));
+  let row = Math.max(0, Math.min(Math.max(1, layout.gridRows) - 1, coord.row));
+  if (!isHexStraddlingMapBorder({ col, row }, layout)) {
+    return { col, row };
+  }
+
+  const step = getTileSizePx(layout.geometry.gridSizePx);
+  const hint =
+    worldHint ?? hexToWorldCenter({ col, row }, layout.geometry);
+  const mapLeft = layout.sceneX;
+  const mapRight = layout.sceneX + layout.innerWidth;
+  const mapTop = layout.sceneY;
+  const mapBottom = layout.sceneY + layout.innerHeight;
+
+  const colLeft = layout.geometry.offsetX + col * step;
+  const colRight = colLeft + step;
+  if (colLeft < mapLeft - 0.01 && colRight > mapLeft + 0.01) {
+    if (hint.x < mapLeft && col - 1 >= 0) {
+      col = col - 1;
+    } else {
+      col = layout.innerStartCol;
+    }
+  } else if (colLeft < mapRight - 0.01 && colRight > mapRight + 0.01) {
+    if (hint.x > mapRight && col + 1 < layout.gridCols) {
+      col = col + 1;
+    } else {
+      col = layout.innerEndCol;
+    }
+  }
+
+  const rowTop = layout.geometry.offsetY + row * step;
+  const rowBottom = rowTop + step;
+  if (rowTop < mapTop - 0.01 && rowBottom > mapTop + 0.01) {
+    if (hint.y < mapTop && row - 1 >= 0) {
+      row = row - 1;
+    } else {
+      row = layout.innerStartRow;
+    }
+  } else if (rowTop < mapBottom - 0.01 && rowBottom > mapBottom + 0.01) {
+    if (hint.y > mapBottom && row + 1 < layout.gridRows) {
+      row = row + 1;
+    } else {
+      row = layout.innerEndRow;
+    }
+  }
+
+  return { col, row };
 }
 
 export function feetToWorldPixels(feet: number, gridSizePx: number): number {
@@ -279,10 +431,8 @@ export function getHexWorldBounds(geom: HexGridGeometry): {
   const step = getTileSizePx(geom.gridSizePx);
   const cols = Math.max(1, geom.gridWidth);
   const rows = Math.max(1, geom.gridHeight);
-  const width =
-    Math.max(0, geom.offsetX) * 2 + Math.min(0, geom.offsetX) + cols * step;
-  const height =
-    Math.max(0, geom.offsetY) * 2 + Math.min(0, geom.offsetY) + rows * step;
+  const width = Math.max(0, geom.offsetX) + cols * step;
+  const height = Math.max(0, geom.offsetY) + rows * step;
   return { width, height };
 }
 
@@ -601,7 +751,8 @@ export function createTokenTravelAnimation(
   waypoints: VttPoint[],
   speedFeetPerSec: number,
   gridSizePx: number,
-  startedAtMs: number
+  startedAtMs: number,
+  maxDurationMs?: number
 ): TokenTravelAnimation | null {
   if (speedFeetPerSec <= 0 || waypoints.length < 2) {
     return null;
@@ -635,7 +786,11 @@ export function createTokenTravelAnimation(
     return null;
   }
 
-  const durationMs = Math.max(40, (totalPx / speedPxPerSec) * 1000);
+  const rawDurationMs = Math.max(40, (totalPx / speedPxPerSec) * 1000);
+  const durationMs =
+    typeof maxDurationMs === 'number' && maxDurationMs > 0
+      ? Math.max(40, Math.min(rawDurationMs, maxDurationMs))
+      : rawDurationMs;
   return {
     waypoints: deduped,
     cumulativeLengthsPx: cumulative,

@@ -134,6 +134,7 @@ import {
 } from './features/vtt/engine/directory-tree.engine';
 import {
   HexGridGeometry,
+  clampHexToSceneLayout,
   clampWorldPointToBounds,
   computeSceneCanvasLayout,
   createTokenTravelAnimation,
@@ -145,6 +146,7 @@ import {
   getTokenDistanceFeet,
   getTokenWorldCenter,
   hexToWorldCenter,
+  isHexStraddlingMapBorder,
   isWorldSegmentBlockedByWalls,
   sampleTokenTravelAnimation,
   worldPointToHex,
@@ -1928,10 +1930,18 @@ describe('App', () => {
       padding: DEFAULT_VTT_SCENE_PADDING,
     });
 
-    expect(large4kLayout.innerWidth).toBe(3840);
-    expect(large4kLayout.innerHeight).toBe(2160);
-    expect(large4kLayout.sceneX).toBeGreaterThanOrEqual(768);
-    expect(large4kLayout.sceneY).toBeGreaterThanOrEqual(432);
+    expect(large4kLayout.innerWidth).toBe(3800);
+    expect(large4kLayout.innerHeight).toBe(2200);
+    expect(large4kLayout.sceneX).toBeGreaterThanOrEqual(760);
+    expect(large4kLayout.sceneY).toBeGreaterThanOrEqual(440);
+    expect(large4kLayout.mapGridLeft).toBe(large4kLayout.sceneX);
+    expect(large4kLayout.mapGridRight).toBe(
+      large4kLayout.sceneX + large4kLayout.innerWidth
+    );
+    expect(large4kLayout.mapGridTop).toBe(large4kLayout.sceneY);
+    expect(large4kLayout.mapGridBottom).toBe(
+      large4kLayout.sceneY + large4kLayout.innerHeight
+    );
     expect(large4kLayout.totalWidth).toBe(
       large4kLayout.innerWidth + large4kLayout.sceneX * 2
     );
@@ -1939,9 +1949,19 @@ describe('App', () => {
       large4kLayout.innerHeight + large4kLayout.sceneY * 2
     );
 
+    const gridless4kLayout = computeSceneCanvasLayout({
+      sceneWidthPx: 3840,
+      sceneHeightPx: 2160,
+      gridSizePx: 100,
+      gridMode: 'gridless',
+      padding: DEFAULT_VTT_SCENE_PADDING,
+    });
+    expect(gridless4kLayout.innerWidth).toBe(3840);
+    expect(gridless4kLayout.innerHeight).toBe(2160);
+
     const hexBounds = getHexWorldBounds(large4kLayout.geometry);
-    expect(hexBounds.width).toBeGreaterThanOrEqual(large4kLayout.totalWidth);
-    expect(hexBounds.height).toBeGreaterThanOrEqual(large4kLayout.totalHeight);
+    expect(hexBounds.width).toBe(large4kLayout.totalWidth);
+    expect(hexBounds.height).toBe(large4kLayout.totalHeight);
 
     const stagedPaddingHex = worldPointToHex(
       { x: 180, y: 180 },
@@ -13041,5 +13061,463 @@ describe('App', () => {
       'Lord Vane'
     );
     expect(vttStore.effectivePublicSpeaker().name).toBe('Lord Vane');
+  });
+
+  it('should fill 100% of the map edge-to-edge with complete grid tiles and support smooth optimistic WASD, Arrow, and diagonal chord movement without Realtime echo rubberbanding', async () => {
+    for (const gridPx of [70, 140, 150, 200, 300, 400]) {
+      for (const pad of [0, 0.2]) {
+        for (const off of [0, 35, -35]) {
+          const layout = computeSceneCanvasLayout({
+            sceneWidthPx: 1600,
+            sceneHeightPx: 1100,
+            gridSizePx: gridPx,
+            padding: pad,
+            offsetX: off,
+            offsetY: off,
+          });
+
+          expect(layout.innerCols).toBeGreaterThanOrEqual(1);
+          expect(layout.innerRows).toBeGreaterThanOrEqual(1);
+          expect(layout.innerWidth % layout.gridSizePx).toBe(0);
+          expect(layout.innerHeight % layout.gridSizePx).toBe(0);
+          expect(layout.mapGridLeft).toBeGreaterThanOrEqual(layout.sceneX);
+          expect(layout.mapGridRight).toBeLessThanOrEqual(
+            layout.sceneX + layout.innerWidth
+          );
+          expect(layout.mapGridTop).toBeGreaterThanOrEqual(layout.sceneY);
+          expect(layout.mapGridBottom).toBeLessThanOrEqual(
+            layout.sceneY + layout.innerHeight
+          );
+
+          if (off === 0) {
+            expect(layout.mapGridLeft).toBe(layout.sceneX);
+            expect(layout.mapGridRight).toBe(layout.sceneX + layout.innerWidth);
+            expect(layout.mapGridTop).toBe(layout.sceneY);
+            expect(layout.mapGridBottom).toBe(
+              layout.sceneY + layout.innerHeight
+            );
+          }
+
+          for (
+            let col = layout.innerStartCol;
+            col <= layout.innerEndCol;
+            col++
+          ) {
+            for (
+              let row = layout.innerStartRow;
+              row <= layout.innerEndRow;
+              row++
+            ) {
+              expect(isHexStraddlingMapBorder({ col, row }, layout)).toBe(
+                false
+              );
+              const center = hexToWorldCenter({ col, row }, layout.geometry);
+              const half = layout.gridSizePx / 2;
+              expect(center.x - half).toBeGreaterThanOrEqual(
+                layout.sceneX - 0.01
+              );
+              expect(center.x + half).toBeLessThanOrEqual(
+                layout.sceneX + layout.innerWidth + 0.01
+              );
+              expect(center.y - half).toBeGreaterThanOrEqual(
+                layout.sceneY - 0.01
+              );
+              expect(center.y + half).toBeLessThanOrEqual(
+                layout.sceneY + layout.innerHeight + 0.01
+              );
+            }
+          }
+
+          const bottomEdgePt = {
+            x: layout.sceneX + layout.innerWidth - 5,
+            y: layout.sceneY + layout.innerHeight - 5,
+          };
+          const snappedEdge = clampHexToSceneLayout(
+            worldPointToHex(bottomEdgePt, layout.geometry),
+            layout,
+            bottomEdgePt
+          );
+          expect(isHexStraddlingMapBorder(snappedEdge, layout)).toBe(false);
+          expect(snappedEdge.col).toBeLessThanOrEqual(layout.innerEndCol);
+          expect(snappedEdge.row).toBeLessThanOrEqual(layout.innerEndRow);
+        }
+      }
+    }
+
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'gm-wasd-1',
+      email: 'gm@test.com',
+    });
+
+    const tokenDbWrites: Partial<VttTokenModel>[] = [];
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async (
+              _tokenId: string,
+              patch: Partial<VttTokenModel>
+            ) => {
+              tokenDbWrites.push(patch);
+              return null;
+            },
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: 'log-wasd-1',
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    const settingsStore = TestBed.inject(VttSettingsStore);
+    settingsStore.resetAllHotkeys();
+
+    const initLayout = computeSceneCanvasLayout({
+      sceneWidthPx: 1600,
+      sceneHeightPx: 1100,
+      gridSizePx: 200,
+      padding: 0.2,
+    });
+    expect(initLayout.innerCols).toBe(8);
+    expect(initLayout.innerRows).toBe(6);
+    expect(initLayout.innerWidth).toBe(1600);
+    expect(initLayout.innerHeight).toBe(1200);
+
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-wasd',
+      gm_id: 'gm-wasd-1',
+      name: 'Keyboard Move Campaign',
+      cover_image_url: null,
+      invite_code: 'WASD01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-wasd-1',
+        campaign_id: 'camp-wasd',
+        gm_id: 'gm-wasd-1',
+        folder_id: null,
+        name: 'Stone Arena',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: 1600,
+        scene_height: 1100,
+        padding: 0.2,
+        grid_width: initLayout.gridCols,
+        grid_height: initLayout.gridRows,
+        grid_size_px: 200,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: false,
+        round_number: 1,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [
+          {
+            id: 'wall-north',
+            x1: initLayout.sceneX,
+            y1: initLayout.sceneY + 200,
+            x2: initLayout.sceneX + 600,
+            y2: initLayout.sceneY + 200,
+            kind: 'wall',
+          },
+        ],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-wasd-1');
+    vttStore.tokens.set([
+      {
+        id: 'tok-walker',
+        encounter_id: 'scene-wasd-1',
+        character_id: null,
+        owner_id: 'gm-wasd-1',
+        name: 'Arena Warden',
+        faction: 'ally',
+        x: initLayout.innerStartCol + 1,
+        y: initLayout.innerStartRow + 1,
+        q: initLayout.innerStartCol + 1,
+        r: initLayout.innerStartRow + 1,
+        size: 1,
+        icon: 'greatsword',
+        color: '#38B29A',
+        current_hp: 20,
+        max_hp: 20,
+        current_sp: 6,
+        max_sp: 6,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 25,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {},
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+
+    vttStore.selectedTokenId.set('tok-walker');
+    fixture.detectChanges();
+
+    const tapKey = async (key: string, code: string) => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true })
+      );
+      window.dispatchEvent(
+        new KeyboardEvent('keyup', { key, code, bubbles: true, cancelable: true })
+      );
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+
+    const startX = initLayout.innerStartCol + 1;
+    const startY = initLayout.innerStartRow + 1;
+
+    await tapKey('w', 'KeyW');
+    expect(vttStore.activeTool()).toBe('select');
+    expect(vttStore.tokens()[0].x).toBe(startX);
+    expect(vttStore.tokens()[0].y).toBe(startY);
+
+    await tapKey('d', 'KeyD');
+    expect(vttStore.tokens()[0].x).toBe(startX + 1);
+    expect(vttStore.tokens()[0].y).toBe(startY);
+
+    await tapKey('s', 'KeyS');
+    expect(vttStore.tokens()[0].x).toBe(startX + 1);
+    expect(vttStore.tokens()[0].y).toBe(startY + 1);
+
+    expect(tokenDbWrites.length).toBe(0);
+
+    vttStore.handleRealtimeTokenUpsert({
+      ...vttStore.tokens()[0],
+      x: startX,
+      y: startY,
+      q: startX,
+      r: startY,
+      current_hp: 17,
+    });
+    expect(vttStore.tokens()[0].x).toBe(startX + 1);
+    expect(vttStore.tokens()[0].y).toBe(startY + 1);
+    expect(vttStore.tokens()[0].current_hp).toBe(17);
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'w',
+        code: 'KeyW',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'a',
+        code: 'KeyA',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: 'w',
+        code: 'KeyW',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: 'a',
+        code: 'KeyA',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens()[0].x).toBe(startX);
+    expect(vttStore.tokens()[0].y).toBe(startY);
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 's',
+        code: 'KeyS',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'd',
+        code: 'KeyD',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: 's',
+        code: 'KeyS',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    window.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: 'd',
+        code: 'KeyD',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.tokens()[0].x).toBe(startX + 1);
+    expect(vttStore.tokens()[0].y).toBe(startY + 1);
+
+    await tapKey('ArrowLeft', 'ArrowLeft');
+    expect(vttStore.tokens()[0].x).toBe(startX);
+    expect(vttStore.tokens()[0].y).toBe(startY + 1);
+
+    await tapKey('ArrowUp', 'ArrowUp');
+    expect(vttStore.tokens()[0].x).toBe(startX);
+    expect(vttStore.tokens()[0].y).toBe(startY);
+
+    for (let i = 0; i < 10; i++) {
+      await tapKey('ArrowDown', 'ArrowDown');
+    }
+    expect(vttStore.tokens()[0].y).toBe(initLayout.innerEndRow);
+    expect(
+      isHexStraddlingMapBorder(
+        { col: vttStore.tokens()[0].x, row: vttStore.tokens()[0].y },
+        initLayout
+      )
+    ).toBe(false);
+
+    await vttStore.flushPendingKeyboardMoves();
+    expect(tokenDbWrites.length).toBe(1);
+    expect(tokenDbWrites[0].x).toBe(startX);
+    expect(tokenDbWrites[0].y).toBe(initLayout.innerEndRow);
+
+    const chatInput = fixture.nativeElement.querySelector(
+      'input[type="text"], textarea'
+    ) as HTMLElement | null;
+    if (chatInput) {
+      const yBeforeInput = vttStore.tokens()[0].y;
+      chatInput.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'w',
+          code: 'KeyW',
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      await fixture.whenStable();
+      expect(vttStore.tokens()[0].y).toBe(yBeforeInput);
+    }
+
+    await vttStore.patchScene('scene-wasd-1', { grid_size_px: 400 });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const nextLayout = vttStore.sceneLayout();
+    expect(nextLayout.mapGridLeft).toBe(nextLayout.sceneX);
+    expect(nextLayout.mapGridRight).toBe(
+      nextLayout.sceneX + nextLayout.innerWidth
+    );
+    expect(nextLayout.mapGridTop).toBe(nextLayout.sceneY);
+    expect(nextLayout.mapGridBottom).toBe(
+      nextLayout.sceneY + nextLayout.innerHeight
+    );
+    const movedTok = vttStore.tokens()[0];
+    expect(movedTok.x).toBeGreaterThanOrEqual(nextLayout.innerStartCol);
+    expect(movedTok.x).toBeLessThanOrEqual(nextLayout.innerEndCol);
+    expect(movedTok.y).toBeGreaterThanOrEqual(nextLayout.innerStartRow);
+    expect(movedTok.y).toBeLessThanOrEqual(nextLayout.innerEndRow);
+    expect(
+      isHexStraddlingMapBorder({ col: movedTok.x, row: movedTok.y }, nextLayout)
+    ).toBe(false);
   });
 });

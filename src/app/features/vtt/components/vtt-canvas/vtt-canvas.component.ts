@@ -20,6 +20,7 @@ import {
   HexPathResult,
   TokenTravelAnimation,
   clampHexToBounds,
+  clampHexToSceneLayout,
   clampWorldPointToBounds,
   createTokenTravelAnimation,
   feetToWorldPixels,
@@ -33,6 +34,8 @@ import {
   hexKey,
   hexToWorldCenter,
   isHexInBounds,
+  isHexStepBlockedByWalls,
+  isHexStraddlingMapBorder,
   isWorldSegmentBlockedByWalls,
   parseHexKey,
   sampleTokenTravelAnimation,
@@ -306,6 +309,14 @@ export class VttCanvasComponent implements AfterViewInit {
   private pingAnimFrame: number | null = null;
   private suppressContextMenuUntil = 0;
   private suppressRightPanUntilPointerUp = false;
+  private readonly pressedMoveDirs = new Set<'up' | 'down' | 'left' | 'right'>();
+  private readonly pressedArrowDirs = new Set<'up' | 'down' | 'left' | 'right'>();
+  private readonly chordMoveDirs = new Set<'up' | 'down' | 'left' | 'right'>();
+  private chordShiftHeld = false;
+  private keyboardChordTimer: ReturnType<typeof setTimeout> | null = null;
+  private keyboardHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  private keyboardHoldShiftHeld = false;
+  private diagonalReleaseGraceUntilMs = 0;
   private readonly isMacPlatform =
     typeof navigator !== 'undefined' &&
     /mac|ipod|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
@@ -1097,6 +1108,7 @@ export class VttCanvasComponent implements AfterViewInit {
     });
 
     this.destroyRef.onDestroy(() => {
+      this.clearKeyboardMoveState();
       if (this.pingAnimFrame !== null) {
         cancelAnimationFrame(this.pingAnimFrame);
       }
@@ -1480,6 +1492,53 @@ export class VttCanvasComponent implements AfterViewInit {
     this.startTokenTravelLoopIfNeeded();
   }
 
+  private queueKeyboardStepAnimation(
+    tokenId: string,
+    fallbackStart: VttPoint,
+    targetEnd: VttPoint,
+    maxStepDurationMs = 115
+  ): void {
+    const speed = this.settingsStore.preferences().tokenMoveSpeed;
+    if (speed <= 0) {
+      return;
+    }
+    const now = this.nowAnimClockMs();
+    const existingAnim = this.activeTokenAnimations.get(tokenId);
+    const liveOrigin = existingAnim
+      ? sampleTokenTravelAnimation(existingAnim, now).point
+      : (this.tokenAnimPositions()[tokenId] ?? fallbackStart);
+    const geom = this.vttStore.gridGeometry();
+    const distPx = Math.hypot(
+      targetEnd.x - liveOrigin.x,
+      targetEnd.y - liveOrigin.y
+    );
+    if (distPx < 0.5) {
+      this.lastTokenCenters.set(tokenId, targetEnd);
+      return;
+    }
+    const stepFeet = Math.max(
+      0.5,
+      (distPx / Math.max(10, geom.gridSizePx)) * 5
+    );
+    const minSpeedForCadence = (stepFeet / maxStepDurationMs) * 1000;
+    const effectiveSpeed = Math.max(speed, minSpeedForCadence);
+    const anim = createTokenTravelAnimation(
+      [liveOrigin, targetEnd],
+      effectiveSpeed,
+      geom.gridSizePx,
+      now,
+      maxStepDurationMs
+    );
+    if (!anim) {
+      this.lastTokenCenters.set(tokenId, targetEnd);
+      return;
+    }
+    this.lastTokenCenters.set(tokenId, anim.targetEnd);
+    this.activeTokenAnimations.set(tokenId, anim);
+    this.syncTokenAnimPositionsNow();
+    this.startTokenTravelLoopIfNeeded();
+  }
+
   commitActiveChainedMove(): void {
     const chain = this.chainedTokenMove();
     this.chainedTokenMove.set(null);
@@ -1548,20 +1607,25 @@ export class VttCanvasComponent implements AfterViewInit {
     shiftHeld: boolean
   ): DragTokenState {
     const sc = this.vttStore.activeScene();
-    const geom = this.vttStore.gridGeometry();
+    const layout = this.vttStore.sceneLayout();
+    const geom = layout.geometry;
     const shiftOverride = shiftHeld && this.vttStore.isGm();
     const freeUnsnap = dragTok.gridMode === 'gridless' || shiftHeld;
+    const tokMargin = Math.max(
+      20,
+      Math.round(getHexRadius(geom.gridSizePx) * 0.82)
+    );
 
     if (freeUnsnap) {
       const clampedWorld = clampWorldPointToBounds(
         worldPt,
         this.worldBounds(),
-        20
+        tokMargin
       );
-      const clampedHex = clampHexToBounds(
+      const clampedHex = clampHexToSceneLayout(
         worldPointToHex(clampedWorld, geom),
-        geom.gridWidth,
-        geom.gridHeight
+        layout,
+        clampedWorld
       );
       const distPx = Math.hypot(
         clampedWorld.x - dragTok.startWorld.x,
@@ -1590,12 +1654,12 @@ export class VttCanvasComponent implements AfterViewInit {
         const compWorld = clampWorldPointToBounds(
           { x: comp.startWorld.x + dx, y: comp.startWorld.y + dy },
           this.worldBounds(),
-          20
+          tokMargin
         );
-        const compHex = clampHexToBounds(
+        const compHex = clampHexToSceneLayout(
           worldPointToHex(compWorld, geom),
-          geom.gridWidth,
-          geom.gridHeight
+          layout,
+          compWorld
         );
         const compDistPx = Math.hypot(
           compWorld.x - comp.startWorld.x,
@@ -1632,7 +1696,25 @@ export class VttCanvasComponent implements AfterViewInit {
     }
 
     const rawHex = worldPointToHex(worldPt, geom);
-    const clamped = clampHexToBounds(rawHex, geom.gridWidth, geom.gridHeight);
+    const nonStraddling = clampHexToSceneLayout(rawHex, layout, worldPt);
+    const startedInMap =
+      dragTok.startHex.col >= layout.innerStartCol &&
+      dragTok.startHex.col <= layout.innerEndCol &&
+      dragTok.startHex.row >= layout.innerStartRow &&
+      dragTok.startHex.row <= layout.innerEndRow;
+    const clamped =
+      startedInMap && !this.vttStore.isGm()
+        ? {
+            col: Math.max(
+              layout.innerStartCol,
+              Math.min(layout.innerEndCol, nonStraddling.col)
+            ),
+            row: Math.max(
+              layout.innerStartRow,
+              Math.min(layout.innerEndRow, nonStraddling.row)
+            ),
+          }
+        : nonStraddling;
     const startTileCenter = hexToWorldCenter(dragTok.startHex, geom);
     const targetTileCenter = hexToWorldCenter(clamped, geom);
     const startedOffCenter =
@@ -1658,16 +1740,14 @@ export class VttCanvasComponent implements AfterViewInit {
     const tileWorldDy = targetTileCenter.y - startTileCenter.y;
     const companions = dragTok.companions.map((comp) => {
       const compStartTileCenter = hexToWorldCenter(comp.startHex, geom);
-      const compHex = clampHexToBounds(
-        worldPointToHex(
-          {
-            x: compStartTileCenter.x + tileWorldDx,
-            y: compStartTileCenter.y + tileWorldDy,
-          },
-          geom
-        ),
-        geom.gridWidth,
-        geom.gridHeight
+      const compPt = {
+        x: compStartTileCenter.x + tileWorldDx,
+        y: compStartTileCenter.y + tileWorldDy,
+      };
+      const compHex = clampHexToSceneLayout(
+        worldPointToHex(compPt, geom),
+        layout,
+        compPt
       );
       const compWorld = hexToWorldCenter(compHex, geom);
       if (shiftOverride) {
@@ -1724,17 +1804,22 @@ export class VttCanvasComponent implements AfterViewInit {
       event.dataTransfer.dropEffect = 'copy';
     }
 
+    const layout = this.vttStore.sceneLayout();
+    const geom = layout.geometry;
+    const tokMargin = Math.max(
+      20,
+      Math.round(getHexRadius(geom.gridSizePx) * 0.82)
+    );
     const rawWorld = this.screenToWorld(event.clientX, event.clientY);
     const clampedWorld = clampWorldPointToBounds(
       rawWorld,
       this.worldBounds(),
-      20
+      tokMargin
     );
-    const geom = this.vttStore.gridGeometry();
-    const clampedHex = clampHexToBounds(
+    const clampedHex = clampHexToSceneLayout(
       worldPointToHex(clampedWorld, geom),
-      geom.gridWidth,
-      geom.gridHeight
+      layout,
+      clampedWorld
     );
     const unsnapped = sc.grid_mode === 'gridless' || Boolean(event.shiftKey);
 
@@ -2475,13 +2560,15 @@ export class VttCanvasComponent implements AfterViewInit {
 
     const worldPt = this.screenToWorld(event.clientX, event.clientY);
     this.lastPointerWorld.set(worldPt);
-    const geom = this.vttStore.gridGeometry();
+    const layout = this.vttStore.sceneLayout();
+    const geom = layout.geometry;
     const rawHex = worldPointToHex(worldPt, geom);
 
     if (
       sc.grid_mode !== 'gridless' &&
       insideViewport &&
-      isHexInBounds(rawHex, geom.gridWidth, geom.gridHeight)
+      isHexInBounds(rawHex, geom.gridWidth, geom.gridHeight) &&
+      !isHexStraddlingMapBorder(rawHex, layout)
     ) {
       const prev = this.hoveredHex();
       if (!prev || prev.col !== rawHex.col || prev.row !== rawHex.row) {
@@ -2890,6 +2977,371 @@ export class VttCanvasComponent implements AfterViewInit {
     }
   }
 
+  private resolveKeyboardMoveDirection(event: KeyboardEvent): {
+    dir: 'up' | 'down' | 'left' | 'right';
+    isArrow: boolean;
+  } | null {
+    const code = event.code || '';
+    const rawKey = (event.key || '').toLowerCase();
+    if (code === 'ArrowUp' || rawKey === 'arrowup') {
+      return { dir: 'up', isArrow: true };
+    }
+    if (code === 'ArrowDown' || rawKey === 'arrowdown') {
+      return { dir: 'down', isArrow: true };
+    }
+    if (code === 'ArrowLeft' || rawKey === 'arrowleft') {
+      return { dir: 'left', isArrow: true };
+    }
+    if (code === 'ArrowRight' || rawKey === 'arrowright') {
+      return { dir: 'right', isArrow: true };
+    }
+    if (code === 'KeyW' || rawKey === 'w') {
+      return { dir: 'up', isArrow: false };
+    }
+    if (code === 'KeyS' || rawKey === 's') {
+      return { dir: 'down', isArrow: false };
+    }
+    if (code === 'KeyA' || rawKey === 'a') {
+      return { dir: 'left', isArrow: false };
+    }
+    if (code === 'KeyD' || rawKey === 'd') {
+      return { dir: 'right', isArrow: false };
+    }
+    return null;
+  }
+
+  private computeVectorFromDirs(
+    dirs: ReadonlySet<'up' | 'down' | 'left' | 'right'>
+  ): { dc: number; dr: number } {
+    const dc = (dirs.has('right') ? 1 : 0) - (dirs.has('left') ? 1 : 0);
+    const dr = (dirs.has('down') ? 1 : 0) - (dirs.has('up') ? 1 : 0);
+    return { dc, dr };
+  }
+
+  private clearKeyboardMoveState(): void {
+    if (this.keyboardChordTimer !== null) {
+      clearTimeout(this.keyboardChordTimer);
+      this.keyboardChordTimer = null;
+    }
+    if (this.keyboardHoldTimer !== null) {
+      clearTimeout(this.keyboardHoldTimer);
+      this.keyboardHoldTimer = null;
+    }
+    this.pressedMoveDirs.clear();
+    this.pressedArrowDirs.clear();
+    this.chordMoveDirs.clear();
+    this.chordShiftHeld = false;
+    this.keyboardHoldShiftHeld = false;
+    this.diagonalReleaseGraceUntilMs = 0;
+  }
+
+  private flushPendingKeyboardChord(scheduleHoldIfStillPressed: boolean): void {
+    if (this.keyboardChordTimer !== null) {
+      clearTimeout(this.keyboardChordTimer);
+      this.keyboardChordTimer = null;
+    }
+    if (this.chordMoveDirs.size === 0) return;
+
+    const vec = this.computeVectorFromDirs(this.chordMoveDirs);
+    const shift = this.chordShiftHeld;
+    this.chordMoveDirs.clear();
+    this.chordShiftHeld = false;
+
+    if (vec.dc !== 0 || vec.dr !== 0) {
+      this.stepSelectedTokensByKeyboard(vec.dc, vec.dr, shift);
+    }
+    if (scheduleHoldIfStillPressed && this.pressedMoveDirs.size > 0) {
+      this.scheduleKeyboardHoldTick(190);
+    }
+  }
+
+  private scheduleKeyboardHoldTick(delayMs: number): void {
+    if (this.keyboardHoldTimer !== null) {
+      clearTimeout(this.keyboardHoldTimer);
+    }
+    this.keyboardHoldTimer = setTimeout(() => {
+      this.keyboardHoldTimer = null;
+      if (this.pressedMoveDirs.size === 0) {
+        return;
+      }
+      const sc = this.vttStore.activeScene();
+      const allowByTool =
+        this.pressedArrowDirs.size > 0 ||
+        this.vttStore.activeTool() === 'select';
+      if (
+        !sc ||
+        !allowByTool ||
+        this.hasActiveChainedOrDragMove() ||
+        this.vttStore.controllableSelectedTokens().length === 0
+      ) {
+        this.clearKeyboardMoveState();
+        return;
+      }
+
+      const now = Date.now();
+      if (now < this.diagonalReleaseGraceUntilMs) {
+        this.scheduleKeyboardHoldTick(
+          Math.max(8, this.diagonalReleaseGraceUntilMs - now)
+        );
+        return;
+      }
+
+      const vec = this.computeVectorFromDirs(this.pressedMoveDirs);
+      if (vec.dc !== 0 || vec.dr !== 0) {
+        this.stepSelectedTokensByKeyboard(
+          vec.dc,
+          vec.dr,
+          this.keyboardHoldShiftHeld
+        );
+      }
+      if (this.pressedMoveDirs.size > 0) {
+        this.scheduleKeyboardHoldTick(115);
+      }
+    }, delayMs);
+  }
+
+  tryHandleKeyboardTokenMove(event: KeyboardEvent): boolean {
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return false;
+    }
+    const resolved = this.resolveKeyboardMoveDirection(event);
+    if (!resolved) {
+      return false;
+    }
+    if (!resolved.isArrow && this.vttStore.activeTool() !== 'select') {
+      return false;
+    }
+    const sc = this.vttStore.activeScene();
+    if (
+      !sc ||
+      this.hasActiveChainedOrDragMove() ||
+      this.vttStore.controllableSelectedTokens().length === 0
+    ) {
+      return false;
+    }
+
+    event.preventDefault();
+    this.tokenContextMenu.set(null);
+
+    const wasAlreadyHeld = this.pressedMoveDirs.has(resolved.dir);
+    this.pressedMoveDirs.add(resolved.dir);
+    if (resolved.isArrow) {
+      this.pressedArrowDirs.add(resolved.dir);
+    }
+    this.keyboardHoldShiftHeld = Boolean(event.shiftKey);
+    this.diagonalReleaseGraceUntilMs = 0;
+
+    if (event.repeat || wasAlreadyHeld) {
+      return true;
+    }
+
+    if (this.keyboardHoldTimer !== null) {
+      return true;
+    }
+
+    if (this.keyboardChordTimer !== null) {
+      this.chordMoveDirs.add(resolved.dir);
+      this.chordShiftHeld = this.chordShiftHeld || Boolean(event.shiftKey);
+      const vec = this.computeVectorFromDirs(this.chordMoveDirs);
+      if (vec.dc !== 0 && vec.dr !== 0) {
+        this.flushPendingKeyboardChord(true);
+      }
+      return true;
+    }
+
+    this.chordMoveDirs.clear();
+    for (const dir of this.pressedMoveDirs) {
+      this.chordMoveDirs.add(dir);
+    }
+    this.chordShiftHeld = Boolean(event.shiftKey);
+
+    const initialVec = this.computeVectorFromDirs(this.chordMoveDirs);
+    if (initialVec.dc !== 0 && initialVec.dr !== 0) {
+      this.flushPendingKeyboardChord(true);
+      return true;
+    }
+
+    this.keyboardChordTimer = setTimeout(() => {
+      this.keyboardChordTimer = null;
+      this.flushPendingKeyboardChord(true);
+    }, 28);
+    return true;
+  }
+
+  stepSelectedTokensByKeyboard(
+    dc: number,
+    dr: number,
+    shiftHeld = false
+  ): void {
+    if (dc === 0 && dr === 0) return;
+    const sc = this.vttStore.activeScene();
+    if (!sc) return;
+    const selected = this.vttStore.controllableSelectedTokens();
+    if (selected.length === 0) return;
+
+    const layout = this.vttStore.sceneLayout();
+    const geom = layout.geometry;
+    const shiftOverride = shiftHeld && this.vttStore.isGm();
+    const freeUnsnap = sc.grid_mode === 'gridless' || shiftHeld;
+    const batchMoves: BatchTokenMoveInput[] = [];
+
+    if (freeUnsnap) {
+      const stepPx =
+        sc.grid_mode === 'gridless' && !shiftHeld
+          ? geom.gridSizePx
+          : Math.max(8, Math.round(geom.gridSizePx * 0.25));
+      const norm = dc !== 0 && dr !== 0 ? Math.SQRT1_2 : 1;
+      const moveDx = dc * stepPx * norm;
+      const moveDy = dr * stepPx * norm;
+      const outerBounds = this.worldBounds();
+
+      for (const tok of selected) {
+        const startWorld = getTokenWorldCenter(tok, geom, sc.grid_mode);
+        const tokRadius = Math.max(
+          22,
+          Math.round(
+            getHexRadius(geom.gridSizePx) *
+              0.82 *
+              Math.min(2, Math.max(1, tok.size || 1))
+          )
+        );
+        const startedInMap =
+          startWorld.x >= layout.sceneX - 0.5 &&
+          startWorld.x <= layout.sceneX + layout.innerWidth + 0.5 &&
+          startWorld.y >= layout.sceneY - 0.5 &&
+          startWorld.y <= layout.sceneY + layout.innerHeight + 0.5;
+
+        let targetWorld = clampWorldPointToBounds(
+          { x: startWorld.x + moveDx, y: startWorld.y + moveDy },
+          outerBounds,
+          tokRadius
+        );
+        if (startedInMap && !shiftOverride) {
+          targetWorld = {
+            x: Math.round(
+              Math.max(
+                layout.sceneX + tokRadius,
+                Math.min(
+                  layout.sceneX + layout.innerWidth - tokRadius,
+                  targetWorld.x
+                )
+              )
+            ),
+            y: Math.round(
+              Math.max(
+                layout.sceneY + tokRadius,
+                Math.min(
+                  layout.sceneY + layout.innerHeight - tokRadius,
+                  targetWorld.y
+                )
+              )
+            ),
+          };
+        }
+
+        const distPx = Math.hypot(
+          targetWorld.x - startWorld.x,
+          targetWorld.y - startWorld.y
+        );
+        if (distPx < 1) continue;
+        if (
+          !shiftOverride &&
+          isWorldSegmentBlockedByWalls(startWorld, targetWorld, sc.walls)
+        ) {
+          continue;
+        }
+
+        this.queueKeyboardStepAnimation(tok.id, startWorld, targetWorld, 115);
+        batchMoves.push({
+          tokenId: tok.id,
+          targetWorld,
+          distanceFeet: Math.max(
+            5,
+            worldPixelsToFeet(distPx, geom.gridSizePx)
+          ),
+          freeOverride: shiftOverride,
+        });
+      }
+
+      if (batchMoves.length > 0) {
+        this.vttStore.moveTokensKeyboardOptimistic(batchMoves, outerBounds);
+      }
+      return;
+    }
+
+    for (const tok of selected) {
+      const startWorld = getTokenWorldCenter(tok, geom, sc.grid_mode);
+      const startHex = tok.npc_stats?.__unsnapped
+        ? clampHexToSceneLayout(
+            worldPointToHex(startWorld, geom),
+            layout,
+            startWorld
+          )
+        : { col: tok.x, row: tok.y };
+
+      const startedInMap =
+        startHex.col >= layout.innerStartCol &&
+        startHex.col <= layout.innerEndCol &&
+        startHex.row >= layout.innerStartRow &&
+        startHex.row <= layout.innerEndRow;
+
+      let nextHex: HexCoord;
+      if (startedInMap) {
+        nextHex = {
+          col: Math.max(
+            layout.innerStartCol,
+            Math.min(layout.innerEndCol, startHex.col + dc)
+          ),
+          row: Math.max(
+            layout.innerStartRow,
+            Math.min(layout.innerEndRow, startHex.row + dr)
+          ),
+        };
+      } else {
+        const candidate = {
+          col: startHex.col + dc,
+          row: startHex.row + dr,
+        };
+        if (isHexStraddlingMapBorder(candidate, layout)) {
+          nextHex = clampHexToSceneLayout(
+            { col: candidate.col + dc, row: candidate.row + dr },
+            layout
+          );
+        } else {
+          nextHex = clampHexToSceneLayout(candidate, layout);
+        }
+      }
+
+      if (
+        nextHex.col === startHex.col &&
+        nextHex.row === startHex.row &&
+        !tok.npc_stats?.__unsnapped
+      ) {
+        continue;
+      }
+
+      if (
+        !shiftOverride &&
+        isHexStepBlockedByWalls(startHex, nextHex, sc.walls, geom)
+      ) {
+        continue;
+      }
+
+      const endWorld = hexToWorldCenter(nextHex, geom);
+      this.queueKeyboardStepAnimation(tok.id, startWorld, endWorld, 115);
+      batchMoves.push({
+        tokenId: tok.id,
+        targetHex: nextHex,
+        distanceFeet: 5,
+        freeOverride: shiftOverride,
+      });
+    }
+
+    if (batchMoves.length > 0) {
+      this.vttStore.moveTokensKeyboardOptimistic(batchMoves);
+    }
+  }
+
   @HostListener('window:keydown', ['$event'])
   onWindowKeyDown(event: KeyboardEvent): void {
     if (event.key === 'Control' || event.key === 'Meta') {
@@ -2907,6 +3359,29 @@ export class VttCanvasComponent implements AfterViewInit {
 
   @HostListener('window:keyup', ['$event'])
   onWindowKeyUp(event: KeyboardEvent): void {
+    const moveDir = this.resolveKeyboardMoveDirection(event);
+    if (moveDir) {
+      const hadBothAxes =
+        (this.pressedMoveDirs.has('left') ||
+          this.pressedMoveDirs.has('right')) &&
+        (this.pressedMoveDirs.has('up') || this.pressedMoveDirs.has('down'));
+      this.pressedMoveDirs.delete(moveDir.dir);
+      this.pressedArrowDirs.delete(moveDir.dir);
+      this.keyboardHoldShiftHeld = Boolean(event.shiftKey);
+
+      if (this.pressedMoveDirs.size === 0) {
+        if (this.keyboardHoldTimer !== null) {
+          clearTimeout(this.keyboardHoldTimer);
+          this.keyboardHoldTimer = null;
+        }
+        this.diagonalReleaseGraceUntilMs = 0;
+        if (this.keyboardChordTimer !== null) {
+          this.flushPendingKeyboardChord(false);
+        }
+      } else if (hadBothAxes) {
+        this.diagonalReleaseGraceUntilMs = Date.now() + 32;
+      }
+    }
     if (event.code === 'Space') {
       this.spacePressed.set(false);
     }
@@ -2927,6 +3402,7 @@ export class VttCanvasComponent implements AfterViewInit {
 
   @HostListener('window:blur')
   onWindowBlur(): void {
+    this.clearKeyboardMoveState();
     this.spacePressed.set(false);
     this.ctrlPressed.set(false);
     this.shiftPressed.set(false);
@@ -3085,33 +3561,101 @@ export class VttCanvasComponent implements AfterViewInit {
       const visMaxY = Math.min(layout.totalHeight, (vh - py) / z + step);
 
       if (visMinX < visMaxX && visMinY < visMaxY) {
-        const startColLine = Math.floor((visMinX - geom.offsetX) / step);
-        const endColLine = Math.ceil((visMaxX - geom.offsetX) / step);
-        const startRowLine = Math.floor((visMinY - geom.offsetY) / step);
-        const endRowLine = Math.ceil((visMaxY - geom.offsetY) / step);
+        const lineWidth = Math.max(0.75, 1.15 / z);
+        const mapLeft = layout.sceneX;
+        const mapRight = layout.sceneX + layout.innerWidth;
+        const mapTop = layout.sceneY;
+        const mapBottom = layout.sceneY + layout.innerHeight;
+        const mapVisMinX = Math.max(mapLeft, visMinX);
+        const mapVisMaxX = Math.min(mapRight, visMaxX);
+        const mapVisMinY = Math.max(mapTop, visMinY);
+        const mapVisMaxY = Math.min(mapBottom, visMaxY);
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, layout.totalWidth, layout.totalHeight);
-        ctx.clip();
+        if (mapVisMinX <= mapVisMaxX && mapVisMinY <= mapVisMaxY) {
+          const startColLine = Math.ceil(
+            (mapVisMinX - geom.offsetX - 0.01) / step
+          );
+          const endColLine = Math.floor(
+            (mapVisMaxX - geom.offsetX + 0.01) / step
+          );
+          const startRowLine = Math.ceil(
+            (mapVisMinY - geom.offsetY - 0.01) / step
+          );
+          const endRowLine = Math.floor(
+            (mapVisMaxY - geom.offsetY + 0.01) / step
+          );
 
-        ctx.beginPath();
-        for (let col = startColLine; col <= endColLine; col++) {
-          const x = geom.offsetX + col * step;
-          if (x < 0 || x > layout.totalWidth) continue;
-          ctx.moveTo(x, visMinY);
-          ctx.lineTo(x, visMaxY);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(mapLeft, mapTop, layout.innerWidth, layout.innerHeight);
+          ctx.clip();
+          ctx.beginPath();
+          for (let col = startColLine; col <= endColLine; col++) {
+            const x = geom.offsetX + col * step;
+            ctx.moveTo(x, mapVisMinY);
+            ctx.lineTo(x, mapVisMaxY);
+          }
+          for (let row = startRowLine; row <= endRowLine; row++) {
+            const y = geom.offsetY + row * step;
+            ctx.moveTo(mapVisMinX, y);
+            ctx.lineTo(mapVisMaxX, y);
+          }
+          ctx.strokeStyle = `rgba(215, 238, 234, ${Math.min(0.9, sc.grid_opacity)})`;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+          ctx.restore();
         }
-        for (let row = startRowLine; row <= endRowLine; row++) {
-          const y = geom.offsetY + row * step;
-          if (y < 0 || y > layout.totalHeight) continue;
-          ctx.moveTo(visMinX, y);
-          ctx.lineTo(visMaxX, y);
+
+        if (
+          layout.padding > 0 &&
+          this.vttStore.isGm() &&
+          !this.vttStore.previewPlayerVision()
+        ) {
+          const padColStart = Math.max(
+            0,
+            Math.floor((visMinX - geom.offsetX) / step)
+          );
+          const padColEnd = Math.min(
+            layout.gridCols - 1,
+            Math.floor((visMaxX - geom.offsetX) / step)
+          );
+          const padRowStart = Math.max(
+            0,
+            Math.floor((visMinY - geom.offsetY) / step)
+          );
+          const padRowEnd = Math.min(
+            layout.gridRows - 1,
+            Math.floor((visMaxY - geom.offsetY) / step)
+          );
+
+          ctx.save();
+          ctx.beginPath();
+          for (let col = padColStart; col <= padColEnd; col++) {
+            for (let row = padRowStart; row <= padRowEnd; row++) {
+              const insideMapGrid =
+                col >= layout.innerStartCol &&
+                col <= layout.innerEndCol &&
+                row >= layout.innerStartRow &&
+                row <= layout.innerEndRow;
+              if (
+                insideMapGrid ||
+                isHexStraddlingMapBorder({ col, row }, layout)
+              ) {
+                continue;
+              }
+              ctx.rect(
+                geom.offsetX + col * step,
+                geom.offsetY + row * step,
+                step,
+                step
+              );
+            }
+          }
+          ctx.strokeStyle = `rgba(168, 204, 198, ${Math.min(0.42, sc.grid_opacity * 0.5)})`;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+          ctx.restore();
         }
-        ctx.strokeStyle = `rgba(215, 238, 234, ${Math.min(0.9, sc.grid_opacity)})`;
-        ctx.lineWidth = Math.max(0.75, 1.15 / z);
-        ctx.stroke();
-        ctx.restore();
       }
     }
 

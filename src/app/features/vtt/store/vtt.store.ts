@@ -77,8 +77,10 @@ import {
   HexGridGeometry,
   SceneCanvasLayout,
   clampHexToBounds,
+  clampHexToSceneLayout,
   clampWorldPointToBounds,
   computeSceneCanvasLayout,
+  getHexRadius,
   getTokenDistanceFeet,
   getTokenWorldCenter,
   hexKey,
@@ -488,12 +490,26 @@ export class VttStore {
   readonly latestDiceThrow = signal<VttDiceThrowPayload | null>(null);
   readonly undoStack = signal<VttUndoEntry[]>([]);
   readonly isUndoing = signal(false);
+  readonly hasPendingKeyboardMoves = signal(false);
 
   private readonly seenDiceThrowIds = new Set<string>();
   private readonly inFlightTokenRotationPatches = new Map<
     string,
     { inFlight: boolean; queuedPatch: Partial<VttTokenModel> | null }
   >();
+  private readonly localTokenMoveGuardUntil = new Map<string, number>();
+  private readonly inFlightTokenUpdateChains = new Map<
+    string,
+    Promise<string | null>
+  >();
+  private pendingKeyboardMoveSession: {
+    sceneId: string;
+    previousExploredFog: VttExploredFog | undefined;
+    initialPatchesByTokenId: Map<string, Partial<VttTokenModel>>;
+    latestPatchesByTokenId: Map<string, Partial<VttTokenModel>>;
+    accumulatedFeetByTokenId: Map<string, number>;
+    timer: ReturnType<typeof setTimeout> | null;
+  } | null = null;
 
   readonly isGm = computed(() => {
     const camp = this.campaign();
@@ -1340,7 +1356,10 @@ export class VttStore {
   });
 
   readonly canUndo = computed<boolean>(
-    () => this.activeSceneUndoStack().length > 0 && !this.isUndoing()
+    () =>
+      (this.activeSceneUndoStack().length > 0 ||
+        this.hasPendingKeyboardMoves()) &&
+      !this.isUndoing()
   );
 
   readonly nextUndoLabel = computed<string | null>(() => {
@@ -1400,6 +1419,7 @@ export class VttStore {
   }
 
   async undoLastAction(): Promise<boolean> {
+    await this.flushPendingKeyboardMoves();
     const sc = this.activeScene();
     if (!sc || this.isUndoing()) return false;
 
@@ -1542,6 +1562,7 @@ export class VttStore {
       naturalImageWidth: scene?.map_image_url ? nat?.width ?? null : null,
       naturalImageHeight: scene?.map_image_url ? nat?.height ?? null : null,
       gridSizePx: scene?.grid_size_px ?? DEFAULT_VTT_GRID_SIZE_PX,
+      gridMode: scene?.grid_mode ?? 'square',
       padding: scene?.padding ?? DEFAULT_VTT_SCENE_PADDING,
       offsetX: scene?.grid_offset_x ?? 0,
       offsetY: scene?.grid_offset_y ?? 0,
@@ -1933,25 +1954,7 @@ export class VttStore {
             }
           },
           onTokenUpsert: (incomingToken) => {
-            if (
-              incomingToken.is_hidden &&
-              !this.isGm() &&
-              !this.canControlToken(incomingToken)
-            ) {
-              this.tokens.update((curr) =>
-                curr.filter((t) => t.id !== incomingToken.id)
-              );
-              this.pruneRemovedTokenFromSelection(incomingToken.id);
-              return;
-            }
-            this.tokens.update((curr) => {
-              const exists = curr.some((t) => t.id === incomingToken.id);
-              return exists
-                ? curr.map((t) =>
-                    t.id === incomingToken.id ? incomingToken : t
-                  )
-                : [...curr, incomingToken];
-            });
+            this.handleRealtimeTokenUpsert(incomingToken);
           },
           onTokenDelete: (tokenId) => {
             this.tokens.update((curr) =>
@@ -2035,7 +2038,64 @@ export class VttStore {
     }
   }
 
+  handleRealtimeTokenUpsert(incomingToken: VttTokenModel): void {
+    if (
+      incomingToken.is_hidden &&
+      !this.isGm() &&
+      !this.canControlToken(incomingToken)
+    ) {
+      this.tokens.update((curr) =>
+        curr.filter((t) => t.id !== incomingToken.id)
+      );
+      this.pruneRemovedTokenFromSelection(incomingToken.id);
+      return;
+    }
+
+    this.tokens.update((curr) => {
+      const exists = curr.some((t) => t.id === incomingToken.id);
+      if (!exists) {
+        return [...curr, incomingToken];
+      }
+      const guardActive =
+        Date.now() <
+          (this.localTokenMoveGuardUntil.get(incomingToken.id) ?? 0) ||
+        Boolean(
+          this.pendingKeyboardMoveSession?.latestPatchesByTokenId.has(
+            incomingToken.id
+          )
+        );
+      return curr.map((t) => {
+        if (t.id !== incomingToken.id) return t;
+        if (!guardActive) return incomingToken;
+        const mergedStats: VttNpcStats = {
+          ...(incomingToken.npc_stats ?? {}),
+          ...(t.npc_stats?.__unsnapped !== undefined
+            ? { __unsnapped: t.npc_stats.__unsnapped }
+            : {}),
+        };
+        return {
+          ...incomingToken,
+          x: t.x,
+          y: t.y,
+          q: t.q,
+          r: t.r,
+          world_x: t.world_x,
+          world_y: t.world_y,
+          current_ap: t.current_ap,
+          npc_stats: mergedStats,
+        };
+      });
+    });
+  }
+
   leaveRoom(): void {
+    if (this.pendingKeyboardMoveSession?.timer) {
+      clearTimeout(this.pendingKeyboardMoveSession.timer);
+    }
+    this.pendingKeyboardMoveSession = null;
+    this.hasPendingKeyboardMoves.set(false);
+    this.localTokenMoveGuardUntil.clear();
+    this.inFlightTokenUpdateChains.clear();
     this.vttService.unsubscribeChannel(this.realtimeChannel);
     this.realtimeChannel = null;
     this.participants.set([]);
@@ -2278,6 +2338,7 @@ export class VttStore {
       sceneWidthPx: DEFAULT_VTT_SCENE_WIDTH_PX,
       sceneHeightPx: DEFAULT_VTT_SCENE_HEIGHT_PX,
       gridSizePx: DEFAULT_VTT_GRID_SIZE_PX,
+      gridMode: 'square',
       padding: DEFAULT_VTT_SCENE_PADDING,
     });
 
@@ -2459,6 +2520,9 @@ export class VttStore {
     sceneId: string,
     patch: Partial<VttSceneModel>
   ): Promise<void> {
+    if (this.pendingKeyboardMoveSession && patch.explored_fog === undefined) {
+      await this.flushPendingKeyboardMoves();
+    }
     const prevScene = this.scenes().find((s) => s.id === sceneId) ?? null;
     const enrichedPatch: Partial<VttSceneModel> = { ...patch };
 
@@ -2466,6 +2530,7 @@ export class VttStore {
       prevScene !== null &&
       (patch.padding !== undefined ||
         patch.grid_size_px !== undefined ||
+        patch.grid_mode !== undefined ||
         patch.scene_width !== undefined ||
         patch.scene_height !== undefined ||
         patch.grid_offset_x !== undefined ||
@@ -2573,7 +2638,7 @@ export class VttStore {
         patch.grid_size_px !== undefined &&
         patch.grid_size_px !== prevScene.grid_size_px;
 
-      if (modeChanged || dx !== 0 || dy !== 0 || sizeChanged) {
+      if (modeChanged || layoutAffecting || dx !== 0 || dy !== 0 || sizeChanged) {
         await this.reconcileSceneTokensAfterLayoutChange(
           sceneId,
           prevScene.grid_mode,
@@ -2604,15 +2669,59 @@ export class VttStore {
 
     for (const tok of sceneToks) {
       const prevPt = getTokenWorldCenter(tok, oldLayout.geometry, prevMode);
+      const wasInsideMap =
+        prevPt.x >= oldLayout.sceneX - 0.5 &&
+        prevPt.x <= oldLayout.sceneX + oldLayout.innerWidth + 0.5 &&
+        prevPt.y >= oldLayout.sceneY - 0.5 &&
+        prevPt.y <= oldLayout.sceneY + oldLayout.innerHeight + 0.5;
+      const tokRadius = Math.max(
+        22,
+        Math.round(
+          getHexRadius(newLayout.gridSizePx) *
+            0.82 *
+            Math.min(2, Math.max(1, tok.size || 1))
+        )
+      );
+      const rawTargetPt = wasInsideMap
+        ? {
+            x: Math.max(
+              newLayout.sceneX + tokRadius,
+              Math.min(
+                newLayout.sceneX + newLayout.innerWidth - tokRadius,
+                prevPt.x + dx
+              )
+            ),
+            y: Math.max(
+              newLayout.sceneY + tokRadius,
+              Math.min(
+                newLayout.sceneY + newLayout.innerHeight - tokRadius,
+                prevPt.y + dy
+              )
+            ),
+          }
+        : { x: prevPt.x + dx, y: prevPt.y + dy };
       const shiftedPt = clampWorldPointToBounds(
-        { x: prevPt.x + dx, y: prevPt.y + dy },
-        bounds
+        rawTargetPt,
+        bounds,
+        tokRadius
       );
-      const snapped = clampHexToBounds(
+      const rawSnapped = clampHexToSceneLayout(
         worldPointToHex(shiftedPt, newLayout.geometry),
-        newLayout.geometry.gridWidth,
-        newLayout.geometry.gridHeight
+        newLayout,
+        shiftedPt
       );
+      const snapped = wasInsideMap
+        ? {
+            col: Math.max(
+              newLayout.innerStartCol,
+              Math.min(newLayout.innerEndCol, rawSnapped.col)
+            ),
+            row: Math.max(
+              newLayout.innerStartRow,
+              Math.min(newLayout.innerEndRow, rawSnapped.row)
+            ),
+          }
+        : rawSnapped;
       const axial = offsetToAxial(snapped.col, snapped.row);
 
       if (nextMode !== 'gridless') {
@@ -3148,25 +3257,10 @@ export class VttStore {
     const existingTokens = this.sceneTokens();
     const occupied = new Set(existingTokens.map((t) => `${t.x},${t.y}`));
 
-    const minInner = clampHexToBounds(
-      worldPointToHex(
-        { x: layout.sceneX + 32, y: layout.sceneY + 32 },
-        geom
-      ),
-      geom.gridWidth,
-      geom.gridHeight
-    );
-    const maxInner = clampHexToBounds(
-      worldPointToHex(
-        {
-          x: layout.sceneX + Math.max(48, layout.innerWidth - 32),
-          y: layout.sceneY + Math.max(48, layout.innerHeight - 32),
-        },
-        geom
-      ),
-      geom.gridWidth,
-      geom.gridHeight
-    );
+    const minCol = layout.innerStartCol;
+    const maxCol = layout.innerEndCol;
+    const minRow = layout.innerStartRow;
+    const maxRow = layout.innerEndRow;
 
     const insetX = Math.min(
       layout.innerWidth * 0.22,
@@ -3182,20 +3276,15 @@ export class VttStore {
             x: layout.sceneX + insetX,
             y: layout.sceneY + layout.innerHeight * 0.5,
           };
-    const anchorHex = clampHexToBounds(
-      worldPointToHex(anchorWorld, geom),
-      geom.gridWidth,
-      geom.gridHeight
-    );
+    const rawAnchorHex = worldPointToHex(anchorWorld, geom);
+    const anchorHex = {
+      col: Math.max(minCol, Math.min(maxCol, rawAnchorHex.col)),
+      row: Math.max(minRow, Math.min(maxRow, rawAnchorHex.row)),
+    };
 
     let chosenCol = anchorHex.col;
     let chosenRow = anchorHex.row;
     let found = false;
-
-    const minCol = Math.min(minInner.col, maxInner.col);
-    const maxCol = Math.max(minInner.col, maxInner.col);
-    const minRow = Math.min(minInner.row, maxInner.row);
-    const maxRow = Math.max(minInner.row, maxInner.row);
 
     for (
       let radius = 0;
@@ -3229,17 +3318,13 @@ export class VttStore {
       ) {
         for (let dc = -radius; dc <= radius && !found; dc++) {
           for (let dr = -radius; dr <= radius && !found; dr++) {
-            const col = anchorHex.col + dc;
-            const row = anchorHex.row + dr;
-            if (
-              col >= 0 &&
-              col < geom.gridWidth &&
-              row >= 0 &&
-              row < geom.gridHeight &&
-              !occupied.has(`${col},${row}`)
-            ) {
-              chosenCol = col;
-              chosenRow = row;
+            const rawCandidate = clampHexToSceneLayout(
+              { col: anchorHex.col + dc, row: anchorHex.row + dr },
+              layout
+            );
+            if (!occupied.has(`${rawCandidate.col},${rawCandidate.row}`)) {
+              chosenCol = rawCandidate.col;
+              chosenRow = rawCandidate.row;
               found = true;
             }
           }
@@ -3306,11 +3391,19 @@ export class VttStore {
     const layout = this.sceneLayout();
     const geom = layout.geometry;
     const bounds = { width: layout.totalWidth, height: layout.totalHeight };
-    const clampedWorld = clampWorldPointToBounds(placement.worldPt, bounds);
-    const clampedHex = clampHexToBounds(
+    const tokenMargin = Math.max(
+      22,
+      Math.round(getHexRadius(layout.gridSizePx) * 0.82)
+    );
+    const clampedWorld = clampWorldPointToBounds(
+      placement.worldPt,
+      bounds,
+      tokenMargin
+    );
+    const clampedHex = clampHexToSceneLayout(
       worldPointToHex(clampedWorld, geom),
-      geom.gridWidth,
-      geom.gridHeight
+      layout,
+      clampedWorld
     );
 
     if (sc.grid_mode === 'gridless') {
@@ -5947,6 +6040,34 @@ export class VttStore {
     }
   }
 
+  private enqueueSerializedTokenUpdate(
+    tokenId: string,
+    patch: Partial<VttTokenModel>,
+    fallbackToken: VttTokenModel
+  ): Promise<string | null> {
+    const prev =
+      this.inFlightTokenUpdateChains.get(tokenId) ?? Promise.resolve(null);
+    const next = prev
+      .catch(() => null)
+      .then(() => {
+        const latest =
+          this.tokens().find((t) => t.id === tokenId) ?? fallbackToken;
+        return this.vttService.updateToken(
+          tokenId,
+          patch,
+          this.needsMigration(),
+          latest
+        );
+      });
+    const tracked = next.finally(() => {
+      if (this.inFlightTokenUpdateChains.get(tokenId) === tracked) {
+        this.inFlightTokenUpdateChains.delete(tokenId);
+      }
+    });
+    this.inFlightTokenUpdateChains.set(tokenId, tracked);
+    return tracked;
+  }
+
   async patchToken(
     tokenId: string,
     patch: Partial<VttTokenModel>
@@ -5954,14 +6075,22 @@ export class VttStore {
     const existing = this.tokens().find((t) => t.id === tokenId);
     if (!existing) return;
 
+    if (
+      patch.x !== undefined ||
+      patch.y !== undefined ||
+      patch.world_x !== undefined ||
+      patch.world_y !== undefined
+    ) {
+      this.localTokenMoveGuardUntil.set(tokenId, Date.now() + 1200);
+    }
+
     this.tokens.update((curr) =>
       curr.map((t) => (t.id === tokenId ? { ...t, ...patch } : t))
     );
 
-    const err = await this.vttService.updateToken(
+    const err = await this.enqueueSerializedTokenUpdate(
       tokenId,
       patch,
-      this.needsMigration(),
       existing
     );
     if (err) {
@@ -6110,12 +6239,9 @@ export class VttStore {
     const sc = this.activeScene();
     if (!tok || !sc || !this.canControlToken(tok)) return;
 
-    const geom = this.gridGeometry();
-    const clamped = clampHexToBounds(
-      { col, row },
-      geom.gridWidth,
-      geom.gridHeight
-    );
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const clamped = clampHexToSceneLayout({ col, row }, layout);
     const hasWaypoints = Boolean(
       intermediateHexes && intermediateHexes.length > 0
     );
@@ -6218,11 +6344,19 @@ export class VttStore {
       width: layout.totalWidth,
       height: layout.totalHeight,
     };
-    const clampedWorld = clampWorldPointToBounds(worldPt, bounds);
-    const nearestHex = clampHexToBounds(
+    const tokMargin = Math.max(
+      22,
+      Math.round(
+        getHexRadius(layout.gridSizePx) *
+          0.82 *
+          Math.min(2, Math.max(1, tok.size || 1))
+      )
+    );
+    const clampedWorld = clampWorldPointToBounds(worldPt, bounds, tokMargin);
+    const nearestHex = clampHexToSceneLayout(
       worldPointToHex(clampedWorld, geom),
-      geom.gridWidth,
-      geom.gridHeight
+      layout,
+      clampedWorld
     );
     const hasWaypoints = Boolean(
       intermediateWorldPts && intermediateWorldPts.length > 0
@@ -6369,11 +6503,23 @@ export class VttStore {
       if (!tok || !this.canControlToken(tok)) continue;
 
       if (item.targetWorld) {
-        const clampedWorld = clampWorldPointToBounds(item.targetWorld, bounds);
-        const nearestHex = clampHexToBounds(
+        const tokMargin = Math.max(
+          22,
+          Math.round(
+            getHexRadius(layout.gridSizePx) *
+              0.82 *
+              Math.min(2, Math.max(1, tok.size || 1))
+          )
+        );
+        const clampedWorld = clampWorldPointToBounds(
+          item.targetWorld,
+          bounds,
+          tokMargin
+        );
+        const nearestHex = clampHexToSceneLayout(
           worldPointToHex(clampedWorld, geom),
-          geom.gridWidth,
-          geom.gridHeight
+          layout,
+          clampedWorld
         );
         if (
           tok.world_x === clampedWorld.x &&
@@ -6426,11 +6572,7 @@ export class VttStore {
         });
         forwardPatches.push({ tokenId: tok.id, patch });
       } else if (item.targetHex) {
-        const clamped = clampHexToBounds(
-          item.targetHex,
-          geom.gridWidth,
-          geom.gridHeight
-        );
+        const clamped = clampHexToSceneLayout(item.targetHex, layout);
         if (
           clamped.col === tok.x &&
           clamped.row === tok.y &&
@@ -6501,6 +6643,283 @@ export class VttStore {
       forwardPatches.map((entry) => this.patchToken(entry.tokenId, entry.patch))
     );
     this.syncExploredFogFromObservers();
+  }
+
+  moveTokensKeyboardOptimistic(
+    moves: readonly BatchTokenMoveInput[],
+    worldBoundsOverride?: { width: number; height: number }
+  ): void {
+    if (moves.length === 0) return;
+    const sc = this.activeScene();
+    if (!sc) return;
+
+    if (
+      this.pendingKeyboardMoveSession &&
+      this.pendingKeyboardMoveSession.sceneId !== sc.id
+    ) {
+      void this.flushPendingKeyboardMoves();
+    }
+
+    const layout = this.sceneLayout();
+    const geom = layout.geometry;
+    const bounds = worldBoundsOverride ?? {
+      width: layout.totalWidth,
+      height: layout.totalHeight,
+    };
+    const unsnappedOnGrid = sc.grid_mode !== 'gridless';
+
+    const stepUpdates = new Map<
+      string,
+      {
+        previousTokenPatch: Partial<VttTokenModel>;
+        patch: Partial<VttTokenModel>;
+        distanceFeet: number;
+        freeOverride: boolean;
+        moveFeet: number;
+      }
+    >();
+
+    for (const item of moves) {
+      const tok = this.sceneTokens().find((t) => t.id === item.tokenId);
+      if (!tok || (!this.isGm() && !this.canControlToken(tok))) continue;
+
+      if (item.targetWorld) {
+        const tokMargin = Math.max(
+          22,
+          Math.round(
+            getHexRadius(layout.gridSizePx) *
+              0.82 *
+              Math.min(2, Math.max(1, tok.size || 1))
+          )
+        );
+        const clampedWorld = clampWorldPointToBounds(
+          item.targetWorld,
+          bounds,
+          tokMargin
+        );
+        const nearestHex = clampHexToSceneLayout(
+          worldPointToHex(clampedWorld, geom),
+          layout,
+          clampedWorld
+        );
+        if (
+          tok.world_x === clampedWorld.x &&
+          tok.world_y === clampedWorld.y &&
+          tok.x === nearestHex.col &&
+          tok.y === nearestHex.row &&
+          Boolean(tok.npc_stats?.__unsnapped) === unsnappedOnGrid
+        ) {
+          continue;
+        }
+
+        const axial = offsetToAxial(nearestHex.col, nearestHex.row);
+        const patch: Partial<VttTokenModel> = {
+          x: nearestHex.col,
+          y: nearestHex.row,
+          q: axial.q,
+          r: axial.r,
+          world_x: clampedWorld.x,
+          world_y: clampedWorld.y,
+          ...(unsnappedOnGrid
+            ? { npc_stats: { ...tok.npc_stats, __unsnapped: true } }
+            : {}),
+        };
+
+        stepUpdates.set(tok.id, {
+          previousTokenPatch: {
+            x: tok.x,
+            y: tok.y,
+            q: tok.q,
+            r: tok.r,
+            world_x: tok.world_x,
+            world_y: tok.world_y,
+            current_ap: tok.current_ap,
+            npc_stats: { ...tok.npc_stats },
+          },
+          patch,
+          distanceFeet: Math.max(0, item.distanceFeet),
+          freeOverride: Boolean(item.freeOverride),
+          moveFeet: Math.max(5, tok.move_feet),
+        });
+      } else if (item.targetHex) {
+        const clamped = clampHexToSceneLayout(item.targetHex, layout);
+        if (
+          clamped.col === tok.x &&
+          clamped.row === tok.y &&
+          (tok.world_x === null || tok.world_x === undefined) &&
+          !tok.npc_stats?.__unsnapped
+        ) {
+          continue;
+        }
+
+        const axial = offsetToAxial(clamped.col, clamped.row);
+        const patch: Partial<VttTokenModel> = {
+          x: clamped.col,
+          y: clamped.row,
+          q: axial.q,
+          r: axial.r,
+          world_x: null,
+          world_y: null,
+          ...(tok.npc_stats?.__unsnapped
+            ? { npc_stats: { ...tok.npc_stats, __unsnapped: false } }
+            : {}),
+        };
+
+        stepUpdates.set(tok.id, {
+          previousTokenPatch: {
+            x: tok.x,
+            y: tok.y,
+            q: tok.q,
+            r: tok.r,
+            world_x: tok.world_x,
+            world_y: tok.world_y,
+            current_ap: tok.current_ap,
+            npc_stats: { ...tok.npc_stats },
+          },
+          patch,
+          distanceFeet: Math.max(0, item.distanceFeet),
+          freeOverride: Boolean(item.freeOverride),
+          moveFeet: Math.max(5, tok.move_feet),
+        });
+      }
+    }
+
+    if (stepUpdates.size === 0) return;
+
+    let session = this.pendingKeyboardMoveSession;
+    if (!session) {
+      session = {
+        sceneId: sc.id,
+        previousExploredFog: cloneExploredFog(sc.explored_fog),
+        initialPatchesByTokenId: new Map(),
+        latestPatchesByTokenId: new Map(),
+        accumulatedFeetByTokenId: new Map(),
+        timer: null,
+      };
+      this.pendingKeyboardMoveSession = session;
+    }
+
+    const guardExpiresAt = Date.now() + 1500;
+    const patchesToApplyNow = new Map<string, Partial<VttTokenModel>>();
+
+    for (const [tokenId, upd] of stepUpdates.entries()) {
+      if (!session.initialPatchesByTokenId.has(tokenId)) {
+        session.initialPatchesByTokenId.set(tokenId, upd.previousTokenPatch);
+      }
+      const nextFeet =
+        (session.accumulatedFeetByTokenId.get(tokenId) ?? 0) + upd.distanceFeet;
+      session.accumulatedFeetByTokenId.set(tokenId, nextFeet);
+
+      const finalStepPatch: Partial<VttTokenModel> = { ...upd.patch };
+      if (
+        sc.combat_active &&
+        this.enforceApOnMove() &&
+        !upd.freeOverride &&
+        nextFeet > 0
+      ) {
+        const initialAp =
+          session.initialPatchesByTokenId.get(tokenId)?.current_ap ?? 0;
+        const moveActionsNeeded = Math.max(
+          1,
+          Math.ceil(nextFeet / upd.moveFeet)
+        );
+        finalStepPatch.current_ap = Math.max(0, initialAp - moveActionsNeeded);
+      }
+
+      const mergedLatest: Partial<VttTokenModel> = {
+        ...(session.latestPatchesByTokenId.get(tokenId) ?? {}),
+        ...finalStepPatch,
+      };
+      session.latestPatchesByTokenId.set(tokenId, mergedLatest);
+      patchesToApplyNow.set(tokenId, finalStepPatch);
+      this.localTokenMoveGuardUntil.set(tokenId, guardExpiresAt);
+    }
+
+    this.tokens.update((curr) =>
+      curr.map((tok) => {
+        const p = patchesToApplyNow.get(tok.id);
+        return p ? { ...tok, ...p } : tok;
+      })
+    );
+    this.hasPendingKeyboardMoves.set(true);
+
+    if (session.timer !== null) {
+      clearTimeout(session.timer);
+    }
+    session.timer = setTimeout(() => {
+      void this.flushPendingKeyboardMoves();
+    }, 140);
+  }
+
+  async flushPendingKeyboardMoves(): Promise<void> {
+    const session = this.pendingKeyboardMoveSession;
+    if (!session) return;
+
+    if (session.timer !== null) {
+      clearTimeout(session.timer);
+      session.timer = null;
+    }
+    this.pendingKeyboardMoveSession = null;
+    this.hasPendingKeyboardMoves.set(false);
+
+    const undoPatches = Array.from(
+      session.initialPatchesByTokenId.entries()
+    ).map(([tokenId, previousTokenPatch]) => ({
+      tokenId,
+      previousTokenPatch,
+    }));
+    const forwardEntries = Array.from(session.latestPatchesByTokenId.entries());
+    if (forwardEntries.length === 0) return;
+
+    let label = `Move ${forwardEntries.length} Tokens`;
+    if (forwardEntries.length === 1) {
+      const onlyId = forwardEntries[0][0];
+      const tokName =
+        this.tokens().find((t) => t.id === onlyId)?.name ?? 'Token';
+      const feet = Math.round(
+        session.accumulatedFeetByTokenId.get(onlyId) ?? 0
+      );
+      label = feet > 0 ? `Move ${tokName} (${feet} ft)` : `Move ${tokName}`;
+    }
+
+    const coalesceKey = `kbd-move:${Array.from(
+      session.initialPatchesByTokenId.keys()
+    )
+      .sort()
+      .join(',')}`;
+
+    this.pushUndoEntry(session.sceneId, label, {
+      kind: 'tokens_batch',
+      patches: undoPatches,
+      previousExploredFog: session.previousExploredFog,
+      selectedTokenIdsAfterUndo: [...this.selectedTokenIds()],
+      coalesceKey,
+    });
+
+    await Promise.all(
+      forwardEntries.map(async ([tokenId, patch]) => {
+        const currentTok = this.tokens().find((t) => t.id === tokenId);
+        if (!currentTok) return;
+        this.localTokenMoveGuardUntil.set(tokenId, Date.now() + 1200);
+        const err = await this.enqueueSerializedTokenUpdate(
+          tokenId,
+          patch,
+          currentTok
+        );
+        if (err) {
+          this.notifications.error('Token Sync Error', err);
+          return;
+        }
+        const tokenSheet = this.resolveCharacterForToken(currentTok);
+        if (tokenSheet && patch.current_ap !== undefined) {
+          await this.syncTokenVitalsToCharacter(currentTok, tokenSheet, patch);
+        }
+      })
+    );
+
+    if (this.activeScene()?.id === session.sceneId) {
+      this.syncExploredFogFromObservers();
+    }
   }
 
   private async patchTokenCoalesced(

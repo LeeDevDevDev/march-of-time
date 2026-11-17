@@ -3658,8 +3658,8 @@
                   <input
                     type="range"
                     name="editMapSizePxRange"
-                    min="30"
-                    max="250"
+                    min="20"
+                    max="400"
                     step="2"
                     [ngModel]="em.grid_size_px"
                     (ngModelChange)="updateEditMapField('grid_size_px', $event)"
@@ -3668,7 +3668,7 @@
                 </div>
 
                 <p class="text-[11px] text-[#8AB0AB]">
-                  Pixels per 5 ft square tile (default {{ defaultGridSizePx }} px). Grid counts calculate automatically to cover 100% of the scene and padding.
+                  Pixels per 5 ft square tile (default {{ defaultGridSizePx }} px). Only complete tiles inside the map are active so tokens never hang outside map edges.
                 </p>
               </div>
 
@@ -3769,7 +3769,10 @@
                       @if (em.grid_mode === 'gridless') {
                         Gridless Scale: {{ dl.gridSizePx }} px = 5 ft
                       } @else {
-                        Auto-Calculated Grid: {{ dl.gridCols }} &times; {{ dl.gridRows }} tiles
+                        Map Grid: {{ dl.innerCols }} &times; {{ dl.innerRows }} full tiles
+                        @if (dl.padding > 0) {
+                          <span class="font-normal text-[#8AB0AB]">({{ dl.gridCols }} &times; {{ dl.gridRows }} w/ padding)</span>
+                        }
                       }
                     </span>
                     <span class="text-[#5EEAD4]">

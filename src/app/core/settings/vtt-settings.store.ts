@@ -255,7 +255,7 @@ export const DEFAULT_VTT_HOTKEYS: VttHotkeyMap = {
   tool_select: 'v',
   tool_ruler: 'r',
   tool_pan: 'h',
-  tool_wall: 'w',
+  tool_wall: 'b',
   tool_light: 'l',
   tool_fog: 'f',
   fit_scene: 'c',
@@ -267,7 +267,8 @@ export const VTT_HOTKEY_META: VttHotkeyBindingMeta[] = [
   {
     action: 'tool_select',
     label: 'Select & Move Tool',
-    description: 'Select tokens and drag to move (hold Ctrl to chain moves).',
+    description:
+      'Select tokens and move via drag or WASD / Arrow keys (hold Ctrl to chain moves).',
     defaultCombo: DEFAULT_VTT_HOTKEYS.tool_select,
     gmOnly: false,
   },
