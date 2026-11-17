@@ -2516,14 +2516,22 @@ export class VttRoomComponent {
         : stat === 'current_sp'
           ? tok.max_sp
           : tok.max_ap;
-    const next = Math.max(0, Math.min(maxVal, tok[stat] + delta));
+    const prev = tok[stat];
+    const next = Math.max(0, Math.min(maxVal, prev + delta));
+    if (next === prev) return;
     const statLabel =
       stat === 'current_hp' ? 'HP' : stat === 'current_sp' ? 'SP' : 'AP';
-    void this.vttStore.recordablePatchToken(
-      tok.id,
-      { [stat]: next },
-      `Adjust ${tok.name} ${statLabel}`
-    );
+    void this.vttStore
+      .recordablePatchToken(
+        tok.id,
+        { [stat]: next },
+        `Adjust ${tok.name} ${statLabel}`
+      )
+      .then(() => {
+        if (stat === 'current_ap') {
+          void this.vttStore.logManualApAdjustment(tok, prev, next);
+        }
+      });
   }
 
   onManualAttackInputChange(val: string | number | null): void {

@@ -330,6 +330,8 @@ export interface PerkRuleHooks {
 
   __art_upgrade?: CombatArtUpgradeSpec;
   __weapon_req?: CombatArtWeaponRequirement;
+  __range_mode?: CombatArtRangeMode;
+  __custom_range_feet?: number;
   __icon?: string;
   __icon_color?: string;
   __icon_tint_custom?: boolean;
@@ -343,6 +345,11 @@ export interface PerkRuleHooks {
   __canvas_y?: number;
 }
 
+export type CombatArtRangeMode =
+  | 'melee_reach'
+  | 'weapon_thrown'
+  | 'custom_feet';
+
 export type PerkUnlockMode = 'any' | 'all';
 
 export type EditableRuleHookKey = Exclude<
@@ -350,6 +357,8 @@ export type EditableRuleHookKey = Exclude<
   | 'disallow_defense'
   | '__art_upgrade'
   | '__weapon_req'
+  | '__range_mode'
+  | '__custom_range_feet'
   | '__icon'
   | '__icon_color'
   | '__icon_tint_custom'
@@ -2113,8 +2122,66 @@ export function formatRuleHookBadges(hooks: PerkRuleHooks | undefined | null): s
   if (hooks.bonus_block_mod) {
     badges.push(`+${hooks.bonus_block_mod} Block`);
   }
+  if (hooks.__range_mode === 'custom_feet' && hooks.__custom_range_feet) {
+    badges.push(`Range ${Math.round(hooks.__custom_range_feet)} ft`);
+  } else if (hooks.__range_mode === 'weapon_thrown') {
+    badges.push('Allows Thrown Range');
+  } else if (hooks.__range_mode === 'melee_reach') {
+    badges.push('Melee Reach Only');
+  }
 
   return badges;
+}
+
+export function resolveCombatArtRangeMode(
+  node: Pick<PerkNodeModel, 'rule_hooks'> | null | undefined
+): CombatArtRangeMode {
+  const explicit = node?.rule_hooks?.__range_mode;
+  if (
+    explicit === 'melee_reach' ||
+    explicit === 'weapon_thrown' ||
+    explicit === 'custom_feet'
+  ) {
+    return explicit;
+  }
+  const req = normalizeWeaponRequirement(node?.rule_hooks?.__weapon_req);
+  if (req?.requires_thrown) {
+    return 'weapon_thrown';
+  }
+  if (
+    req?.categories?.length === 1 &&
+    req.categories[0].toLowerCase() === 'ranged'
+  ) {
+    return 'weapon_thrown';
+  }
+  return 'melee_reach';
+}
+
+export function computeCombatArtReachFeet(
+  node: Pick<PerkNodeModel, 'rule_hooks'> | null | undefined,
+  activeWeapon?: WeaponModel | null
+): number {
+  const mode = resolveCombatArtRangeMode(node);
+  if (mode === 'custom_feet') {
+    const raw = Number(node?.rule_hooks?.__custom_range_feet ?? 5);
+    return Number.isFinite(raw) && raw > 0 ? Math.max(5, Math.round(raw)) : 5;
+  }
+  if (!activeWeapon) {
+    return 5;
+  }
+  const isPureRanged = (activeWeapon.category ?? '').toLowerCase() === 'ranged';
+  const baseReachFeet = Math.max(
+    5,
+    Math.round((activeWeapon.reach_tiles ?? 1) * 5)
+  );
+  if (mode === 'weapon_thrown') {
+    const thrownFeet = Math.max(
+      0,
+      Math.round((activeWeapon.thrown_range_tiles ?? 0) * 5)
+    );
+    return Math.max(baseReachFeet, thrownFeet);
+  }
+  return isPureRanged ? 5 : baseReachFeet;
 }
 
 function formatOrList(items: string[]): string {

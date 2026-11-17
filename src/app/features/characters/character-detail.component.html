@@ -792,7 +792,7 @@
                             }
                           </div>
                           <div class="font-mono-num text-xs text-[var(--mot-muted)]">
-                            Roll <strong class="text-[var(--mot-text)]">{{ formatRollFormulaFromMod(cArtMod) }}</strong> &middot; Damage <strong class="text-[var(--mot-text)]">{{ cArtDmg }} DMG</strong>
+                            Roll <strong class="text-[var(--mot-text)]">{{ formatRollFormulaFromMod(cArtMod) }}</strong> &middot; Damage <strong class="text-[var(--mot-text)]">{{ cArtDmg }} DMG</strong> &middot; Reach <strong class="text-[var(--mot-text)]">{{ cArt.reachFeet }} ft</strong>
                           </div>
                           @if (!cArt.meetsWeaponRequirement && cArt.weaponRequirementUnmetReason) {
                             <div class="font-mono-num text-xs font-semibold text-[#F59E0B]">

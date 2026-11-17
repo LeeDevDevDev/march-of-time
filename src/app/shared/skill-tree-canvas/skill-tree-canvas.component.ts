@@ -52,6 +52,12 @@ export interface PositionedSkillNode {
   incomingCount: number;
 }
 
+export interface SkillNodeContextMenuState {
+  nodeId: string;
+  screenX: number;
+  screenY: number;
+}
+
 export interface RenderedRouteCurve {
   id: string;
   sourceId: string;
@@ -143,6 +149,7 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
   readonly selectedNodeId = signal<string | null>(null);
   readonly hoveredRouteId = signal<string | null>(null);
   readonly selectedRouteId = signal<string | null>(null);
+  readonly nodeContextMenu = signal<SkillNodeContextMenuState | null>(null);
   readonly targetMoveTreeId = signal<string>('');
   readonly inspectorAddParentId = signal<string>('');
   readonly inspectorAddChildId = signal<string>('');
@@ -441,14 +448,59 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
         this.targetMoveTreeId.set('');
         this.selectedRouteId.set(null);
         this.hoveredRouteId.set(null);
+        this.nodeContextMenu.set(null);
         setTimeout(() => this.resetCamera(), 0);
       }
     }
   }
 
+  readonly contextMenuItem = computed<PositionedSkillNode | null>(() => {
+    const ctx = this.nodeContextMenu();
+    if (!ctx) return null;
+    return this.positionedById().get(ctx.nodeId) ?? null;
+  });
+
+  closeNodeContextMenu(): void {
+    if (this.nodeContextMenu() !== null) {
+      this.nodeContextMenu.set(null);
+    }
+  }
+
+  onNodeDoubleClick(event: MouseEvent, item: PositionedSkillNode): void {
+    if (this.mode !== 'admin') return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.movingNodeId.set(null);
+    this.liveNodePosition.set(null);
+    this.closeNodeContextMenu();
+    this.selectedNodeId.set(item.node.id);
+    this.selectedRouteId.set(null);
+    this.editNode.emit(item.node);
+  }
+
+  onNodeContextMenu(event: MouseEvent, item: PositionedSkillNode): void {
+    if (this.mode !== 'admin') return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.movingNodeId.set(null);
+    this.liveNodePosition.set(null);
+    this.selectedNodeId.set(item.node.id);
+    this.selectedRouteId.set(null);
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const screenX = Math.max(12, Math.min(vw - 244, Math.round(event.clientX)));
+    const screenY = Math.max(12, Math.min(vh - 280, Math.round(event.clientY)));
+    this.nodeContextMenu.set({
+      nodeId: item.node.id,
+      screenX,
+      screenY,
+    });
+  }
+
   selectNodeById(nodeId: string): void {
     this.selectedNodeId.set(nodeId);
     this.selectedRouteId.set(null);
+    this.closeNodeContextMenu();
   }
 
   private clientToWorld(clientX: number, clientY: number): SkillGraphPoint {
@@ -487,6 +539,7 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
   }
 
   onCanvasPointerDown(event: PointerEvent): void {
+    this.closeNodeContextMenu();
     if (event.button !== 0) return;
     this.selectedRouteId.set(null);
     this.isPanning.set(true);
@@ -499,6 +552,7 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
 
   onNodePointerDown(event: PointerEvent, item: PositionedSkillNode): void {
     if (event.button !== 0) return;
+    this.closeNodeContextMenu();
     event.stopPropagation();
     this.selectedRouteId.set(null);
 
@@ -602,8 +656,19 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
     }
   }
 
+  @HostListener('document:pointerdown', ['$event'])
+  onDocumentPointerDown(event: PointerEvent): void {
+    if (this.nodeContextMenu() === null) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-skill-node-context-menu="true"]')) {
+      return;
+    }
+    this.closeNodeContextMenu();
+  }
+
   @HostListener('document:keydown.escape')
   onEscapeCancelWire(): void {
+    this.closeNodeContextMenu();
     if (this.connectingFromNodeId()) {
       this.connectingFromNodeId.set(null);
       this.wireCursorWorld.set(null);
@@ -613,9 +678,52 @@ export class SkillTreeCanvasComponent implements OnChanges, AfterViewInit {
   }
 
   onCanvasWheel(event: WheelEvent): void {
+    this.closeNodeContextMenu();
     event.preventDefault();
     const delta = event.deltaY < 0 ? 0.1 : -0.1;
     this.adjustZoom(delta);
+  }
+
+  ctxEditNode(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    this.editNode.emit(node);
+  }
+
+  ctxBranchNode(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    this.branchChildNode.emit(node);
+  }
+
+  ctxAttachExisting(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    this.attachExistingNode.emit(node);
+  }
+
+  ctxMakeStartingNode(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    if (!node.tree_id) return;
+    void this.compendiumStore.moveOrReparentPerkNode(
+      node.id,
+      node.tree_id,
+      null
+    );
+  }
+
+  ctxToggleUnlockMode(item: PositionedSkillNode): void {
+    this.closeNodeContextMenu();
+    const nextMode: PerkUnlockMode =
+      item.unlockMode === 'all' ? 'any' : 'all';
+    void this.compendiumStore.setNodeUnlockMode(item.node.id, nextMode);
+  }
+
+  ctxRemoveFromTree(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    this.onRemoveFromTree(node);
+  }
+
+  ctxDeleteNode(node: PerkNodeModel): void {
+    this.closeNodeContextMenu();
+    this.deleteNode.emit(node);
   }
 
   adjustZoom(delta: number): void {

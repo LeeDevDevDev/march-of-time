@@ -32,7 +32,7 @@
       </div>
       <span class="text-xs text-[#8AB0AB]">
         @if (mode === 'admin') {
-          Drag nodes to arrange · Drag bottom point ● to connect routes · Click + to branch
+          Drag to arrange · Double-click to edit · Right-click for menu · Drag ● to connect
         } @else {
           Drag background to pan · Scroll to zoom · Click any node icon to inspect
         }
@@ -353,7 +353,10 @@
             }
 
             <div
+              [attr.data-skill-tree-node]="item.node.id"
               (pointerdown)="onNodePointerDown($event, item)"
+              (dblclick)="onNodeDoubleClick($event, item)"
+              (contextmenu)="onNodeContextMenu($event, item)"
               class="group flex w-40 flex-col items-center text-center focus:outline-none"
               [class.cursor-grab]="mode === 'admin' && movingNodeId() !== item.node.id"
               [class.cursor-grabbing]="mode === 'admin' && movingNodeId() === item.node.id"
@@ -1040,4 +1043,120 @@
       </div>
     }
   </aside>
+
+  @if (mode === 'admin' && nodeContextMenu(); as ctx) {
+    @if (contextMenuItem(); as ctxItem) {
+      <div
+        data-skill-node-context-menu="true"
+        role="menu"
+        [attr.aria-label]="'Actions for ' + ctxItem.node.name"
+        class="fixed z-50 w-56 overflow-hidden rounded-xl border border-[#355650] bg-[#0D1615]/98 p-1.5 text-xs text-[#EBF5F3] shadow-2xl backdrop-blur-md"
+        [style.left.px]="ctx.screenX"
+        [style.top.px]="ctx.screenY"
+        (contextmenu)="$event.preventDefault()"
+      >
+        <div class="flex items-center justify-between gap-2 border-b border-[#243B37] px-2.5 py-1.5">
+          <span class="truncate font-display text-xs font-bold text-white">
+            {{ ctxItem.node.name }}
+          </span>
+          <span class="shrink-0 rounded border border-[#243B37] bg-[#122220] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#8AB0AB]">
+            {{
+              ctxItem.node.node_type === 'combat_art'
+                ? 'Art'
+                : isCombatArtUpgradeNode(ctxItem.node)
+                  ? 'Upgrade'
+                  : 'Passive'
+            }}
+          </span>
+        </div>
+
+        <div class="mt-1 space-y-0.5">
+          <button
+            type="button"
+            role="menuitem"
+            data-node-ctx-action="edit"
+            (click)="ctxEditNode(ctxItem.node)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:bg-[#182E2B] hover:text-white"
+          >
+            <span>Edit Node</span>
+            <span class="font-mono-num text-[10px] font-normal text-[#8AB0AB]">DblClick</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            data-node-ctx-action="branch"
+            (click)="ctxBranchNode(ctxItem.node)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FF8C5A] transition-colors hover:bg-[#182E2B] hover:text-white"
+          >
+            <span>+ Branch New Node</span>
+          </button>
+
+          @if (hasAttachableAbilities()) {
+            <button
+              type="button"
+              role="menuitem"
+              data-node-ctx-action="attach"
+              (click)="ctxAttachExisting(ctxItem.node)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:bg-[#182E2B] hover:text-white"
+            >
+              <span>+ Attach Existing Ability</span>
+            </button>
+          }
+
+          @if (ctxItem.incomingCount > 0) {
+            <button
+              type="button"
+              role="menuitem"
+              data-node-ctx-action="make-starting"
+              (click)="ctxMakeStartingNode(ctxItem.node)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#EBF5F3] transition-colors hover:bg-[#182E2B] hover:text-white"
+            >
+              <span>Make Starting Node</span>
+            </button>
+          }
+
+          @if (ctxItem.incomingCount >= 2) {
+            <button
+              type="button"
+              role="menuitem"
+              data-node-ctx-action="toggle-unlock-mode"
+              (click)="ctxToggleUnlockMode(ctxItem)"
+              class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#38B29A] transition-colors hover:bg-[#182E2B] hover:text-white"
+            >
+              <span>
+                {{
+                  ctxItem.unlockMode === 'all'
+                    ? 'Unlock via ANY Route (OR)'
+                    : 'Require ALL Routes (AND)'
+                }}
+              </span>
+            </button>
+          }
+
+          <div class="my-1 border-t border-[#243B37]"></div>
+
+          <button
+            type="button"
+            role="menuitem"
+            data-node-ctx-action="remove-from-tree"
+            (click)="ctxRemoveFromTree(ctxItem.node)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#FBBF24] transition-colors hover:bg-[#182E2B] hover:text-[#FDE68A]"
+          >
+            <span>Remove from Tree (Keep Standalone)</span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            data-node-ctx-action="delete"
+            (click)="ctxDeleteNode(ctxItem.node)"
+            class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-semibold text-[#F26464] transition-colors hover:bg-[#311416] hover:text-[#FDA4AF]"
+          >
+            <span>Delete Ability</span>
+          </button>
+        </div>
+      </div>
+    }
+  }
 </div>

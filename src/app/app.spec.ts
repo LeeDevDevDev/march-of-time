@@ -24,6 +24,7 @@ import {
   buildSkillTreeHierarchy,
   canConnectPerkRoute,
   compileArtUpgradeSpec,
+  computeCombatArtReachFeet,
   computePerkNodeTier,
   evaluateWeaponRequirement,
   formatArtUpgradeBadges,
@@ -41,6 +42,7 @@ import {
   normalizePerkNodesTiers,
   normalizeWeaponRequirement,
   pruneUnreachableUnlockedPerks,
+  resolveCombatArtRangeMode,
   resolveSkillGraphLayout,
   rowsToHooksObject,
   suggestNewNodeCanvasPosition,
@@ -210,6 +212,7 @@ import {
   KeywordTooltipService,
   computeKeywordTooltipPosition,
 } from './shared/keyword-text/keyword-tooltip.service';
+import { SkillTreeCanvasComponent } from './shared/skill-tree-canvas/skill-tree-canvas.component';
 
 describe('App', () => {
   beforeEach(async () => {
@@ -11093,12 +11096,44 @@ describe('App', () => {
     ).toBeTruthy();
     expect(hudEl!.textContent).toContain('Silverleaf Rapier');
     expect(hudEl!.textContent).toContain('Whisper Dagger');
-    expect(hudEl!.textContent).toContain('Flashing Lunge');
+    expect(hudEl!.textContent).not.toContain('Flashing Lunge');
+    expect(hudEl!.textContent).toContain('Combat Arts');
     expect(hudEl!.textContent).toContain('Guard');
     expect(hudEl!.textContent).toContain('Parry');
     expect(hudEl!.textContent).toContain('Dodge');
     expect(hudEl!.textContent).toContain('Move');
     expect(hudEl!.textContent).toContain('Aim');
+
+    const preCombatPip = hudEl!.querySelector(
+      'button[aria-label="Set AP to 2"]'
+    ) as HTMLButtonElement | null;
+    expect(preCombatPip).toBeTruthy();
+    preCombatPip!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      vttStore.logs().some((l) => l.title.includes('AP Adjusted'))
+    ).toBe(false);
+    const restorePreCombatPip = hudEl!.querySelector(
+      'button[aria-label="Set AP to 4"]'
+    ) as HTMLButtonElement;
+    restorePreCombatPip.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const artsTileBtn = hudEl!.querySelector(
+      'button[data-hud-tile="combat-arts"]'
+    ) as HTMLButtonElement | null;
+    expect(artsTileBtn).toBeTruthy();
+    artsTileBtn!.click();
+    fixture.detectChanges();
+    const artsFlyout = hudEl!.querySelector(
+      '[data-hud-flyout="arts"]'
+    ) as HTMLElement | null;
+    expect(artsFlyout).toBeTruthy();
+    expect(artsFlyout!.textContent).toContain('Flashing Lunge');
+    artsTileBtn!.click();
+    fixture.detectChanges();
 
     const hpBarBtn = hudEl!.querySelector(
       'button[data-hud-vital-bar="current_hp"]'
@@ -11238,6 +11273,54 @@ describe('App', () => {
     expect(vttStore.selectedTokenCharacter()!.active_weapon_slot).toBe(2);
     expect(vttStore.tokens()[0].current_ap).toBe(3);
 
+    expect(resolveCombatArtRangeMode(lungeArt)).toBe('melee_reach');
+    expect(computeCombatArtReachFeet(lungeArt, throwingDagger)).toBe(5);
+    expect(
+      computeCombatArtReachFeet(
+        { rule_hooks: { __range_mode: 'weapon_thrown' } },
+        throwingDagger
+      )
+    ).toBe(20);
+    expect(
+      computeCombatArtReachFeet(
+        {
+          rule_hooks: {
+            __range_mode: 'custom_feet',
+            __custom_range_feet: 15,
+          },
+        },
+        throwingDagger
+      )
+    ).toBe(15);
+
+    const openArtsBtn = hudEl!.querySelector(
+      'button[data-hud-flyout-btn="arts"]'
+    ) as HTMLButtonElement | null;
+    expect(openArtsBtn).toBeTruthy();
+    openArtsBtn!.click();
+    fixture.detectChanges();
+    const lungeBtn = hudEl!.querySelector(
+      'button[data-hud-art="perk-hud-lunge"]'
+    ) as HTMLButtonElement | null;
+    expect(lungeBtn).toBeTruthy();
+    expect(lungeBtn!.textContent).toContain('Reach 5 ft');
+    lungeBtn!.click();
+    fixture.detectChanges();
+    expect(vttStore.pendingTargetAction()?.reachFeet).toBe(5);
+    vttStore.cancelTargetSelection();
+    fixture.detectChanges();
+
+    await vttStore.patchToken(vttStore.tokens()[0].id, { current_hp: 0 });
+    fixture.detectChanges();
+    const downBadgeEl = rootEl.querySelector(
+      '[data-canvas-token-down="true"]'
+    ) as HTMLElement | null;
+    expect(downBadgeEl).toBeTruthy();
+    expect(downBadgeEl!.textContent?.trim()).toBe('Down');
+    expect(rootEl.textContent).not.toContain('KO');
+    await vttStore.patchToken(vttStore.tokens()[0].id, { current_hp: 6 });
+    fixture.detectChanges();
+
     const skillsFlyoutBtn = hudEl!.querySelector(
       'button[data-hud-flyout-btn="skills"]'
     ) as HTMLButtonElement | null;
@@ -11309,6 +11392,19 @@ describe('App', () => {
     expect(
       hudEl!.querySelector('button[data-hud-end-turn="true"]')
     ).toBeTruthy();
+
+    const combatPipBtn = hudEl!.querySelector(
+      'button[aria-label="Set AP to 3"]'
+    ) as HTMLButtonElement | null;
+    expect(combatPipBtn).toBeTruthy();
+    combatPipBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const apLog = vttStore
+      .logs()
+      .find((l) => l.title.includes('AP Adjusted (−1 AP)'));
+    expect(apLog).toBeTruthy();
+    expect(apLog!.detail).toBe('4/4 AP → 3/4 AP');
 
     const collapseBtn = hudEl!.querySelector(
       'button[data-hud-collapse-toggle="true"]'
@@ -12277,6 +12373,308 @@ describe('App', () => {
     ).toBeNull();
     expect(
       rootEl.querySelector('[data-vtt-combat-tracker-window="true"]')
+    ).toBeNull();
+  });
+
+  it('should open Edit Node modal on double-click and show node context menu on right-click in Content Manager skill trees', async () => {
+    const vanguardTree = {
+      id: 'tree-vanguard',
+      slug: 'vanguard',
+      name: 'Vanguard',
+      description: 'Frontline martial path.',
+      icon: 'greatsword',
+      icon_color: '#FF8C5A',
+      icon_tint_custom: true,
+      is_active: true,
+    };
+
+    const cleaveNode: PerkNodeModel = {
+      id: 'node-cleave',
+      tree_id: 'tree-vanguard',
+      slug: 'cleave',
+      parent_node_id: null,
+      tier: 1,
+      name: 'Cleave',
+      node_type: 'combat_art',
+      perk_cost: 1,
+      ap_cost: 2,
+      cooldown_rounds: 2,
+      combat_tag: 'Sweeping',
+      description: 'Wide horizontal slash.',
+      rule_hooks: { __canvas_x: 200, __canvas_y: 120 },
+      is_active: true,
+    };
+
+    const sunderNode: PerkNodeModel = {
+      id: 'node-sunder',
+      tree_id: 'tree-vanguard',
+      slug: 'sunder',
+      parent_node_id: 'node-cleave',
+      tier: 2,
+      name: 'Sunder',
+      node_type: 'combat_art',
+      perk_cost: 1,
+      ap_cost: 2,
+      cooldown_rounds: 3,
+      combat_tag: 'Crushing',
+      description: 'Heavy armor-cracking strike.',
+      rule_hooks: {
+        __parent_ids: ['node-cleave'],
+        __canvas_x: 200,
+        __canvas_y: 300,
+      },
+      is_active: true,
+    };
+
+    const soloDashNode: PerkNodeModel = {
+      id: 'node-solo-dash',
+      tree_id: null,
+      slug: 'quickstep',
+      parent_node_id: null,
+      tier: 1,
+      name: 'Quickstep',
+      node_type: 'combat_art',
+      perk_cost: 1,
+      ap_cost: 1,
+      cooldown_rounds: 2,
+      combat_tag: 'None',
+      description: 'Rapid footwork.',
+      rule_hooks: { __is_standalone: true },
+      is_active: true,
+    };
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: CompendiumService,
+          useValue: {
+            fetchFullCompendium: async () => ({
+              weapons: [],
+              armors: [],
+              items: [],
+              skillTrees: [vanguardTree],
+              perkNodes: [cleaveNode, sunderNode, soloDashNode],
+              keywords: [],
+            }),
+          },
+        },
+        provideRouter([
+          {
+            path: 'content-manager',
+            component: ContentManagerComponent,
+            children: [
+              { path: '', pathMatch: 'full', redirectTo: 'trees' },
+              { path: 'trees', component: ContentManagerRouteSlotComponent },
+              {
+                path: 'trees/:treeId',
+                component: ContentManagerRouteSlotComponent,
+              },
+              {
+                path: 'standalone',
+                component: ContentManagerRouteSlotComponent,
+              },
+              { path: 'weapons', component: ContentManagerRouteSlotComponent },
+              { path: 'keywords', component: ContentManagerRouteSlotComponent },
+            ],
+          },
+        ]),
+      ],
+    }).compileComponents();
+
+    const store = TestBed.inject(CompendiumStore);
+    await store.loadCompendium();
+
+    const harness = await RouterTestingHarness.create(
+      '/content-manager/trees/vanguard'
+    );
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+
+    const cmEl = harness.routeNativeElement as HTMLElement;
+    const cmComp = harness.routeDebugElement
+      ?.componentInstance as ContentManagerComponent;
+
+    const cleaveEl = cmEl.querySelector(
+      '[data-skill-tree-node="node-cleave"]'
+    ) as HTMLElement | null;
+    const sunderEl = cmEl.querySelector(
+      '[data-skill-tree-node="node-sunder"]'
+    ) as HTMLElement | null;
+    expect(cleaveEl).toBeTruthy();
+    expect(sunderEl).toBeTruthy();
+
+    cleaveEl!.dispatchEvent(
+      new MouseEvent('dblclick', { bubbles: true, cancelable: true })
+    );
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+
+    const editHeading = Array.from(cmEl.querySelectorAll('h2')).find((h) =>
+      h.textContent?.includes('Edit Skill Tree Node')
+    );
+    expect(editHeading).toBeTruthy();
+    const nodeNameInput = cmEl.querySelector(
+      'input#nodeName'
+    ) as HTMLInputElement | null;
+    expect(nodeNameInput).toBeTruthy();
+    expect(nodeNameInput!.value).toBe('Cleave');
+
+    const closeModalBtn = Array.from(cmEl.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Close'
+    ) as HTMLButtonElement | undefined;
+    expect(closeModalBtn).toBeTruthy();
+    closeModalBtn!.click();
+    harness.detectChanges();
+
+    const ctxEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 280,
+      clientY: 240,
+    });
+    sunderEl!.dispatchEvent(ctxEvent);
+    harness.detectChanges();
+
+    expect(ctxEvent.defaultPrevented).toBe(true);
+    const ctxMenu = cmEl.querySelector(
+      '[data-skill-node-context-menu="true"]'
+    ) as HTMLElement | null;
+    expect(ctxMenu).toBeTruthy();
+    expect(ctxMenu!.textContent).toContain('Sunder');
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="edit"]')
+    ).toBeTruthy();
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="branch"]')
+    ).toBeTruthy();
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="attach"]')
+    ).toBeTruthy();
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="make-starting"]')
+    ).toBeTruthy();
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="remove-from-tree"]')
+    ).toBeTruthy();
+    expect(
+      ctxMenu!.querySelector('button[data-node-ctx-action="delete"]')
+    ).toBeTruthy();
+
+    const branchBtn = ctxMenu!.querySelector(
+      'button[data-node-ctx-action="branch"]'
+    ) as HTMLButtonElement;
+    branchBtn.click();
+    await harness.fixture.whenStable();
+    harness.detectChanges();
+
+    expect(
+      cmEl.querySelector('[data-skill-node-context-menu="true"]')
+    ).toBeNull();
+    const createHeading = Array.from(cmEl.querySelectorAll('h2')).find((h) =>
+      h.textContent?.includes('Create Skill Tree Node')
+    );
+    expect(createHeading).toBeTruthy();
+
+    const closeCreateBtn = Array.from(cmEl.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Close'
+    ) as HTMLButtonElement | undefined;
+    closeCreateBtn!.click();
+    harness.detectChanges();
+
+    cleaveEl!.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 220,
+        clientY: 180,
+      })
+    );
+    harness.detectChanges();
+    const cleaveMenu = cmEl.querySelector(
+      '[data-skill-node-context-menu="true"]'
+    ) as HTMLElement | null;
+    expect(cleaveMenu).toBeTruthy();
+    expect(
+      cleaveMenu!.querySelector('button[data-node-ctx-action="make-starting"]')
+    ).toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    harness.detectChanges();
+    expect(
+      cmEl.querySelector('[data-skill-node-context-menu="true"]')
+    ).toBeNull();
+
+    cleaveEl!.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 220,
+        clientY: 180,
+      })
+    );
+    harness.detectChanges();
+    expect(
+      cmEl.querySelector('[data-skill-node-context-menu="true"]')
+    ).toBeTruthy();
+
+    document.body.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true })
+    );
+    harness.detectChanges();
+    expect(
+      cmEl.querySelector('[data-skill-node-context-menu="true"]')
+    ).toBeNull();
+
+    cleaveEl!.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 220,
+        clientY: 180,
+      })
+    );
+    harness.detectChanges();
+    const deleteMenuBtn = cmEl.querySelector(
+      'button[data-node-ctx-action="delete"]'
+    ) as HTMLButtonElement | null;
+    expect(deleteMenuBtn).toBeTruthy();
+    deleteMenuBtn!.click();
+    harness.detectChanges();
+    expect(
+      cmEl.querySelector('[data-skill-node-context-menu="true"]')
+    ).toBeNull();
+    expect(cmComp.pendingDelete()?.target.id).toBe('node-cleave');
+
+    const charFixture = TestBed.createComponent(SkillTreeCanvasComponent);
+    charFixture.componentRef.setInput('tree', vanguardTree);
+    charFixture.componentRef.setInput('allNodes', [cleaveNode, sunderNode]);
+    charFixture.componentRef.setInput('mode', 'character');
+    let emittedEditCount = 0;
+    charFixture.componentInstance.editNode.subscribe(() => {
+      emittedEditCount += 1;
+    });
+    charFixture.detectChanges();
+
+    const charNodeEl = charFixture.nativeElement.querySelector(
+      '[data-skill-tree-node="node-cleave"]'
+    ) as HTMLElement | null;
+    expect(charNodeEl).toBeTruthy();
+    const charCtxEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    });
+    charNodeEl!.dispatchEvent(charCtxEvent);
+    charNodeEl!.dispatchEvent(
+      new MouseEvent('dblclick', { bubbles: true, cancelable: true })
+    );
+    charFixture.detectChanges();
+    expect(charCtxEvent.defaultPrevented).toBe(false);
+    expect(emittedEditCount).toBe(0);
+    expect(
+      charFixture.nativeElement.querySelector(
+        '[data-skill-node-context-menu="true"]'
+      )
     ).toBeNull();
   });
 });

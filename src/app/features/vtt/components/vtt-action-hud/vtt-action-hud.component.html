@@ -21,6 +21,183 @@
       (wheel)="$event.stopPropagation()"
       class="mb-2 max-h-[360px] w-[min(90vw,460px)] overflow-y-auto rounded-2xl border border-[#355650] bg-[#0B1413]/98 p-3 shadow-2xl backdrop-blur-md tabular-nums"
     >
+      @if (flyout === 'arts' && !multi) {
+        @let artCount = totalCombatArtsCount();
+        <div class="space-y-2.5">
+          <div class="flex items-center justify-between gap-2 border-b border-[#243B37] pb-2">
+            <div>
+              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                Combat Arts
+              </span>
+              <span class="ml-2 font-mono-num text-[10px] text-[#8AB0AB]">
+                {{ artCount }} {{ artCount === 1 ? 'skill' : 'skills' }}
+              </span>
+            </div>
+            <button
+              type="button"
+              (click)="activeFlyout.set(null)"
+              class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 text-[11px] font-bold text-[#8AB0AB] hover:text-white"
+            >
+              &times;
+            </button>
+          </div>
+
+          @if (artCount >= 4) {
+            <input
+              type="text"
+              data-hud-arts-filter="true"
+              [value]="artsFilterQuery()"
+              (input)="onArtsFilterInput($event)"
+              placeholder="Filter skills by name or tag..."
+              class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs text-white placeholder-[#8AB0AB]/60 focus:border-[#C4491A] focus:outline-none"
+            />
+          }
+
+          @if (artCount === 0) {
+            <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F]/60 px-3 py-4 text-center text-[11px] text-[#8AB0AB]">
+              No active Combat Arts unlocked yet.
+            </div>
+          } @else if (ch && st) {
+            @let pcArts = filteredPcCombatArts();
+            @if (pcArts.length === 0) {
+              <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F]/60 px-3 py-3 text-center text-[11px] text-[#8AB0AB]">
+                No Combat Arts match your filter.
+              </div>
+            } @else {
+              <div class="space-y-1.5">
+                @for (art of pcArts; track art.baseNode.id) {
+                  @let artVis = getNodeVisuals(art.baseNode);
+                  @let cd = getArtCooldown(art);
+                  @let artLocked = cd > 0 || !art.meetsWeaponRequirement || !controllable || tok.current_ap < art.apCost;
+                  <button
+                    type="button"
+                    [attr.data-hud-art]="art.baseNode.id"
+                    [disabled]="artLocked"
+                    (click)="triggerPcArt(art)"
+                    class="flex w-full items-start justify-between gap-2.5 rounded-xl border border-[#784321]/80 bg-[#18110C] p-2.5 text-left transition-colors hover:border-[#FB923C] hover:bg-[#22160F] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <div class="flex min-w-0 items-start gap-2.5">
+                      <span
+                        class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                        [style.border-color]="artVis.color"
+                      >
+                        <app-compendium-icon
+                          [icon]="artVis.icon"
+                          [color]="artVis.color"
+                          [tintCustom]="artVis.tintCustom"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0 space-y-0.5">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          <span class="font-display text-xs font-bold text-white">
+                            {{ art.baseNode.name }}
+                          </span>
+                          @if (art.appliedUpgrades.length > 0) {
+                            <span class="rounded border border-[#225C50] bg-[#102B26] px-1 py-[1px] font-mono-num text-[9px] font-bold text-[#5EEAD4]">
+                              &#9733;{{ art.appliedUpgrades.length }}
+                            </span>
+                          }
+                          @for (tag of art.combatTags; track tag) {
+                            <span
+                              class="rounded border px-1 py-[1px] text-[9px] font-bold"
+                              [class]="getCombatTagBadgeClass(tag)"
+                            >
+                              {{ tag }}
+                            </span>
+                          }
+                        </div>
+                        <div class="font-mono-num text-[10px] font-semibold text-[#FDBA74]">
+                          {{ formatFormula(st.attackRollMod + art.bonusAttackMod) }} &middot; {{ st.flatWeaponDamage + art.bonusFlatDamage }} DMG &middot; Reach {{ art.reachFeet }} ft
+                        </div>
+                        @if (!art.meetsWeaponRequirement) {
+                          <div class="text-[10px] font-semibold text-[#FDA4AF]">
+                            Requires {{ formatWeaponReq(art.weaponRequirement) }}
+                          </div>
+                        } @else if (art.baseNode.description) {
+                          <div class="line-clamp-2 text-[10px] leading-snug text-[#8AB0AB]">
+                            {{ art.baseNode.description }}
+                          </div>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="flex shrink-0 flex-col items-end gap-1 font-mono-num">
+                      <span class="rounded bg-[#C4491A] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        {{ art.apCost }} AP
+                      </span>
+                      @if (cd > 0) {
+                        <span class="rounded border border-[#6E293B] bg-[#3B1822] px-1.5 py-0.5 text-[9px] font-bold text-[#FDA4AF]">
+                          CD {{ cd }}
+                        </span>
+                      }
+                    </div>
+                  </button>
+                }
+              </div>
+            }
+          } @else {
+            @let nArts = filteredNpcCombatArts();
+            @if (nArts.length === 0) {
+              <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F]/60 px-3 py-3 text-center text-[11px] text-[#8AB0AB]">
+                No Combat Arts match your filter.
+              </div>
+            } @else {
+              <div class="space-y-1.5">
+                @for (nArt of nArts; track nArt.id) {
+                  @let nVis = getNodeVisuals(nArt);
+                  @let nAp = nArt.ap_cost ?? 1;
+                  <button
+                    type="button"
+                    [attr.data-hud-art]="nArt.id"
+                    [disabled]="!controllable || tok.current_ap < nAp"
+                    (click)="triggerNpcArt(nArt)"
+                    class="flex w-full items-start justify-between gap-2.5 rounded-xl border border-[#784321]/80 bg-[#18110C] p-2.5 text-left transition-colors hover:border-[#FB923C] hover:bg-[#22160F] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <div class="flex min-w-0 items-start gap-2.5">
+                      <span
+                        class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-[#09100F]"
+                        [style.border-color]="nVis.color"
+                      >
+                        <app-compendium-icon
+                          [icon]="nVis.icon"
+                          [color]="nVis.color"
+                          [tintCustom]="nVis.tintCustom"
+                          sizeClass="h-4 w-4"
+                        />
+                      </span>
+                      <div class="min-w-0 space-y-0.5">
+                        <div class="font-display text-xs font-bold text-white">
+                          {{ nArt.name }}
+                        </div>
+                        @if (nArt.description) {
+                          <div class="line-clamp-2 text-[10px] leading-snug text-[#8AB0AB]">
+                            {{ nArt.description }}
+                          </div>
+                        }
+                      </div>
+                    </div>
+                    <span class="shrink-0 rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-white">
+                      {{ nAp }} AP
+                    </span>
+                  </button>
+                }
+              </div>
+            }
+          }
+
+          <div class="flex justify-end border-t border-[#243B37] pt-2">
+            <button
+              type="button"
+              (click)="openSheet()"
+              class="rounded-lg border border-[#243B37] bg-[#122220] px-2.5 py-1 text-[10px] font-bold text-[#5EEAD4] hover:border-[#38B29A]"
+            >
+              Manage Skills in Sheet &rarr;
+            </button>
+          </div>
+        </div>
+      }
+
       @if (flyout === 'skills') {
         @let attrs = resolvedAttributes();
         @let cSkills = resolvedCombatSkills();
@@ -583,6 +760,27 @@
     </button>
 
     @if (!multi) {
+      <button
+        type="button"
+        data-hud-flyout-btn="arts"
+        (click)="toggleFlyout('arts')"
+        class="inline-flex items-center gap-1.5 rounded-t-xl rounded-b-md border px-2.5 py-1 text-[11px] font-bold shadow-md backdrop-blur-xs transition-colors"
+        [class.border-[#C4491A]]="flyout === 'arts'"
+        [class.bg-[#27160E]]="flyout === 'arts'"
+        [class.text-white]="flyout === 'arts'"
+        [class.border-[#243B37]]="flyout !== 'arts'"
+        [class.bg-[#0D1615]/95]="flyout !== 'arts'"
+        [class.text-[#8AB0AB]]="flyout !== 'arts'"
+        [class.hover:text-white]="flyout !== 'arts'"
+      >
+        <span>Combat Arts</span>
+        @if (totalCombatArtsCount() > 0) {
+          <span class="rounded bg-[#122220] px-1.5 py-0.25 font-mono-num text-[9px] text-[#FDBA74]">
+            {{ totalCombatArtsCount() }}
+          </span>
+        }
+      </button>
+
       <button
         type="button"
         data-hud-flyout-btn="items"
@@ -1535,66 +1733,6 @@
               </span>
             </button>
           </div>
-
-          @if (st.resolvedCombatArts.length > 0) {
-            <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
-            <div data-hud-section="combat-arts" class="flex flex-wrap items-stretch gap-1.5">
-              @for (art of st.resolvedCombatArts; track art.baseNode.id) {
-                @let artVis = getNodeVisuals(art.baseNode);
-                @let cd = getArtCooldown(art);
-                @let artLocked = cd > 0 || !art.meetsWeaponRequirement || !controllable || tok.current_ap < art.apCost;
-                <button
-                  type="button"
-                  [attr.data-hud-art]="art.baseNode.id"
-                  [disabled]="artLocked"
-                  (click)="triggerPcArt(art)"
-                  (mouseenter)="setHover({
-                    title: art.baseNode.name,
-                    apLabel: art.apCost + ' AP',
-                    subtitle: formatFormula(st.attackRollMod + art.bonusAttackMod) + ' · ' + (st.flatWeaponDamage + art.bonusFlatDamage) + ' DMG',
-                    description: !art.meetsWeaponRequirement ? 'Requires ' + formatWeaponReq(art.weaponRequirement) : art.baseNode.description,
-                    tags: art.combatTags
-                  })"
-                  (mouseleave)="setHover(null)"
-                  class="relative flex h-[84px] w-[72px] flex-col items-center justify-between overflow-hidden rounded-xl border border-[#784321] bg-[#1F140D] p-1.5 text-center transition-all hover:border-[#FB923C] disabled:opacity-45"
-                >
-                  <div class="flex w-full items-center justify-between gap-0.5 font-mono-num text-[8px] font-bold">
-                    @if (art.appliedUpgrades.length > 0) {
-                      <span class="text-[#5EEAD4]">&#9733;{{ art.appliedUpgrades.length }}</span>
-                    } @else if (art.combatTags.length > 0) {
-                      <span class="truncate text-[#FDBA74]">{{ art.combatTags[0].slice(0, 3) }}</span>
-                    } @else {
-                      <span></span>
-                    }
-                    <span class="rounded bg-black/55 px-1 py-[1px] text-[#FDBA74]">
-                      {{ art.apCost }} AP
-                    </span>
-                  </div>
-
-                  <app-compendium-icon
-                    [icon]="artVis.icon"
-                    [color]="artVis.color"
-                    [tintCustom]="artVis.tintCustom"
-                    sizeClass="h-6 w-6"
-                  />
-
-                  <span class="w-full truncate text-[9px] font-bold text-white">
-                    {{ art.baseNode.name }}
-                  </span>
-
-                  @if (cd > 0) {
-                    <span class=" absolute inset-0 flex items-center justify-center bg-[#09100F]/85 font-mono-num text-[10px] font-extrabold text-[#FDA4AF]">
-                      CD {{ cd }}
-                    </span>
-                  } @else if (!art.meetsWeaponRequirement) {
-                    <span class="absolute inset-x-0 bottom-0 bg-[#3B1822]/95 py-0.5 font-mono-num text-[8px] font-bold text-[#FDA4AF]">
-                      Req Weapon
-                    </span>
-                  }
-                </button>
-              }
-            </div>
-          }
         } @else {
           @let npcAp = tok.npc_stats.attack_ap ?? 1;
           @let npcMod = tok.npc_stats.attack_mod ?? 3;
@@ -1655,41 +1793,43 @@
               </button>
             </div>
           </div>
+        }
 
-          @if (npcCombatArts().length > 0) {
-            <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
-            <div data-hud-section="combat-arts" class="flex flex-wrap items-stretch gap-1.5">
-              @for (nArt of npcCombatArts(); track nArt.id) {
-                @let nVis = getNodeVisuals(nArt);
-                @let nAp = nArt.ap_cost ?? 1;
-                <button
-                  type="button"
-                  [attr.data-hud-art]="nArt.id"
-                  [disabled]="!controllable || tok.current_ap < nAp"
-                  (click)="triggerNpcArt(nArt)"
-                  (mouseenter)="setHover({
-                    title: nArt.name,
-                    apLabel: nAp + ' AP',
-                    subtitle: 'Special Combat Art',
-                    description: nArt.description
-                  })"
-                  (mouseleave)="setHover(null)"
-                  class="flex h-[84px] w-[72px] flex-col items-center justify-between rounded-xl border border-[#784321] bg-[#1F140D] p-1.5 text-center transition-all hover:border-[#FB923C] disabled:opacity-45"
-                >
-                  <div class="flex w-full justify-end font-mono-num text-[8px] font-bold">
-                    <span class="rounded bg-black/55 px-1 py-[1px] text-[#FDBA74]">{{ nAp }} AP</span>
-                  </div>
-                  <app-compendium-icon
-                    [icon]="nVis.icon"
-                    [color]="nVis.color"
-                    [tintCustom]="nVis.tintCustom"
-                    sizeClass="h-6 w-6"
-                  />
-                  <span class="w-full truncate text-[9px] font-bold text-white">{{ nArt.name }}</span>
-                </button>
-              }
-            </div>
-          }
+        @if (totalCombatArtsCount() > 0) {
+          <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>
+          <div data-hud-section="combat-arts" class="flex items-stretch">
+            <button
+              type="button"
+              data-hud-tile="combat-arts"
+              (click)="toggleFlyout('arts')"
+              (mouseenter)="setHover({
+                title: 'Combat Arts & Active Skills',
+                apLabel: totalCombatArtsCount() + ' Unlocked',
+                subtitle: 'Open scrollable Combat Arts drawer',
+                description: 'Browse and activate your unlocked Combat Arts without crowding the main action bar.'
+              })"
+              (mouseleave)="setHover(null)"
+              class="flex h-[84px] w-[74px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-all"
+              [class.border-[#FB923C]]="flyout === 'arts'"
+              [class.bg-[#2B180D]]="flyout === 'arts'"
+              [class.border-[#784321]]="flyout !== 'arts'"
+              [class.bg-[#1F140D]]="flyout !== 'arts'"
+              [class.hover:border-[#FB923C]]="true"
+            >
+              <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#FDBA74]">
+                {{ totalCombatArtsCount() }} {{ totalCombatArtsCount() === 1 ? 'Art' : 'Arts' }}
+              </span>
+              <svg class="h-5 w-5 text-[#FDBA74]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              <div class="w-full leading-tight">
+                <div class="text-[9px] font-bold text-white">Combat Arts</div>
+                <div class="font-mono-num text-[8px] text-[#FDBA74]">
+                  {{ flyout === 'arts' ? 'Close' : 'Open' }}
+                </div>
+              </div>
+            </button>
+          </div>
         }
 
         <div class="hidden w-px self-stretch bg-[#243B37]/80 sm:block"></div>

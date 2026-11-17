@@ -59,6 +59,7 @@ import { VttSettingsStore } from '../../../../core/settings/vtt-settings.store';
 import { VttStore } from '../../store/vtt.store';
 
 export type VttHudFlyoutTab =
+  | 'arts'
   | 'skills'
   | 'items'
   | 'statuses'
@@ -306,6 +307,38 @@ export class VttActionHudComponent {
     return this.vttStore.getNpcStandaloneCombatArts(this.token());
   });
 
+  readonly artsFilterQuery = signal<string>('');
+
+  readonly totalCombatArtsCount = computed<number>(() => {
+    const st = this.stats();
+    if (st) return st.resolvedCombatArts.length;
+    return this.npcCombatArts().length;
+  });
+
+  readonly filteredPcCombatArts = computed<ResolvedCombatArt[]>(() => {
+    const st = this.stats();
+    if (!st) return [];
+    const q = this.artsFilterQuery().trim().toLowerCase();
+    if (!q) return st.resolvedCombatArts;
+    return st.resolvedCombatArts.filter(
+      (art) =>
+        art.baseNode.name.toLowerCase().includes(q) ||
+        art.baseNode.description.toLowerCase().includes(q) ||
+        art.combatTags.some((tag) => tag.toLowerCase().includes(q))
+    );
+  });
+
+  readonly filteredNpcCombatArts = computed<PerkNodeModel[]>(() => {
+    const list = this.npcCombatArts();
+    const q = this.artsFilterQuery().trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (node) =>
+        node.name.toLowerCase().includes(q) ||
+        node.description.toLowerCase().includes(q)
+    );
+  });
+
   readonly resolvedAttributes = computed<Record<AttributeName, number>>(() => {
     const ch = this.char();
     if (ch) return ch.attributes;
@@ -480,9 +513,15 @@ export class VttActionHudComponent {
           this.activeFlyout.set(null);
           this.hoveredTile.set(null);
           this.editingVital.set(null);
+          this.artsFilterQuery.set('');
         });
       }
     });
+  }
+
+  onArtsFilterInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.artsFilterQuery.set(target?.value ?? '');
   }
 
   @HostListener('document:pointerdown', ['$event'])
@@ -878,6 +917,11 @@ export class VttActionHudComponent {
       (t) => t.current_ap < t.max_ap
     );
     if (targets.length === 0) return;
+    const snapshots = targets.map((t) => ({
+      tok: t,
+      prevAp: t.current_ap,
+      nextAp: t.max_ap,
+    }));
     await this.vttStore.recordablePatchTokensBatch(
       targets.map((t) => ({
         tokenId: t.id,
@@ -885,6 +929,13 @@ export class VttActionHudComponent {
       })),
       `Refresh AP (${targets.length} Tokens)`
     );
+    for (const snap of snapshots) {
+      await this.vttStore.logManualApAdjustment(
+        snap.tok,
+        snap.prevAp,
+        snap.nextAp
+      );
+    }
   }
 
   async rollInitiative(): Promise<void> {
@@ -1052,21 +1103,43 @@ export class VttActionHudComponent {
       if (targets.length === 0) return;
       const statLabel =
         stat === 'current_hp' ? 'HP' : stat === 'current_sp' ? 'SP' : 'AP';
-      void this.vttStore.recordablePatchTokensBatch(
-        targets.map((t) => {
-          const maxVal =
-            stat === 'current_hp'
-              ? t.max_hp
-              : stat === 'current_sp'
-                ? t.max_sp
-                : t.max_ap;
-          return {
-            tokenId: t.id,
-            patch: { [stat]: Math.max(0, Math.min(maxVal, t[stat] + delta)) },
-          };
-        }),
-        `Group ${statLabel} (${delta >= 0 ? '+' : ''}${delta})`
-      );
+      const apSnapshots =
+        stat === 'current_ap'
+          ? targets.map((t) => ({
+              tok: t,
+              prevAp: t.current_ap,
+              nextAp: Math.max(0, Math.min(t.max_ap, t.current_ap + delta)),
+            }))
+          : [];
+      void this.vttStore
+        .recordablePatchTokensBatch(
+          targets.map((t) => {
+            const maxVal =
+              stat === 'current_hp'
+                ? t.max_hp
+                : stat === 'current_sp'
+                  ? t.max_sp
+                  : t.max_ap;
+            return {
+              tokenId: t.id,
+              patch: {
+                [stat]: Math.max(0, Math.min(maxVal, t[stat] + delta)),
+              },
+            };
+          }),
+          `Group ${statLabel} (${delta >= 0 ? '+' : ''}${delta})`
+        )
+        .then(async () => {
+          for (const snap of apSnapshots) {
+            if (snap.prevAp !== snap.nextAp) {
+              await this.vttStore.logManualApAdjustment(
+                snap.tok,
+                snap.prevAp,
+                snap.nextAp
+              );
+            }
+          }
+        });
       return;
     }
 
@@ -1078,25 +1151,42 @@ export class VttActionHudComponent {
         : stat === 'current_sp'
           ? tok.max_sp
           : tok.max_ap;
-    const next = Math.max(0, Math.min(maxVal, tok[stat] + delta));
+    const prev = tok[stat];
+    const next = Math.max(0, Math.min(maxVal, prev + delta));
+    if (next === prev) return;
     const statLabel =
       stat === 'current_hp' ? 'HP' : stat === 'current_sp' ? 'SP' : 'AP';
-    void this.vttStore.recordablePatchToken(
-      tok.id,
-      { [stat]: next },
-      `Adjust ${tok.name} ${statLabel}`
-    );
+    void this.vttStore
+      .recordablePatchToken(
+        tok.id,
+        { [stat]: next },
+        `Adjust ${tok.name} ${statLabel}`
+      )
+      .then(() => {
+        if (stat === 'current_ap') {
+          void this.vttStore.logManualApAdjustment(tok, prev, next);
+        }
+      });
   }
 
   setApFromPip(pip: number): void {
     const tok = this.token();
     if (!this.canControl()) return;
-    const next = pip === tok.current_ap ? Math.max(0, pip - 1) : pip;
-    void this.vttStore.recordablePatchToken(
-      tok.id,
-      { current_ap: Math.max(0, Math.min(tok.max_ap, next)) },
-      `Set ${tok.name} AP`
+    const prevAp = tok.current_ap;
+    const next = Math.max(
+      0,
+      Math.min(tok.max_ap, pip === prevAp ? Math.max(0, pip - 1) : pip)
     );
+    if (next === prevAp) return;
+    void this.vttStore
+      .recordablePatchToken(
+        tok.id,
+        { current_ap: next },
+        `Set ${tok.name} AP`
+      )
+      .then(() => {
+        void this.vttStore.logManualApAdjustment(tok, prevAp, next);
+      });
   }
 
   triggerActiveWeapon(): void {
@@ -1135,7 +1225,8 @@ export class VttActionHudComponent {
 
   async swapWeaponSlot(): Promise<void> {
     const tok = this.token();
-    if (!this.canControl() || tok.current_ap < 1) return;
+    if (!this.canControl()) return;
+    if (tok.current_ap < 1) return;
     await this.vttStore.switchCharacterWeaponSlotInVtt(tok);
   }
 
@@ -1147,6 +1238,7 @@ export class VttActionHudComponent {
     if (cd > 0 || tok.current_ap < art.apCost || !art.meetsWeaponRequirement) {
       return;
     }
+    this.activeFlyout.set(null);
     this.vttStore.beginCombatArtTargetSelection(tok, art, st);
   }
 
@@ -1154,6 +1246,7 @@ export class VttActionHudComponent {
     const tok = this.token();
     const apCost = Number(node.ap_cost ?? 1);
     if (!this.canControl() || tok.current_ap < apCost) return;
+    this.activeFlyout.set(null);
     this.vttStore.beginNpcStandaloneArtTargetSelection(tok, node);
   }
 

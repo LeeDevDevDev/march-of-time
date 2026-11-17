@@ -4,6 +4,7 @@ import {
   ArmorModel,
   ArmorWeightClass,
   AttributeName,
+  CombatArtRangeMode,
   CombatArtUpgradeSpec,
   CombatArtWeaponRequirement,
   CombatSkillName,
@@ -22,12 +23,14 @@ import {
   WeaponModel,
   WeaponPropertyTag,
   WeaponRequirementEvaluation,
+  computeCombatArtReachFeet,
   evaluateWeaponRequirement,
   formatRuleHookBadges,
   formatWeaponRequirementLabel,
   getHeavyWeaponBlockBase,
   getNodeUiKind,
   getWeaponPropertyTags,
+  resolveCombatArtRangeMode,
   hasWeaponRequirement,
   isCombatArtUpgradeNode,
   isStandalonePerkNode,
@@ -747,6 +750,8 @@ export interface ResolvedCombatArt {
   disallowedDefenses: ('Parry' | 'Dodge' | 'Block')[];
   bonusAttackMod: number;
   bonusFlatDamage: number;
+  rangeMode: CombatArtRangeMode;
+  reachFeet: number;
   effectBadges: string[];
   appliedUpgrades: PerkNodeModel[];
   weaponRequirement: CombatArtWeaponRequirement | null;
@@ -1039,6 +1044,9 @@ export function computeDerivedStats(
         : null;
     const alternateSlotSatisfiesWeaponReq = Boolean(altEval?.satisfied);
 
+    const rangeMode = resolveCombatArtRangeMode(baseNode);
+    const reachFeet = computeCombatArtReachFeet(baseNode, activeWeapon);
+
     return {
       baseNode,
       apCost,
@@ -1049,6 +1057,8 @@ export function computeDerivedStats(
       disallowedDefenses,
       bonusAttackMod,
       bonusFlatDamage,
+      rangeMode,
+      reachFeet,
       effectBadges,
       appliedUpgrades,
       weaponRequirement: weaponReq,

@@ -224,9 +224,10 @@
 
           @if (item.token.current_hp <= 0) {
             <div
-              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-full bg-black/70 text-xs font-extrabold text-[#FDA4AF]"
+              data-canvas-token-down="true"
+              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-full bg-black/70 text-[10px] font-extrabold uppercase tracking-wide text-[#FDA4AF]"
             >
-              KO
+              Down
             </div>
           }
 

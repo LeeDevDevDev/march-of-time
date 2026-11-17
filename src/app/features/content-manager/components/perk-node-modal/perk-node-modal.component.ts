@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import {
   ART_UPGRADE_HOOK_KEYS,
   ActiveCombatTag,
+  CombatArtRangeMode,
   CombatArtUpgradeTargetMode,
   CombatArtWeaponRequirement,
   CombatTag,
@@ -36,6 +37,7 @@ import {
   hooksObjectToRows,
   isStandalonePerkNode,
   normalizeWeaponRequirement,
+  resolveCombatArtRangeMode,
   resolveNodeVisuals,
   rowsToHooksObject,
 } from '../../../../core/compendium/compendium.model';
@@ -101,6 +103,8 @@ export class PerkNodeModalComponent {
   readonly reqShield = signal<boolean>(false);
   readonly reqWeaponIds = signal<string[]>([]);
   readonly addSpecificWeaponId = signal<string>('');
+  readonly rangeMode = signal<CombatArtRangeMode>('melee_reach');
+  readonly customRangeFeet = signal<number>(15);
 
   readonly hookRows = signal<RuleHookRow[]>([]);
   readonly selectedParentIds = signal<string[]>([]);
@@ -244,6 +248,15 @@ export class PerkNodeModalComponent {
       kind === 'combat_art' ? 'combat_art' : 'passive_upgrade',
       this.combatTagSignal()
     );
+    if (kind === 'combat_art') {
+      compiled.__range_mode = this.rangeMode();
+      if (this.rangeMode() === 'custom_feet') {
+        compiled.__custom_range_feet = Math.max(
+          5,
+          Math.round(Number(this.customRangeFeet()) || 5)
+        );
+      }
+    }
     const badges = formatRuleHookBadges(compiled);
     if (kind === 'combat_art') {
       const reqLabel = this.currentWeaponRequirementLabel();
@@ -253,6 +266,27 @@ export class PerkNodeModalComponent {
     }
     return badges;
   });
+
+  private resetRangeModeSignals(node?: PerkNodeModel | null): void {
+    if (!node || getNodeUiKind(node) !== 'combat_art') {
+      this.rangeMode.set('melee_reach');
+      this.customRangeFeet.set(15);
+      return;
+    }
+    this.rangeMode.set(resolveCombatArtRangeMode(node));
+    const savedFeet = Number(node.rule_hooks?.__custom_range_feet ?? 15);
+    this.customRangeFeet.set(
+      Number.isFinite(savedFeet) && savedFeet > 0 ? Math.round(savedFeet) : 15
+    );
+  }
+
+  toggleReqThrown(): void {
+    const next = !this.reqThrown();
+    this.reqThrown.set(next);
+    if (next && this.rangeMode() === 'melee_reach') {
+      this.rangeMode.set('weapon_thrown');
+    }
+  }
 
   private resetWeaponReqSignals(
     req?: CombatArtWeaponRequirement | null
@@ -323,6 +357,7 @@ export class PerkNodeModalComponent {
     this.combatTagSignal.set('Crushing');
     this.resetUpgradeSignals(defaultTreeId);
     this.resetWeaponReqSignals(null);
+    this.resetRangeModeSignals(null);
     this.nodeForm = {
       tree_id: defaultTreeId,
       name: '',
@@ -366,6 +401,7 @@ export class PerkNodeModalComponent {
       parentNode.node_type === 'combat_art' ? [parentNode.id] : []
     );
     this.resetWeaponReqSignals(null);
+    this.resetRangeModeSignals(null);
     this.nodeForm = {
       tree_id: parentNode.tree_id,
       name: '',
@@ -433,12 +469,14 @@ export class PerkNodeModalComponent {
       this.upgradeApDelta.set(Number(spec.ap_cost_delta ?? 0));
       this.upgradeCooldownDelta.set(Number(spec.cooldown_delta ?? 0));
       this.resetWeaponReqSignals(null);
+      this.resetRangeModeSignals(null);
       this.hookRows.set(artUpgradeToHookRows(spec));
     } else {
       this.resetUpgradeSignals(resolvedTreeId);
       this.resetWeaponReqSignals(
         kind === 'combat_art' ? node.rule_hooks?.__weapon_req : null
       );
+      this.resetRangeModeSignals(node);
       this.hookRows.set(hooksObjectToRows(node.rule_hooks));
     }
 
@@ -728,6 +766,13 @@ export class PerkNodeModalComponent {
         const weaponReq = this.currentWeaponRequirement();
         if (weaponReq) {
           compiledHooks.__weapon_req = weaponReq;
+        }
+        compiledHooks.__range_mode = this.rangeMode();
+        if (this.rangeMode() === 'custom_feet') {
+          compiledHooks.__custom_range_feet = Math.max(
+            5,
+            Math.round(Number(this.customRangeFeet()) || 5)
+          );
         }
       }
     }

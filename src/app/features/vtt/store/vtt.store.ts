@@ -12,6 +12,8 @@ import {
   ActiveCombatTag,
   CombatStatusEffect,
   WeaponModel,
+  computeCombatArtReachFeet,
+  resolveCombatArtRangeMode,
   resolveWeaponVisuals,
 } from '../../../core/compendium/compendium.model';
 import { CompendiumStore } from '../../../core/compendium/compendium.store';
@@ -7168,12 +7170,10 @@ export class VttStore {
   ): void {
     if (!art.meetsWeaponRequirement) return;
     const wep = stats.activeWeapon;
-    const reachFeet = wep
-      ? Math.max(
-          (wep.reach_tiles ?? 1) * 5,
-          (wep.thrown_range_tiles ?? 0) * 5
-        )
-      : 5;
+    const reachFeet =
+      typeof art.reachFeet === 'number'
+        ? art.reachFeet
+        : computeCombatArtReachFeet(art.baseNode, wep);
 
     const baseHooks = art.baseNode.rule_hooks ?? {};
     let bonusSp = Number(baseHooks.bonus_sp_damage ?? 0);
@@ -7272,6 +7272,15 @@ export class VttStore {
         ? [hooks.inflict_status]
         : [];
 
+    const rangeMode = resolveCombatArtRangeMode(node);
+    const npcBaseReach = Math.max(5, Number(npc.reach_feet ?? 5));
+    const npcReachFeet =
+      rangeMode === 'custom_feet'
+        ? computeCombatArtReachFeet(node)
+        : rangeMode === 'melee_reach' && npcBaseReach > 10
+          ? 5
+          : npcBaseReach;
+
     this.pendingTargetAction.set({
       attackerTokenId: token.id,
       kind: 'combat_art',
@@ -7279,7 +7288,7 @@ export class VttStore {
       apCost,
       cooldownRounds: Math.max(0, Number(node.cooldown_rounds ?? 0)),
       perkId: node.id,
-      reachFeet: Number(npc.reach_feet ?? 5),
+      reachFeet: npcReachFeet,
       attackMod: Number(npc.attack_mod ?? 3) + bonusAtk,
       flatDamage: Number(npc.flat_damage ?? 4) + bonusDmg,
       combatTags,
@@ -7748,6 +7757,40 @@ export class VttStore {
   saveCombatTrackerMinimized(minimized: boolean): void {
     this.combatTrackerMinimized.set(minimized);
     writeStoredCombatTrackerLayout(this.combatTrackerPosition(), minimized);
+  }
+
+  async logManualApAdjustment(
+    tok: VttTokenModel,
+    previousAp: number,
+    nextAp: number,
+    maxAp = tok.max_ap
+  ): Promise<void> {
+    if (previousAp === nextAp || !this.isCombatTrackerUnlocked()) {
+      return;
+    }
+    const diff = nextAp - previousAp;
+    const diffLabel = diff > 0 ? `+${diff}` : `−${Math.abs(diff)}`;
+    const vis = this.resolveTokenVisuals(tok);
+    await this.postLog({
+      kind: 'system',
+      title: `${tok.name} · AP Adjusted (${diffLabel} AP)`,
+      detail: `${previousAp}/${maxAp} AP → ${nextAp}/${maxAp} AP`,
+      senderNameOverride: tok.name,
+      payload: {
+        speaker_mode: 'character',
+        speaker_color: tok.color || '#FDBA74',
+        speaker_icon: tok.icon || 'greatsword',
+        speaker_faction: tok.faction,
+        ...(vis.portraitUrl ? { speaker_portrait_url: vis.portraitUrl } : {}),
+        ...(vis.tokenImageUrl
+          ? { speaker_token_image_url: vis.tokenImageUrl }
+          : {}),
+        ...(vis.tokenAppearance
+          ? { speaker_token_appearance: vis.tokenAppearance }
+          : {}),
+        ...(tok.is_hidden ? { visibility: 'gm' } : {}),
+      },
+    });
   }
 
   async initiateCombatPhase(silentLog = false): Promise<void> {

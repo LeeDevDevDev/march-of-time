@@ -324,6 +324,108 @@
               </div>
             </div>
 
+            <div class="space-y-2 border-t border-[var(--mot-border)] pt-3.5">
+              <div>
+                <h4 class="font-display text-xs font-bold text-[var(--mot-text)]">
+                  Targeting Range Mode
+                </h4>
+                <p class="text-[11px] text-[var(--mot-muted)]">
+                  Controls whether this Combat Art uses melee reach only (ignoring Thrown range), allows Thrown / full weapon range, or uses a fixed range in feet.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  data-node-range-mode="melee_reach"
+                  (click)="rangeMode.set('melee_reach')"
+                  class="rounded-xl border p-2.5 text-left transition-colors"
+                  [class.btn-copper]="rangeMode() === 'melee_reach'"
+                  [class.border-[var(--mot-border)]]="rangeMode() !== 'melee_reach'"
+                  [class.bg-[var(--mot-surface)]]="rangeMode() !== 'melee_reach'"
+                  [class.text-[var(--mot-text)]]="rangeMode() !== 'melee_reach'"
+                >
+                  <div class="font-mono-num text-xs font-bold">
+                    Melee Reach Only
+                  </div>
+                  <div
+                    class="mt-0.5 text-[10px]"
+                    [class.text-white/80]="rangeMode() === 'melee_reach'"
+                    [class.text-[var(--mot-muted)]]="rangeMode() !== 'melee_reach'"
+                  >
+                    Uses weapon melee reach; ignores Thrown
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  data-node-range-mode="weapon_thrown"
+                  (click)="rangeMode.set('weapon_thrown')"
+                  class="rounded-xl border p-2.5 text-left transition-colors"
+                  [class.btn-copper]="rangeMode() === 'weapon_thrown'"
+                  [class.border-[var(--mot-border)]]="rangeMode() !== 'weapon_thrown'"
+                  [class.bg-[var(--mot-surface)]]="rangeMode() !== 'weapon_thrown'"
+                  [class.text-[var(--mot-text)]]="rangeMode() !== 'weapon_thrown'"
+                >
+                  <div class="font-mono-num text-xs font-bold">
+                    Allow Thrown Range
+                  </div>
+                  <div
+                    class="mt-0.5 text-[10px]"
+                    [class.text-white/80]="rangeMode() === 'weapon_thrown'"
+                    [class.text-[var(--mot-muted)]]="rangeMode() !== 'weapon_thrown'"
+                  >
+                    Uses full weapon or Thrown distance
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  data-node-range-mode="custom_feet"
+                  (click)="rangeMode.set('custom_feet')"
+                  class="rounded-xl border p-2.5 text-left transition-colors"
+                  [class.btn-copper]="rangeMode() === 'custom_feet'"
+                  [class.border-[var(--mot-border)]]="rangeMode() !== 'custom_feet'"
+                  [class.bg-[var(--mot-surface)]]="rangeMode() !== 'custom_feet'"
+                  [class.text-[var(--mot-text)]]="rangeMode() !== 'custom_feet'"
+                >
+                  <div class="font-mono-num text-xs font-bold">
+                    Custom Range (ft)
+                  </div>
+                  <div
+                    class="mt-0.5 text-[10px]"
+                    [class.text-white/80]="rangeMode() === 'custom_feet'"
+                    [class.text-[var(--mot-muted)]]="rangeMode() !== 'custom_feet'"
+                  >
+                    Fixed skill range regardless of weapon
+                  </div>
+                </button>
+              </div>
+
+              @if (rangeMode() === 'custom_feet') {
+                <div class="flex items-center gap-2.5 pt-1">
+                  <label
+                    for="customRangeFeetInput"
+                    class="text-xs font-bold text-[var(--mot-text)]"
+                  >
+                    Skill Range (ft):
+                  </label>
+                  <input
+                    id="customRangeFeetInput"
+                    type="number"
+                    name="customRangeFeet"
+                    data-node-custom-range-input="true"
+                    min="5"
+                    max="180"
+                    step="5"
+                    [ngModel]="customRangeFeet()"
+                    (ngModelChange)="customRangeFeet.set($event)"
+                    class="mot-input w-28 px-3 py-1.5 font-mono-num text-sm font-bold"
+                  />
+                </div>
+              }
+            </div>
+
             <div class="space-y-3 border-t border-[var(--mot-border)] pt-3.5">
               <div class="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -423,7 +525,7 @@
 
                   <button
                     type="button"
-                    (click)="reqThrown.set(!reqThrown())"
+                    (click)="toggleReqThrown()"
                     class="rounded-lg border px-2.5 py-1 font-mono-num text-xs font-bold transition-colors"
                     [class.badge-piercing]="reqThrown()"
                     [class.border-[var(--mot-border)]]="!reqThrown()"

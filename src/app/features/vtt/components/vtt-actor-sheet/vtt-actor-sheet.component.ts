@@ -626,17 +626,30 @@ export class VttActorSheetComponent {
         return;
       }
     }
+    const prevVal = char[field] ?? 0;
     const max =
       field === 'current_hp'
         ? stats.maxHp
         : field === 'current_sp'
           ? stats.maxSp
           : 8;
-    const nextVal = Math.max(0, Math.min(max, (char[field] ?? 0) + delta));
+    const nextVal = Math.max(0, Math.min(max, prevVal + delta));
+    if (nextVal === prevVal) return;
     await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
       ...c,
       [field]: nextVal,
     }));
+    if (field === 'current_ap') {
+      const tok = this.sheetToken();
+      if (tok) {
+        await this.vttStore.logManualApAdjustment(
+          tok,
+          prevVal,
+          nextVal,
+          tok.max_ap
+        );
+      }
+    }
   }
 
   async adjustAttribute(
@@ -2104,14 +2117,19 @@ export class VttActorSheetComponent {
         return;
       }
     }
+    const prevVal = tok[field];
     const maxField =
       field === 'current_hp'
         ? tok.max_hp
         : field === 'current_sp'
           ? tok.max_sp
           : tok.max_ap;
-    const nextVal = Math.max(0, Math.min(maxField, tok[field] + delta));
+    const nextVal = Math.max(0, Math.min(maxField, prevVal + delta));
+    if (nextVal === prevVal) return;
     await this.vttStore.patchToken(tok.id, { [field]: nextVal });
+    if (field === 'current_ap') {
+      await this.vttStore.logManualApAdjustment(tok, prevVal, nextVal);
+    }
   }
 
   async patchNpcStatsField(patch: Partial<VttNpcStats>): Promise<void> {
