@@ -334,7 +334,7 @@ describe('App', () => {
 
     expect(stats.perkBudget).toBe(1);
     expect(stats.perkSpent).toBe(1);
-    expect(stats.maxSp).toBe(6);
+    expect(stats.maxSp).toBe(9);
     expect(stats.unlockedPerks.map((p) => p.id)).toContain(standalonePassive.id);
   });
 
@@ -9260,7 +9260,7 @@ describe('App', () => {
     expect(statsAfterPlate.equippedArmorLabel).toBe('Fortress Full Plate');
     expect(statsAfterPlate.armorSp).toBe(6);
     expect(statsAfterPlate.armorDr).toBe(6);
-    expect(statsAfterPlate.maxSp).toBe(10);
+    expect(statsAfterPlate.maxSp).toBe(13);
     expect(statsAfterPlate.canDodge).toBe(false);
 
     detailComp.inventoryTab.set('armor');

@@ -1109,7 +1109,7 @@ export function computeDerivedStats(
 
   const stanceRecoverySp = 2 + iron + perkBonusStanceRecovery;
   const armorSp = effectiveArmorSp;
-  const maxSp = 2 + iron + armorSp + perkBonusSp;
+  const maxSp = 5 + iron + armorSp + perkBonusSp;
   const maxHp = 5 + iron * 2 + perkBonusHp;
   const armorDr = effectiveArmorBaseDr + perkBonusArmorDr;
 

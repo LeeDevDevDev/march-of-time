@@ -143,7 +143,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'SP',
     category: 'Core Mechanic',
     summary:
-      'Stamina & Poise (2 + Iron + Armor SP). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP]. Spend 1 AP on [Stance Recovery] to restore 2 + Iron SP.',
+      'Stamina & Poise (5 + Iron + Armor SP). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP]. Spend 1 AP on [Stance Recovery] to restore 2 + Iron SP.',
   },
   {
     id: 'kw-hp',
@@ -430,7 +430,7 @@ export const RULE_HOOK_DEFINITIONS: RuleHookDefinition[] = [
   },
   {
     key: 'bonus_max_sp',
-    label: 'Bonus Max SP (Base 2 + Iron + Armor SP)',
+    label: 'Bonus Max SP (Base 5 + Iron + Armor SP)',
     category: 'Sheet Stat Bonus',
     valueType: 'number',
     defaultValue: 2,
