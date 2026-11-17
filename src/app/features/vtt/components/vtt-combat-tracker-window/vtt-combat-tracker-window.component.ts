@@ -121,7 +121,11 @@ export class VttCombatTrackerWindowComponent {
   }
 
   onPositionChange(coords: { x: number; y: number }): void {
-    this.vttStore.combatTrackerPosition.set(coords);
+    this.vttStore.saveCombatTrackerPosition(coords);
+  }
+
+  onMinimizedChange(minimized: boolean): void {
+    this.vttStore.saveCombatTrackerMinimized(minimized);
   }
 
   async rollMyInitiative(): Promise<void> {

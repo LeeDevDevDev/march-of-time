@@ -290,6 +290,56 @@ function cloneLights(lights: VttLightSource[]): VttLightSource[] {
   return (lights ?? []).map((l) => ({ ...l }));
 }
 
+export const VTT_COMBAT_TRACKER_LAYOUT_STORAGE_KEY =
+  'mot.vtt.combat_tracker_window.v1';
+
+interface StoredCombatTrackerWindowLayout {
+  position: { x: number; y: number } | null;
+  minimized: boolean;
+}
+
+function readStoredCombatTrackerLayout(): StoredCombatTrackerWindowLayout {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return { position: null, minimized: false };
+    }
+    const raw = localStorage.getItem(VTT_COMBAT_TRACKER_LAYOUT_STORAGE_KEY);
+    if (!raw) return { position: null, minimized: false };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const x = parsed['x'];
+    const y = parsed['y'];
+    const hasCoords =
+      typeof x === 'number' &&
+      Number.isFinite(x) &&
+      typeof y === 'number' &&
+      Number.isFinite(y);
+    return {
+      position: hasCoords ? { x: Math.round(x), y: Math.round(y) } : null,
+      minimized: Boolean(parsed['minimized']),
+    };
+  } catch {
+    return { position: null, minimized: false };
+  }
+}
+
+function writeStoredCombatTrackerLayout(
+  position: { x: number; y: number } | null,
+  minimized: boolean
+): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(
+      VTT_COMBAT_TRACKER_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        ...(position ? { x: Math.round(position.x), y: Math.round(position.y) } : {}),
+        minimized,
+      })
+    );
+  } catch {
+    return;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttStore {
   private readonly vttService = inject(VttService);
@@ -1167,7 +1217,10 @@ export class VttStore {
 
   readonly combatTrackerDrawerOpen = signal<boolean>(false);
   readonly combatTrackerPosition = signal<{ x: number; y: number } | null>(
-    null
+    readStoredCombatTrackerLayout().position
+  );
+  readonly combatTrackerMinimized = signal<boolean>(
+    readStoredCombatTrackerLayout().minimized
   );
 
   readonly isCombatInitiationOpen = computed<boolean>(() => {
@@ -7681,6 +7734,20 @@ export class VttStore {
     this.combatTrackerDrawerOpen.update((curr) =>
       force !== undefined ? force : !curr
     );
+  }
+
+  saveCombatTrackerPosition(coords: { x: number; y: number }): void {
+    const normalized = {
+      x: Math.round(coords.x),
+      y: Math.round(coords.y),
+    };
+    this.combatTrackerPosition.set(normalized);
+    writeStoredCombatTrackerLayout(normalized, this.combatTrackerMinimized());
+  }
+
+  saveCombatTrackerMinimized(minimized: boolean): void {
+    this.combatTrackerMinimized.set(minimized);
+    writeStoredCombatTrackerLayout(this.combatTrackerPosition(), minimized);
   }
 
   async initiateCombatPhase(silentLog = false): Promise<void> {

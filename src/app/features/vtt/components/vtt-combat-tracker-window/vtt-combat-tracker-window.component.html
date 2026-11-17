@@ -13,8 +13,10 @@
     [estimatedHeight]="380"
     [initialX]="initialX()"
     [initialY]="initialY()"
+    [initialMinimized]="vttStore.combatTrackerMinimized()"
     [compactHeader]="true"
     (positionChange)="onPositionChange($event)"
+    (minimizedChange)="onMinimizedChange($event)"
     (closed)="closeTracker()"
   >
     <div

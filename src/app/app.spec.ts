@@ -11754,6 +11754,7 @@ describe('App', () => {
   });
 
   it('should enroll anyone who rolls Initiative into the Combat Carousel lobby, start Round 1 with only enrolled combatants, allow mid-combat Initiative joins, and support GM tracker edits', async () => {
+    localStorage.removeItem('mot.vtt.combat_tracker_window.v1');
     const activeUserSig = signal<{ id: string; email: string }>({
       id: 'player-a',
       email: 'playera@test.com',
@@ -12113,6 +12114,13 @@ describe('App', () => {
     const draggedX = vttStore.combatTrackerPosition()!.x;
     const draggedY = vttStore.combatTrackerPosition()!.y;
     expect(draggedX).toBeGreaterThan(200);
+    expect(
+      JSON.parse(localStorage.getItem('mot.vtt.combat_tracker_window.v1')!)
+    ).toEqual({
+      x: draggedX,
+      y: draggedY,
+      minimized: false,
+    });
 
     expect(
       vttStore.tokens().find((t) => t.id === 'tok-hero')?.npc_stats

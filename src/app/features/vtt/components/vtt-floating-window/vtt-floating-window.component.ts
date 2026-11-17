@@ -42,10 +42,12 @@ export class VttFloatingWindowComponent implements OnInit {
   readonly accentBorder = input<boolean>(false);
   readonly allowOverflow = input<boolean>(false);
   readonly minimizable = input<boolean>(true);
+  readonly initialMinimized = input<boolean>(false);
   readonly compactHeader = input<boolean>(false);
 
   readonly closed = output<void>();
   readonly positionChange = output<{ x: number; y: number }>();
+  readonly minimizedChange = output<boolean>();
 
   readonly minimized = signal(false);
   readonly windowX = signal(88);
@@ -63,6 +65,7 @@ export class VttFloatingWindowComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.minimized.set(this.initialMinimized());
     const coords = computeInitialFloatingWindowCoords(
       this.estimatedWidth(),
       this.estimatedHeight(),
@@ -79,10 +82,13 @@ export class VttFloatingWindowComponent implements OnInit {
   }
 
   toggleMinimize(): void {
-    this.minimized.update((v) => !v);
+    const next = !this.minimized();
+    this.minimized.set(next);
+    this.minimizedChange.emit(next);
   }
 
   closeWindow(): void {
+    this.positionChange.emit({ x: this.windowX(), y: this.windowY() });
     this.closed.emit();
   }
 
@@ -108,6 +114,7 @@ export class VttFloatingWindowComponent implements OnInit {
     );
     this.windowX.set(clamped.x);
     this.windowY.set(clamped.y);
+    this.positionChange.emit(clamped);
   }
 
   @HostListener('window:pointerup')
@@ -122,6 +129,7 @@ export class VttFloatingWindowComponent implements OnInit {
   onWindowPointerCancel(): void {
     if (this.isDraggingWindow()) {
       this.isDraggingWindow.set(false);
+      this.positionChange.emit({ x: this.windowX(), y: this.windowY() });
     }
   }
 
