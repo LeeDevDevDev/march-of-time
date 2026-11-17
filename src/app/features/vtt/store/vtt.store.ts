@@ -7283,10 +7283,7 @@ export class VttStore {
     );
 
     const manual = this.manualRollOverride();
-    const attackRoll =
-      manual !== null
-        ? createManualRoll(manual, pending.attackMod)
-        : roll2d10Check(pending.attackMod, this.attackRollMode());
+    const rollMode = this.attackRollMode();
 
     await this.consumeAttackerActionCost(attacker, pending);
 
@@ -7305,7 +7302,10 @@ export class VttStore {
       reachFeet: pending.reachFeet,
       combatTags: pending.combatTags,
       disallowedDefenses: pending.disallowedDefenses,
-      attackRoll,
+      attackMod: pending.attackMod,
+      attackRollMode: rollMode,
+      manualAttackTotal: manual,
+      attackRoll: null,
       rawFlatDamage: pending.flatDamage,
       bonusSpDamage: pending.bonusSpDamage,
       ignoreArmorDr: pending.ignoreArmorDr,
@@ -7318,30 +7318,14 @@ export class VttStore {
 
     this.pendingTargetAction.set(null);
     this.manualRollOverride.set(null);
+    this.attackRollMode.set('normal');
 
-    const built = buildPhysicalDiceFrom2d10Roll(attackRoll);
-    let diceThrow: VttDiceThrowPayload | undefined;
-    if (manual === null) {
-      diceThrow = this.createDiceThrowPayload({
-        label: `${attacker.name} · ${pending.actionName}`,
-        formula: built.formula,
-        total: attackRoll.total,
-        dice: built.physicalDice,
-        senderNameOverride: attacker.name,
-      });
-      this.enqueueDiceThrow(diceThrow, true);
-    }
-
+    const modSign = pending.attackMod >= 0 ? '+' : '';
     await this.patchScene(sc.id, { pending_clash: clash });
     await this.postLog({
       kind: 'clash',
-      title: `${attacker.name} attacks ${defender.name} with ${pending.actionName} (Roll ${attackRoll.total})`,
-      detail: `Distance ${distFeet} ft · ${pending.flatDamage} Raw DMG${pending.combatTags.length ? ' · [' + pending.combatTags.join(', ') + ']' : ''} — Awaiting ${defender.name}'s reaction`,
-      payload: {
-        roll: attackRoll,
-        chips: built.chips,
-        ...(diceThrow ? { diceThrow } : {}),
-      },
+      title: `${attacker.name} targets ${defender.name} with ${pending.actionName}`,
+      detail: `Distance ${distFeet} ft · 2d10${modSign}${pending.attackMod} · ${pending.flatDamage} Raw DMG${pending.combatTags.length ? ' · [' + pending.combatTags.join(', ') + ']' : ''} — Awaiting ${defender.name}'s reaction before rolling`,
     });
   }
 
@@ -7355,6 +7339,13 @@ export class VttStore {
     if (!sc || !clash || !defender) return;
     if (!this.canControlToken(defender) && !this.isGm()) return;
 
+    const atkMod = clash.attackMod ?? 0;
+    const attackRoll =
+      clash.attackRoll ??
+      (clash.manualAttackTotal !== undefined && clash.manualAttackTotal !== null
+        ? createManualRoll(clash.manualAttackTotal, atkMod)
+        : roll2d10Check(atkMod, clash.attackRollMode ?? 'normal'));
+
     const caps = this.getDefenderCapabilities(defender);
     const mod =
       reaction === 'parry'
@@ -7367,30 +7358,81 @@ export class VttStore {
         ? createManualRoll(manualDefenseTotal, mod)
         : undefined;
 
-    const resolution = resolveClashReaction(clash, reaction, caps, customRoll);
+    const clashWithAttack: VttPendingClash = {
+      ...clash,
+      attackRoll,
+    };
+
+    const resolution = resolveClashReaction(
+      clashWithAttack,
+      reaction,
+      caps,
+      customRoll,
+      attackRoll
+    );
+
+    let playedCue = false;
+    const builtAttack = buildPhysicalDiceFrom2d10Roll(attackRoll);
+    let attackDiceThrow: VttDiceThrowPayload | undefined;
+    if (
+      !clash.attackRoll &&
+      (clash.manualAttackTotal === undefined || clash.manualAttackTotal === null)
+    ) {
+      attackDiceThrow = this.createDiceThrowPayload({
+        label: `${clash.attackerName} · ${clash.actionName}`,
+        formula: builtAttack.formula,
+        total: attackRoll.total,
+        dice: builtAttack.physicalDice,
+        senderNameOverride: clash.attackerName,
+      });
+      this.settingsStore.playUiCue('dice');
+      playedCue = true;
+      this.enqueueDiceThrow(attackDiceThrow, true);
+    }
+
     if (
       (reaction === 'parry' || reaction === 'dodge') &&
       customRoll === undefined &&
       resolution.defenseRoll
     ) {
-      const built = buildPhysicalDiceFrom2d10Roll(resolution.defenseRoll);
+      const builtDef = buildPhysicalDiceFrom2d10Roll(resolution.defenseRoll);
       const reactionLabel = reaction === 'parry' ? 'Parry' : 'Dodge';
-      const diceThrow = this.createDiceThrowPayload({
+      const defDiceThrow = this.createDiceThrowPayload({
         label: `${defender.name} · ${reactionLabel}`,
-        formula: built.formula,
+        formula: builtDef.formula,
         total: resolution.defenseRoll.total,
-        dice: built.physicalDice,
+        dice: builtDef.physicalDice,
         senderNameOverride: defender.name,
       });
-      this.settingsStore.playUiCue('dice');
-      this.enqueueDiceThrow(diceThrow, true);
+      if (!playedCue) {
+        this.settingsStore.playUiCue('dice');
+      }
+      this.enqueueDiceThrow(defDiceThrow, true);
     }
+
+    const reactionTitle =
+      reaction === 'parry'
+        ? `Parry ${resolution.defenseRoll?.total ?? 0}`
+        : reaction === 'dodge'
+          ? `Dodge ${resolution.defenseRoll?.total ?? 0}`
+          : 'Take Hit';
 
     await this.patchScene(sc.id, {
       pending_clash: {
-        ...clash,
+        ...clashWithAttack,
         selectedReaction: reaction,
         resolution,
+      },
+    });
+
+    await this.postLog({
+      kind: 'roll',
+      title: `Clash Rolled: ${clash.attackerName} (${attackRoll.total}) vs ${defender.name} (${reactionTitle})`,
+      detail: `${resolution.summary} — Awaiting GM to apply outcome`,
+      payload: {
+        roll: attackRoll,
+        chips: builtAttack.chips,
+        ...(attackDiceThrow ? { diceThrow: attackDiceThrow } : {}),
       },
     });
   }
@@ -7407,6 +7449,7 @@ export class VttStore {
       >
     >
   ): Promise<void> {
+    if (!this.isGm()) return;
     const sc = this.activeScene();
     const clash = this.pendingClash();
     if (!sc || !clash?.resolution) return;
@@ -7454,7 +7497,25 @@ export class VttStore {
 
   async cancelPendingClash(): Promise<void> {
     const sc = this.activeScene();
-    if (!sc) return;
+    const clash = this.pendingClash();
+    if (!sc || !clash) return;
+    if (clash.resolution) {
+      if (!this.isGm()) return;
+    } else {
+      const attacker = this.sceneTokens().find(
+        (t) => t.id === clash.attackerTokenId
+      );
+      const defender = this.sceneTokens().find(
+        (t) => t.id === clash.defenderTokenId
+      );
+      if (
+        !this.isGm() &&
+        !this.canControlToken(attacker) &&
+        !this.canControlToken(defender)
+      ) {
+        return;
+      }
+    }
     await this.patchScene(sc.id, { pending_clash: null });
   }
 

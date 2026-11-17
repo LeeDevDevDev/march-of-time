@@ -783,6 +783,20 @@ export class VttRoomComponent {
     return this.vttStore.canControlToken(def);
   });
 
+  readonly canCancelPreRollClash = computed<boolean>(() => {
+    if (this.vttStore.isGm()) return true;
+    const clash = this.vttStore.pendingClash();
+    if (!clash) return false;
+    const attacker = this.vttStore
+      .sceneTokens()
+      .find((t) => t.id === clash.attackerTokenId);
+    const defender = this.vttStore.pendingClashDefender();
+    return (
+      this.vttStore.canControlToken(attacker) ||
+      this.vttStore.canControlToken(defender)
+    );
+  });
+
   readonly editDraftLayout = computed(() => {
     const draft = this.editingMapDraft();
     if (!draft) return null;
@@ -2488,12 +2502,14 @@ export class VttRoomComponent {
   }
 
   rechooseClashReaction(): void {
+    if (!this.vttStore.isGm()) return;
     const sc = this.vttStore.activeScene();
     const clash = this.vttStore.pendingClash();
     if (!sc || !clash) return;
     void this.vttStore.patchScene(sc.id, {
       pending_clash: {
         ...clash,
+        attackRoll: null,
         selectedReaction: undefined,
         resolution: undefined,
       },
@@ -2501,6 +2517,7 @@ export class VttRoomComponent {
   }
 
   confirmApplyClashOutcome(): void {
+    if (!this.vttStore.isGm()) return;
     void this.vttStore.applyPendingClashOutcome({
       hitLanded: this.overrideHitLanded,
       spDamageToDefender: Math.max(0, Number(this.overrideSpDmg) || 0),

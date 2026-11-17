@@ -499,7 +499,10 @@ export interface VttPendingClash {
   reachFeet: number;
   combatTags: ActiveCombatTag[];
   disallowedDefenses: ('Parry' | 'Dodge' | 'Block')[];
-  attackRoll: VttDiceRoll;
+  attackMod?: number;
+  attackRollMode?: 'normal' | 'advantage' | 'disadvantage';
+  manualAttackTotal?: number | null;
+  attackRoll?: VttDiceRoll | null;
   rawFlatDamage: number;
   bonusSpDamage: number;
   ignoreArmorDr: number;

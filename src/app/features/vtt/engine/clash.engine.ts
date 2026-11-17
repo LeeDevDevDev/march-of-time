@@ -176,8 +176,13 @@ export function resolveClashReaction(
   clash: VttPendingClash,
   reaction: VttDefenseChoice,
   defender: DefenderClashCapabilities,
-  providedDefenseRoll?: VttDiceRoll
+  providedDefenseRoll?: VttDiceRoll,
+  providedAttackRoll?: VttDiceRoll
 ): VttClashResolution {
+  const atkRoll =
+    providedAttackRoll ??
+    clash.attackRoll ??
+    roll2d10Check(clash.attackMod ?? 0, clash.attackRollMode ?? 'normal');
   const uniqueStatuses = Array.from(
     new Set(clash.inflictStatuses ?? [])
   ) as Exclude<CombatStatusEffect, 'None'>[];
@@ -185,7 +190,7 @@ export function resolveClashReaction(
   if (reaction === 'parry') {
     const defRoll =
       providedDefenseRoll ?? roll2d10Check(defender.parryMod, 'normal');
-    const margin = defRoll.total - clash.attackRoll.total;
+    const margin = defRoll.total - atkRoll.total;
     const defended = margin > 0;
     const flawless = defended && margin >= 5;
 
@@ -200,8 +205,8 @@ export function resolveClashReaction(
           : 0;
       const parts = [
         flawless
-          ? `Flawless Parry (${defRoll.total} vs ${clash.attackRoll.total})!`
-          : `Parried (${defRoll.total} vs ${clash.attackRoll.total})!`,
+          ? `Flawless Parry (${defRoll.total} vs ${atkRoll.total})!`
+          : `Parried (${defRoll.total} vs ${atkRoll.total})!`,
       ];
       if (counterSp > 0) {
         parts.push(`Flawless Counter deals ${counterSp} SP DMG to ${clash.attackerName}`);
@@ -245,14 +250,14 @@ export function resolveClashReaction(
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 0,
       shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-      summary: `Parry Broken (${defRoll.total} vs ${clash.attackRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
+      summary: `Parry Broken (${defRoll.total} vs ${atkRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
     };
   }
 
   if (reaction === 'dodge') {
     const defRoll =
       providedDefenseRoll ?? roll2d10Check(defender.dodgeMod, 'normal');
-    const margin = defRoll.total - clash.attackRoll.total;
+    const margin = defRoll.total - atkRoll.total;
     const defended = margin > 0;
     const flawless = defended && margin >= 5;
     const apSpent = flawless ? 0 : 1;
@@ -274,8 +279,8 @@ export function resolveClashReaction(
         shiftDefenderFeet: 5,
         shiftAttackerFeet: clash.selfShiftFeet ?? 0,
         summary: flawless
-          ? `Flawless Dodge (${defRoll.total} vs ${clash.attackRoll.total}) · 1 AP Refunded · Shift 5 ft`
-          : `Dodged (${defRoll.total} vs ${clash.attackRoll.total}) · Shift 5 ft`,
+          ? `Flawless Dodge (${defRoll.total} vs ${atkRoll.total}) · 1 AP Refunded · Shift 5 ft`
+          : `Dodged (${defRoll.total} vs ${atkRoll.total}) · Shift 5 ft`,
       };
     }
 
@@ -295,13 +300,13 @@ export function resolveClashReaction(
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 5,
       shiftAttackerFeet: clash.selfShiftFeet ?? 0,
-      summary: `Caught Mid-Dodge (${defRoll.total} vs ${clash.attackRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
+      summary: `Caught Mid-Dodge (${defRoll.total} vs ${atkRoll.total}) · ${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
     };
   }
 
   const cascade = computeHitDamageCascade(clash, defender);
   const summaryParts = [
-    `Direct Hit (Roll ${clash.attackRoll.total})`,
+    `Direct Hit (Roll ${atkRoll.total})`,
     `${cascade.spDamageToDefender} SP & ${cascade.hpDamageToDefender} HP DMG`,
   ];
   if (cascade.shieldMitigated > 0) {

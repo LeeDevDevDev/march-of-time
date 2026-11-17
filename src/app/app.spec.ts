@@ -11487,4 +11487,269 @@ describe('App', () => {
       vttStore.tokens().find((t) => t.id === scoutTok!.id)!.current_hp
     ).toBe(Math.max(0, scoutHpBefore - 2));
   });
+
+  it('should lock in both attacker and defender Clash actions before rolling and restrict Apply Outcome to GM', async () => {
+    const activeUserSig = signal<{ id: string; email: string }>({
+      id: 'player-atk',
+      email: 'atk@test.com',
+    });
+    let logSeq = 1;
+
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => activeUserSig().id === 'gm-clash-1',
+            displayName: () => activeUserSig().id,
+            handle: () => activeUserSig().id,
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-clash-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.error.set(null);
+    vttStore.campaign.set({
+      id: 'camp-clash-sim',
+      gm_id: 'gm-clash-1',
+      name: 'Simultaneous Clash Campaign',
+      cover_image_url: null,
+      invite_code: 'CLSH01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-clash-sim',
+        campaign_id: 'camp-clash-sim',
+        gm_id: 'gm-clash-1',
+        folder_id: null,
+        name: 'Arena',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: DEFAULT_VTT_SCENE_WIDTH_PX,
+        scene_height: DEFAULT_VTT_SCENE_HEIGHT_PX,
+        padding: DEFAULT_VTT_SCENE_PADDING,
+        grid_width: DEFAULT_VTT_GRID_WIDTH,
+        grid_height: DEFAULT_VTT_GRID_HEIGHT,
+        grid_size_px: DEFAULT_VTT_GRID_SIZE_PX,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: true,
+        round_number: 1,
+        active_turn_token_id: 'tok-atk',
+        initiative_order: ['tok-atk', 'tok-def'],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-clash-sim');
+    vttStore.tokens.set([
+      {
+        id: 'tok-atk',
+        encounter_id: 'scene-clash-sim',
+        character_id: null,
+        owner_id: 'player-atk',
+        name: 'Vanguard Kael',
+        faction: 'ally',
+        x: 2,
+        y: 2,
+        q: 2,
+        r: 2,
+        size: 1,
+        icon: 'greatsword',
+        color: '#38B29A',
+        current_hp: 10,
+        max_hp: 10,
+        current_sp: 4,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 0,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#F59E0B',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          weapon_name: 'Iron Greatsword',
+          attack_ap: 1,
+          attack_mod: 4,
+          flat_damage: 6,
+          reach_feet: 5,
+          parry_mod: 2,
+          dodge_mod: 1,
+          can_dodge: true,
+        },
+      },
+      {
+        id: 'tok-def',
+        encounter_id: 'scene-clash-sim',
+        character_id: null,
+        owner_id: 'player-def',
+        name: 'Rival Duelist',
+        faction: 'enemy',
+        x: 3,
+        y: 2,
+        q: 3,
+        r: 2,
+        size: 1,
+        icon: 'rapier',
+        color: '#EF4444',
+        current_hp: 10,
+        max_hp: 10,
+        current_sp: 2,
+        max_sp: 4,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 0,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#F59E0B',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          weapon_name: 'Steel Saber',
+          attack_ap: 1,
+          attack_mod: 3,
+          flat_damage: 4,
+          reach_feet: 5,
+          parry_mod: 2,
+          dodge_mod: 2,
+          can_dodge: true,
+        },
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    fixture.detectChanges();
+    const rootEl = fixture.nativeElement as HTMLElement;
+
+    vttStore.manualRollOverride.set(18);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    fixture.detectChanges();
+
+    expect(vttStore.pendingClash()).toBeTruthy();
+    expect(vttStore.pendingClash()!.attackRoll).toBeNull();
+    expect(rootEl.querySelector('[data-clash-pending-roll="true"]')).toBeTruthy();
+    expect(rootEl.querySelector('[data-clash-attack-roll="true"]')).toBeNull();
+    expect(rootEl.querySelector('[data-clash-reaction="parry"]')).toBeNull();
+
+    activeUserSig.set({ id: 'player-def', email: 'def@test.com' });
+    fixture.detectChanges();
+
+    const parryReactionBtn = rootEl.querySelector(
+      'button[data-clash-reaction="parry"]'
+    ) as HTMLButtonElement | null;
+    expect(parryReactionBtn).toBeTruthy();
+    await vttStore.declareClashReaction('parry', 12);
+    fixture.detectChanges();
+
+    expect(vttStore.pendingClash()!.attackRoll?.total).toBe(18);
+    expect(vttStore.pendingClash()!.resolution?.defenseRoll?.total).toBe(12);
+    expect(rootEl.querySelector('[data-clash-attack-roll="true"]')).toBeTruthy();
+    expect(rootEl.querySelector('[data-clash-defense-roll="true"]')).toBeTruthy();
+    expect(rootEl.querySelector('[data-clash-apply-outcome="true"]')).toBeNull();
+    expect(rootEl.querySelector('[data-clash-awaiting-gm="true"]')).toBeTruthy();
+
+    await vttStore.applyPendingClashOutcome();
+    expect(vttStore.pendingClash()).toBeTruthy();
+    expect(vttStore.tokens()[1].current_hp).toBe(10);
+
+    activeUserSig.set({ id: 'gm-clash-1', email: 'gm@test.com' });
+    fixture.detectChanges();
+
+    const applyOutcomeBtn = rootEl.querySelector(
+      'button[data-clash-apply-outcome="true"]'
+    ) as HTMLButtonElement | null;
+    expect(applyOutcomeBtn).toBeTruthy();
+    expect(
+      rootEl.querySelector('button[data-clash-dismiss-manual="true"]')
+    ).toBeTruthy();
+
+    applyOutcomeBtn!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(vttStore.pendingClash()).toBeNull();
+    expect(vttStore.tokens()[1].current_sp).toBe(0);
+    expect(vttStore.tokens()[1].current_hp).toBe(7);
+    expect(vttStore.tokens()[1].current_ap).toBe(3);
+  });
 });
