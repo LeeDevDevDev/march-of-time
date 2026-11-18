@@ -1689,12 +1689,18 @@ export class VttStore {
 
     const npc = token.npc_stats ?? {};
     const defMods = this.resolveTokenNpcDefenseMods(token);
+    const baseShield = Math.max(
+      token.shield_block,
+      defMods.heavyWeaponBlockBase
+    );
+    const effectiveNpcShieldBlock =
+      baseShield > 0 ? baseShield + defMods.blockSkillBonus : 0;
     return {
       currentSp: token.current_sp,
       currentHp: token.current_hp,
       currentAp: token.current_ap,
       armorDr: token.armor_dr,
-      shieldBlock: token.shield_block,
+      shieldBlock: effectiveNpcShieldBlock,
       shieldRaised: token.shield_raised,
       parryMod: defMods.parryMod,
       dodgeMod: defMods.dodgeMod,
@@ -7650,7 +7656,9 @@ export class VttStore {
       await this.patchToken(token.id, { shield_raised: false });
       return;
     }
+    const caps = this.getDefenderCapabilities(token);
     if (
+      caps.shieldBlock <= 0 ||
       token.current_ap < 1 ||
       (token.max_sp > 0 && token.current_sp <= 0)
     ) {
@@ -7671,9 +7679,48 @@ export class VttStore {
     await this.postLog({
       kind: 'system',
       title: 'Guard Raised',
-      detail: `Block −${token.shield_block} DMG`,
+      detail: `Block −${caps.shieldBlock} DMG`,
       senderNameOverride: token.name,
       payload: this.buildTokenSpeakerPayload(token),
+    });
+  }
+
+  async raiseClashDefenderGuard(): Promise<void> {
+    const sc = this.activeScene();
+    const clash = this.pendingClash();
+    const defender = this.pendingClashDefender();
+    if (!sc || !clash || clash.resolution || !defender) return;
+    if (!this.canControlToken(defender) && !this.isGm()) return;
+    if (defender.shield_raised) return;
+
+    const caps = this.getDefenderCapabilities(defender);
+    if (
+      caps.shieldBlock <= 0 ||
+      clash.disallowedDefenses.includes('Block') ||
+      defender.current_sp <= 0 ||
+      defender.current_ap < 1
+    ) {
+      return;
+    }
+
+    this.pushUndoEntry(defender.encounter_id, `Raise Guard (${defender.name})`, {
+      kind: 'token_patch',
+      tokenId: defender.id,
+      previousTokenPatch: {
+        shield_raised: defender.shield_raised,
+        current_ap: defender.current_ap,
+      },
+    });
+    await this.patchToken(defender.id, {
+      shield_raised: true,
+      current_ap: Math.max(0, defender.current_ap - 1),
+    });
+    await this.postLog({
+      kind: 'system',
+      title: 'Guard Raised',
+      detail: `Block −${caps.shieldBlock} DMG`,
+      senderNameOverride: defender.name,
+      payload: this.buildTokenSpeakerPayload(defender),
     });
   }
 
@@ -7760,6 +7807,8 @@ export class VttStore {
     parryMod: number;
     dodgeMod: number;
     enablesMartialParry: boolean;
+    heavyWeaponBlockBase: number;
+    blockSkillBonus: number;
   } {
     const allWeapons =
       typeof this.compendiumStore.allWeapons === 'function'
@@ -8277,8 +8326,7 @@ export class VttStore {
       (t) => t.id === clash.attackerTokenId
     );
     const guardBlockedOnRoll =
-      reaction === 'take_hit' &&
-      caps.shieldRaised &&
+      (reaction === 'block' || (reaction === 'take_hit' && caps.shieldRaised)) &&
       caps.shieldBlock > 0 &&
       caps.currentSp > 0 &&
       !clash.disallowedDefenses.includes('Block');
@@ -8336,23 +8384,34 @@ export class VttStore {
       ...overrides,
     };
 
+    const defenderCaps = defender ? this.getDefenderCapabilities(defender) : null;
     const guardBlocked =
-      res.reaction === 'take_hit' &&
+      (res.reaction === 'block' ||
+        (res.reaction === 'take_hit' && Boolean(defender?.shield_raised))) &&
       (res.shieldMitigated > 0 ||
         Boolean(
-          defender?.shield_raised &&
-            defender.shield_block > 0 &&
+          defender &&
+            defenderCaps &&
+            defenderCaps.shieldBlock > 0 &&
             defender.current_sp > 0 &&
             !clash.disallowedDefenses.includes('Block')
         ));
+    let defenderGuardNewlyRaised = false;
     let defenderGuardLowered = false;
 
     if (defender) {
       const nextDefSp = Math.max(0, defender.current_sp - res.spDamageToDefender);
       defenderGuardLowered = Boolean(
-        defender.shield_raised &&
-          (res.defenderGuardBroken ||
-            nextDefSp <= 0)
+        (defender.shield_raised || res.defenderGuardRaised) &&
+          (res.defenderGuardBroken || nextDefSp <= 0)
+      );
+      const nextShieldRaised = defenderGuardLowered
+        ? false
+        : res.defenderGuardRaised
+          ? true
+          : defender.shield_raised;
+      defenderGuardNewlyRaised = Boolean(
+        !defender.shield_raised && nextShieldRaised
       );
       const mergedStatuses = res.hitLanded
         ? Array.from(
@@ -8364,7 +8423,9 @@ export class VttStore {
         current_ap: Math.max(0, defender.current_ap - res.defenderApSpent),
         current_sp: nextDefSp,
         current_hp: Math.max(0, defender.current_hp - res.hpDamageToDefender),
-        ...(defenderGuardLowered ? { shield_raised: false } : {}),
+        ...(nextShieldRaised !== defender.shield_raised
+          ? { shield_raised: nextShieldRaised }
+          : {}),
         statuses: mergedStatuses,
       });
     }
@@ -8386,7 +8447,10 @@ export class VttStore {
       res.hpDamageToDefender,
       res.counterSpToAttacker
     );
-    const extraParts = defenderGuardLowered ? ['Guard Lowered'] : [];
+    const extraParts = [
+      ...(defenderGuardNewlyRaised ? ['Guard Raised'] : []),
+      ...(defenderGuardLowered ? ['Guard Lowered'] : []),
+    ];
     const detailText =
       res.hitLanded && dmgParts.length === 0
         ? [statusLabel, '0 DMG', ...extraParts].join(' · ')
@@ -8394,6 +8458,7 @@ export class VttStore {
 
     const outcomeBadges = [
       ...(res.hitLanded ? res.inflictedStatuses : []),
+      ...(defenderGuardNewlyRaised ? ['Guard Raised'] : []),
       ...(defenderGuardLowered ? ['Guard Lowered'] : []),
     ];
 
@@ -9112,12 +9177,20 @@ export class VttStore {
 
     if (isNewRound) {
       for (const tok of allCombatants) {
-        await this.patchToken(
-          tok.id,
-          tok.id === nextTok.id
-            ? { current_ap: tok.max_ap, shield_raised: false }
-            : { current_ap: tok.max_ap }
-        );
+        const rawNpcStats = tok.npc_stats as Record<string, unknown> | undefined;
+        const nextNpcStats =
+          rawNpcStats && '__shield_raised' in rawNpcStats
+            ? (() => {
+                const copy = { ...rawNpcStats };
+                delete copy['__shield_raised'];
+                return copy as VttNpcStats;
+              })()
+            : undefined;
+        await this.patchToken(tok.id, {
+          current_ap: tok.max_ap,
+          shield_raised: false,
+          ...(nextNpcStats ? { npc_stats: nextNpcStats } : {}),
+        });
 
         const latestTok = this.tokens().find((t) => t.id === tok.id) ?? tok;
         const ch = this.resolveCharacterForToken(latestTok);
@@ -9127,9 +9200,7 @@ export class VttStore {
             if (k.startsWith(UPGRADE_SLOT_PREFIX)) {
               nextCd[k] = v;
             } else if (k === '__shield_raised') {
-              if (latestTok.id !== nextTok.id && v) {
-                nextCd[k] = v;
-              }
+              continue;
             } else {
               const rem = Number(v) - 1;
               if (rem > 0) nextCd[k] = rem;
@@ -9145,14 +9216,6 @@ export class VttStore {
           );
           await this.persistDetachedSheetOnActorForToken(latestTok, updated);
         }
-      }
-    } else {
-      const nextTokChar = this.resolveCharacterForToken(nextTok);
-      if (
-        nextTok.shield_raised ||
-        Boolean(nextTokChar?.active_cooldowns?.['__shield_raised'])
-      ) {
-        await this.patchToken(nextTok.id, { shield_raised: false });
       }
     }
 

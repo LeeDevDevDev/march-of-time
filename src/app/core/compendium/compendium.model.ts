@@ -73,7 +73,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Raise Shield',
     category: 'Active Defense',
     summary:
-      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn or until your [SP] is depleted.',
+      '1 AP Action or Clash Reaction (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against non-[Piercing] attacks until the start of the next round or until your [SP] is depleted.',
   },
   {
     id: 'kw-shield-block',

@@ -738,13 +738,19 @@
 
             @if (!clash.resolution) {
               @if (canRespondToClash() && vttStore.pendingClashLegalReactions(); as legal) {
+                @let defCaps = vttStore.pendingClashCapabilities();
                 <div class="space-y-2 border-t border-[#243B37] pt-2.5">
                   <div class="flex flex-wrap items-center justify-between gap-2">
-                    <div>
+                    <div class="flex flex-wrap items-center gap-1.5">
                       <span class="font-semibold text-white">
                         Choose {{ clash.defenderName }}&rsquo;s Reaction:
                       </span>
-                      <span class="ml-1.5 text-[10px] text-[#8AB0AB]">
+                      @if (defCaps?.shieldRaised) {
+                        <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[10px] font-bold uppercase text-white">
+                          Guard Up
+                        </span>
+                      }
+                      <span class="text-[10px] text-[#8AB0AB]">
                         Both actions lock in before rolling
                       </span>
                     </div>
@@ -756,7 +762,7 @@
                     />
                   </div>
 
-                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
                       type="button"
                       data-clash-reaction="parry"
@@ -765,10 +771,16 @@
                       class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#38BDF8] disabled:opacity-45 disabled:cursor-not-allowed"
                     >
                       <span class="font-bold text-white">
-                        1 AP: Parry (+{{ vttStore.pendingClashCapabilities()?.parryMod ?? 0 }})
+                        1 AP: Parry (+{{ defCaps?.parryMod ?? 0 }})
                       </span>
                       <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
-                        {{ legal.parryDisabledReason || 'Beat roll to negate; +5 Flawless Counter SP' }}
+                        @if (legal.parryDisabledReason) {
+                          {{ legal.parryDisabledReason }}
+                        } @else if (legal.blockActive) {
+                          Beat roll to negate &middot; Guard cushions if failed
+                        } @else {
+                          Beat roll to negate; +5 Flawless Counter SP
+                        }
                       </span>
                     </button>
 
@@ -780,10 +792,51 @@
                       class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#38B29A] disabled:opacity-45 disabled:cursor-not-allowed"
                     >
                       <span class="font-bold text-white">
-                        1 AP: Dodge (+{{ vttStore.pendingClashCapabilities()?.dodgeMod ?? 0 }})
+                        1 AP: Dodge (+{{ defCaps?.dodgeMod ?? 0 }})
                       </span>
                       <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
-                        {{ legal.dodgeDisabledReason || 'Shift 5 ft; +5 Flawless refunds 1 AP' }}
+                        @if (legal.dodgeDisabledReason) {
+                          {{ legal.dodgeDisabledReason }}
+                        } @else if (legal.blockActive) {
+                          Shift 5 ft (+5 refunds 1 AP) &middot; Guard cushions if failed
+                        } @else {
+                          Shift 5 ft; +5 Flawless refunds 1 AP
+                        }
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-clash-reaction="block"
+                      [disabled]="!!defCaps?.shieldRaised || !legal.canBlock"
+                      (click)="raiseClashGuard()"
+                      class="flex flex-col items-start rounded-xl border p-2.5 text-left transition-colors hover:border-[#C4491A] disabled:cursor-not-allowed"
+                      [class.border-[#C4491A]]="defCaps?.shieldRaised"
+                      [class.bg-[#241610]]="defCaps?.shieldRaised"
+                      [class.disabled:opacity-100]="defCaps?.shieldRaised"
+                      [class.border-[#243B37]]="!defCaps?.shieldRaised"
+                      [class.bg-[#142220]]="!defCaps?.shieldRaised"
+                      [class.disabled:opacity-45]="!defCaps?.shieldRaised"
+                    >
+                      <span class="font-bold text-white">
+                        @if (defCaps?.shieldRaised) {
+                          Guard Raised{{ legal.blockMitigationValue > 0 ? ' (−' + legal.blockMitigationValue + ' DMG)' : '' }}
+                        } @else {
+                          1 AP: Raise Guard{{ legal.blockMitigationValue > 0 ? ' (−' + legal.blockMitigationValue + ' DMG)' : '' }}
+                        }
+                      </span>
+                      <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
+                        @if (defCaps?.shieldRaised) {
+                          @if (legal.blockDisabledByPiercing) {
+                            Active until next round &middot; Bypassed by Piercing
+                          } @else {
+                            Active until next round &middot; Now Parry, Dodge, or Take Damage
+                          }
+                        } @else if (legal.canBlock) {
+                          Stays open &middot; Raises Guard until next round
+                        } @else {
+                          {{ legal.blockDisabledReason }}
+                        }
                       </span>
                     </button>
 
@@ -791,16 +844,20 @@
                       type="button"
                       data-clash-reaction="take_hit"
                       (click)="chooseClashReaction('take_hit')"
-                      class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#F59E0B]"
+                      class="flex flex-col items-start rounded-xl border p-2.5 text-left transition-colors hover:border-[#F59E0B]"
+                      [class.border-[#C4491A]]="legal.blockActive"
+                      [class.bg-[#241610]]="legal.blockActive"
+                      [class.border-[#243B37]]="!legal.blockActive"
+                      [class.bg-[#142220]]="!legal.blockActive"
                     >
                       <span class="font-bold text-white">
-                        {{ legal.blockActive ? '0 AP: Guard Block' : '0 AP: Take Hit' }}
+                        {{ legal.blockActive ? '0 AP: Take Damage (Guard Block)' : '0 AP: Take Damage' }}
                       </span>
                       <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
                         @if (legal.blockActive) {
-                          Shield Block &minus;{{ legal.effectiveBlockMitigation }} DMG &rarr; SP (lowers Guard if SP hits 0)
+                          Block &minus;{{ legal.effectiveBlockMitigation }} DMG &rarr; SP damage (lowers Guard if SP hits 0)
                         } @else if (legal.blockDisabledByPiercing) {
-                          Piercing bypasses Block! Skips SP &rarr; Armor DR &rarr; HP
+                          Piercing bypasses Guard &middot; Skips SP &rarr; Armor DR &rarr; HP
                         } @else {
                           Undefended &middot; Skips SP &rarr; Armor DR &rarr; HP
                         }

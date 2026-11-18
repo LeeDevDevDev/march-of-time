@@ -1670,19 +1670,33 @@ describe('App', () => {
     const sweepLegal = getLegalDefenderReactions(parryableClash, defenderCaps);
     expect(sweepLegal.canParry).toBe(true);
     expect(sweepLegal.canDodge).toBe(false);
+    expect(sweepLegal.canBlock).toBe(true);
+    expect(sweepLegal.blockApCost).toBe(0);
     expect(sweepLegal.blockActive).toBe(true);
 
     const guardBlockedHit = resolveClashReaction(
       parryableClash,
-      'take_hit',
+      'block',
       defenderCaps
     );
     expect(guardBlockedHit.hitLanded).toBe(true);
+    expect(guardBlockedHit.defenderApSpent).toBe(0);
     expect(guardBlockedHit.shieldMitigated).toBe(4);
     expect(guardBlockedHit.spDamageToDefender).toBe(3);
     expect(guardBlockedHit.armorMitigated).toBe(1);
     expect(guardBlockedHit.hpDamageToDefender).toBe(0);
     expect(guardBlockedHit.defenderGuardBroken).toBe(true);
+
+    const reactiveBlockHit = resolveClashReaction(
+      parryableClash,
+      'block',
+      { ...defenderCaps, shieldRaised: false, currentSp: 8 }
+    );
+    expect(reactiveBlockHit.defenderApSpent).toBe(1);
+    expect(reactiveBlockHit.shieldMitigated).toBe(4);
+    expect(reactiveBlockHit.spDamageToDefender).toBe(4);
+    expect(reactiveBlockHit.defenderGuardRaised).toBe(true);
+    expect(reactiveBlockHit.defenderGuardBroken).toBe(false);
 
     const flawlessParry = resolveClashReaction(
       parryableClash,
@@ -14443,15 +14457,79 @@ describe('App', () => {
     )!;
     expect(defAfterUndefended.current_sp).toBe(5);
     expect(defAfterUndefended.current_hp).toBe(10);
+    expect(defAfterUndefended.shield_raised).toBe(false);
 
-    await vttStore.toggleTokenRaiseShield(defAfterUndefended);
-    expect(vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised).toBe(
-      true
+    await vttStore.patchToken('tok-def', { current_sp: 8, max_sp: 8 });
+    await vttStore.patchToken('tok-atk', { current_ap: 4 });
+
+    vttStore.manualRollOverride.set(15);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    expect(vttStore.pendingClashLegalReactions()?.canBlock).toBe(true);
+    expect(vttStore.pendingClashLegalReactions()?.blockApCost).toBe(1);
+
+    await vttStore.raiseClashDefenderGuard();
+    expect(vttStore.pendingClash()).toBeTruthy();
+    expect(vttStore.pendingClash()?.resolution).toBeUndefined();
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised
+    ).toBe(true);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-def')?.current_ap).toBe(
+      3
+    );
+    expect(vttStore.pendingClashLegalReactions()?.blockActive).toBe(true);
+    expect(vttStore.pendingClashLegalReactions()?.canParry).toBe(true);
+    expect(vttStore.pendingClashLegalReactions()?.canDodge).toBe(true);
+
+    await vttStore.declareClashReaction('take_hit');
+    await vttStore.applyPendingClashOutcome();
+
+    const defAfterReactiveBlock = vttStore.tokens().find(
+      (t) => t.id === 'tok-def'
+    )!;
+    expect(defAfterReactiveBlock.current_ap).toBe(3);
+    expect(defAfterReactiveBlock.current_sp).toBe(3);
+    expect(defAfterReactiveBlock.current_hp).toBe(10);
+    expect(defAfterReactiveBlock.shield_raised).toBe(true);
+
+    vttStore.manualRollOverride.set(14);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    const legalWhileGuarding = vttStore.pendingClashLegalReactions()!;
+    expect(legalWhileGuarding.canParry).toBe(true);
+    expect(legalWhileGuarding.canDodge).toBe(true);
+    expect(legalWhileGuarding.blockActive).toBe(true);
+    await vttStore.declareClashReaction('parry', 18);
+    await vttStore.applyPendingClashOutcome();
+
+    const defAfterParryWhileGuarding = vttStore.tokens().find(
+      (t) => t.id === 'tok-def'
+    )!;
+    expect(defAfterParryWhileGuarding.current_ap).toBe(2);
+    expect(defAfterParryWhileGuarding.current_sp).toBe(3);
+    expect(defAfterParryWhileGuarding.shield_raised).toBe(true);
+
+    await vttStore.advanceTurn();
+    expect(vttStore.activeScene()?.round_number).toBe(1);
+    expect(vttStore.activeScene()?.active_turn_token_id).toBe('tok-def');
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised
+    ).toBe(true);
+
+    await vttStore.advanceTurn();
+    expect(vttStore.activeScene()?.round_number).toBe(2);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised
+    ).toBe(false);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-def')?.current_ap).toBe(
+      4
     );
 
     vttStore.manualRollOverride.set(16);
     vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
     await vttStore.launchClashAgainstTarget('tok-def');
+    await vttStore.raiseClashDefenderGuard();
+    expect(vttStore.pendingClash()?.resolution).toBeUndefined();
     await vttStore.declareClashReaction('take_hit');
     await vttStore.applyPendingClashOutcome();
 

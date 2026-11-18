@@ -25,6 +25,10 @@ export interface LegalReactionsSummary {
   parryDisabledReason: string | null;
   canDodge: boolean;
   dodgeDisabledReason: string | null;
+  canBlock: boolean;
+  blockApCost: 0 | 1;
+  blockDisabledReason: string | null;
+  blockMitigationValue: number;
   blockActive: boolean;
   blockDisabledByPiercing: boolean;
   effectiveBlockMitigation: number;
@@ -110,11 +114,27 @@ export function getLegalDefenderReactions(
     defender.currentSp > 0 &&
     !noBlockTag;
 
+  const blockApCost: 0 | 1 = defender.shieldRaised ? 0 : 1;
+  let blockDisabledReason: string | null = null;
+  if (defender.shieldBlock <= 0) {
+    blockDisabledReason = 'Requires Shield or Heavy Guard';
+  } else if (noBlockTag) {
+    blockDisabledReason = 'Cannot Block (Piercing)';
+  } else if (defender.currentSp <= 0) {
+    blockDisabledReason = 'Requires SP > 0';
+  } else if (!defender.shieldRaised && defender.currentAp < 1) {
+    blockDisabledReason = 'Requires 1 AP';
+  }
+
   return {
     canParry: parryDisabledReason === null,
     parryDisabledReason,
     canDodge: dodgeDisabledReason === null,
     dodgeDisabledReason,
+    canBlock: blockDisabledReason === null,
+    blockApCost,
+    blockDisabledReason,
+    blockMitigationValue: Math.max(0, defender.shieldBlock),
     blockActive,
     blockDisabledByPiercing:
       defender.shieldRaised &&
@@ -213,7 +233,7 @@ export function formatClashOutcomeStatus(
   if (hitLanded) {
     if (reaction === 'parry') return 'Attack Succeeded · Parry Failed';
     if (reaction === 'dodge') return 'Attack Succeeded · Dodge Failed';
-    if (blocked) return 'Attack Succeeded · Guard Blocked';
+    if (reaction === 'block' || blocked) return 'Attack Succeeded · Guard Blocked';
     return 'Attack Succeeded';
   }
   if (reaction === 'parry') {
@@ -400,6 +420,62 @@ export function resolveClashReaction(
     };
   }
 
+  if (reaction === 'block') {
+    const blockAllowed =
+      !clash.disallowedDefenses.includes('Block') &&
+      defender.shieldBlock > 0 &&
+      defender.currentSp > 0;
+    const apSpent = defender.shieldRaised ? 0 : 1;
+    const defenderWithGuard = {
+      ...defender,
+      shieldRaised: blockAllowed ? true : defender.shieldRaised,
+    };
+    const cascade = blockAllowed
+      ? computeHitDamageCascade(clash, defenderWithGuard)
+      : computeUndefendedHitDamage(clash, defender);
+    const nextSp = Math.max(0, defender.currentSp - cascade.spDamageToDefender);
+    const guardBroken = blockAllowed
+      ? nextSp <= 0
+      : Boolean(defender.shieldRaised && defender.currentSp <= 0);
+    const guardNewlyRaised = Boolean(
+      !defender.shieldRaised && blockAllowed && !guardBroken
+    );
+    const dmgParts = formatClashDamageParts(
+      cascade.spDamageToDefender,
+      cascade.hpDamageToDefender
+    );
+
+    return {
+      reaction: 'block',
+      defenseRoll: null,
+      hitLanded: true,
+      flawlessDefense: false,
+      defenderApSpent: apSpent,
+      spDamageToDefender: cascade.spDamageToDefender,
+      hpDamageToDefender: cascade.hpDamageToDefender,
+      counterSpToAttacker: 0,
+      shieldMitigated: cascade.shieldMitigated,
+      armorMitigated: cascade.armorMitigated,
+      defenderGuardRaised: Boolean(blockAllowed && !guardBroken),
+      defenderGuardBroken: guardBroken,
+      inflictedStatuses: uniqueStatuses,
+      pushFeet: clash.pushFeet ?? 0,
+      shiftDefenderFeet: 0,
+      shiftAttackerFeet: clash.selfShiftFeet ?? 0,
+      summary: [
+        formatClashOutcomeStatus(
+          blockAllowed ? 'block' : 'take_hit',
+          true,
+          false,
+          blockAllowed
+        ),
+        ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+        ...(guardNewlyRaised ? ['Guard Raised'] : []),
+        ...(guardBroken ? ['Guard Lowered'] : []),
+      ].join(' · '),
+    };
+  }
+
   const blockAllowed = !clash.disallowedDefenses.includes('Block');
   const blockActive =
     defender.shieldRaised &&
@@ -429,6 +505,7 @@ export function resolveClashReaction(
     counterSpToAttacker: 0,
     shieldMitigated: cascade.shieldMitigated,
     armorMitigated: cascade.armorMitigated,
+    defenderGuardRaised: false,
     defenderGuardBroken: guardBroken,
     inflictedStatuses: uniqueStatuses,
     pushFeet: clash.pushFeet ?? 0,

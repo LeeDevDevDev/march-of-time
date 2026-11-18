@@ -897,7 +897,7 @@
                       Defensive Actions
                     </span>
                     <p class="text-[10px] text-[#8AB0AB]">
-                      Reactions cost 1 AP when attacked; Raise Shield / Guard costs 1 AP on your turn and lasts until your next turn.
+                      Reactions cost 1 AP when attacked; Raise Shield / Block lasts until the start of the next round.
                     </p>
                   </div>
 
@@ -1025,7 +1025,7 @@
                         </div>
                         <p class="mt-1 text-[10px] text-[#8AB0AB]">
                           @if (stats.usesRaiseShield) {
-                            {{ stats.blockSourceLabel }} automatically reduces non-Piercing hits until your next turn.
+                            {{ stats.blockSourceLabel }} reduces non-Piercing hits until the start of the next round.
                           } @else if (stats.shieldDisabledByTwoHanded) {
                             Off-hand shield is stowed while wielding a Two-Handed weapon without Guard.
                           } @else if (stats.enablesMartialParry) {
@@ -2999,7 +2999,7 @@
                         }
                       </div>
                       <p class="mt-1 text-[10px] text-[#8AB0AB]">
-                        Reduces non-Piercing damage until the NPC's next turn.
+                        Reduces non-Piercing damage until the start of the next round.
                       </p>
                     </div>
                     <div class="flex items-center justify-end border-t border-[#243B37] pt-2">

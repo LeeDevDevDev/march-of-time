@@ -851,7 +851,7 @@
                 Defensive Actions &amp; Reactions
               </h2>
               <p class="text-xs text-[var(--mot-muted)]">
-                Declare 1 AP reactions before incoming attack rolls, or spend 1 AP on your turn to Raise Shield / Guard until your next turn.
+                Declare 1 AP reactions before incoming attack rolls, or spend 1 AP to Raise Shield / Guard until the start of the next round.
               </p>
             </div>
 
@@ -968,7 +968,7 @@
                     <div class="flex items-center gap-1.5 font-mono-num">
                       @if (isShieldRaised(char)) {
                         <span class="rounded bg-[#C4491A] px-2 py-0.5 font-bold text-white">
-                          Active Until Next Turn
+                          Active Until Next Round
                         </span>
                       }
                       <span class="rounded border border-[var(--mot-border)] bg-[var(--mot-surface)] px-2 py-0.5 font-bold text-[var(--mot-text)]">
@@ -989,7 +989,7 @@
                     [class.text-[var(--mot-muted)]]="!isShieldRaised(char)"
                   >
                     @if (stats.usesRaiseShield) {
-                      {{ stats.blockSourceLabel }} automatically mitigates non-Piercing attacks until your next turn.
+                      {{ stats.blockSourceLabel }} reduces non-Piercing attacks until the start of the next round.
                     } @else if (stats.enablesMartialParry) {
                       Buckler uses Martial Parry reaction instead of Raise Shield.
                     } @else if (stats.shieldDisabledByTwoHanded) {
@@ -1339,7 +1339,7 @@
                       <span
                         class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-xs font-bold text-white"
                       >
-                        Active Until Next Turn
+                        Active Until Next Round
                       </span>
                     }
                   </div>

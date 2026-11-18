@@ -505,7 +505,7 @@
                   @if (multi) {
                     Mitigates at least {{ groupMinShieldBlock() }} DMG vs non-Piercing attacks
                   } @else {
-                    Mitigates {{ tok.shield_block }} DMG vs non-Piercing attacks until next turn
+                    Mitigates {{ tok.shield_block }} DMG vs non-Piercing attacks until next round
                   }
                 </div>
               </div>
@@ -1867,7 +1867,7 @@
                 title: tok.shield_raised ? 'Lower Guard / Shield' : 'Raise Guard / Shield',
                 apLabel: tok.shield_raised ? '0 AP' : '1 AP',
                 subtitle: 'Mitigates ' + tok.shield_block + ' DMG vs non-Piercing attacks',
-                description: 'Remains active until the start of your next turn or until SP is depleted.'
+                description: 'Remains active until the start of the next round or until SP is depleted.'
               })"
               (mouseleave)="setHover(null)"
               class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-colors disabled:opacity-40"

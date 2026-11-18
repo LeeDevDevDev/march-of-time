@@ -5,6 +5,7 @@ import {
   CombatStatusEffect,
   PerkNodeModel,
   WeaponModel,
+  getHeavyWeaponBlockBase,
   isCombatArtUpgradeNode,
 } from '../../../core/compendium/compendium.model';
 import {
@@ -503,6 +504,8 @@ export function resolveEffectiveNpcDefenseMods(
   parryMod: number;
   dodgeMod: number;
   enablesMartialParry: boolean;
+  heavyWeaponBlockBase: number;
+  blockSkillBonus: number;
 } {
   const stats = npcStats ?? {};
   const effWep = resolveEffectiveNpcWeaponStats(
@@ -514,6 +517,7 @@ export function resolveEffectiveNpcDefenseMods(
     stats.enables_martial_parry ||
       effWep.compendiumWeapon?.rule_hooks?.['enables_martial_parry']
   );
+  const heavyWeaponBlockBase = getHeavyWeaponBlockBase(effWep.compendiumWeapon);
   if (stats.attributes || stats.combat_skills) {
     const attrs = normalizeNpcAttributes(stats.attributes);
     const skills = normalizeNpcCombatSkills(stats.combat_skills);
@@ -522,10 +526,12 @@ export function resolveEffectiveNpcDefenseMods(
     );
     let perkParry = 0;
     let perkDodge = 0;
+    let perkBlock = 0;
     for (const p of standaloneNodes) {
       if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
         perkParry += Number(p.rule_hooks?.bonus_parry_mod ?? 0);
         perkDodge += Number(p.rule_hooks?.bonus_dodge_mod ?? 0);
+        perkBlock += Number(p.rule_hooks?.bonus_block_mod ?? 0);
       }
     }
     return {
@@ -533,12 +539,16 @@ export function resolveEffectiveNpcDefenseMods(
         (attrs.Technique ?? 0) + (skills.Parry ?? 0) + rapierBonus + perkParry,
       dodgeMod: (attrs.Agility ?? 0) + (skills.Dodge ?? 0) + perkDodge,
       enablesMartialParry,
+      heavyWeaponBlockBase,
+      blockSkillBonus: (skills.Block ?? 0) + perkBlock,
     };
   }
   return {
     parryMod: Number(stats.parry_mod ?? defaults.parryMod ?? 1),
     dodgeMod: Number(stats.dodge_mod ?? defaults.dodgeMod ?? 1),
     enablesMartialParry,
+    heavyWeaponBlockBase,
+    blockSkillBonus: 0,
   };
 }
 
@@ -632,7 +642,7 @@ export function normalizeTokenRotation(
   return ((rounded % 360) + 360) % 360;
 }
 
-export type VttDefenseChoice = 'parry' | 'dodge' | 'take_hit';
+export type VttDefenseChoice = 'parry' | 'dodge' | 'block' | 'take_hit';
 
 export interface VttDiceRoll {
   d1: number;
@@ -654,6 +664,7 @@ export interface VttClashResolution {
   counterSpToAttacker: number;
   shieldMitigated: number;
   armorMitigated: number;
+  defenderGuardRaised?: boolean;
   defenderGuardBroken?: boolean;
   inflictedStatuses: Exclude<CombatStatusEffect, 'None'>[];
   pushFeet: number;

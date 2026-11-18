@@ -2600,6 +2600,10 @@ export class VttRoomComponent {
     this.manualDefenseTotalInput = null;
   }
 
+  raiseClashGuard(): void {
+    void this.vttStore.raiseClashDefenderGuard();
+  }
+
   rechooseClashReaction(): void {
     if (!this.vttStore.isGm()) return;
     const sc = this.vttStore.activeScene();
@@ -3012,14 +3016,16 @@ export class VttRoomComponent {
     const attackTotal = Number(payload['attack_total'] ?? 0);
     const rawChoice = payload['defense_choice'];
     const choice: VttDefenseChoice =
-      rawChoice === 'parry' || rawChoice === 'dodge' ? rawChoice : 'take_hit';
+      rawChoice === 'parry' || rawChoice === 'dodge' || rawChoice === 'block'
+        ? rawChoice
+        : 'take_hit';
     const guardBlocked = Boolean(payload['guard_blocked']);
     const defenseLabel =
       choice === 'parry'
         ? 'Parry'
         : choice === 'dodge'
           ? 'Dodge'
-          : guardBlocked
+          : choice === 'block' || guardBlocked
             ? 'Block'
             : 'Take Hit';
     const defenseTotal =
@@ -3071,7 +3077,9 @@ export class VttRoomComponent {
         : 'Clash';
     const rawReaction = payload['reaction'];
     const reaction: VttDefenseChoice =
-      rawReaction === 'parry' || rawReaction === 'dodge'
+      rawReaction === 'parry' ||
+      rawReaction === 'dodge' ||
+      rawReaction === 'block'
         ? rawReaction
         : 'take_hit';
     const hitLanded = Boolean(payload['hit_landed']);
