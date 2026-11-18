@@ -1857,6 +1857,23 @@ export class VttActorSheetComponent {
     }
   }
 
+  canUseOpeningRush(): boolean {
+    const tok = this.sheetToken();
+    if (!tok || typeof this.vttStore.canTokenUseOpeningRush !== 'function') {
+      return false;
+    }
+    return this.vttStore.canTokenUseOpeningRush(tok);
+  }
+
+  async useOpeningRush(): Promise<void> {
+    if (!this.canEdit()) return;
+    const tok = this.sheetToken();
+    if (!tok || typeof this.vttStore.triggerTokenOpeningRush !== 'function') {
+      return;
+    }
+    await this.vttStore.triggerTokenOpeningRush(tok);
+  }
+
   getNpcName(): string {
     return (
       this.sheetRosterActor()?.name ??

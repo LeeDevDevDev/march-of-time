@@ -236,6 +236,17 @@ export class VttTokenizerWindowComponent {
     );
   }
 
+  async setDisposition(nextFaction: VttFaction): Promise<void> {
+    if (!this.vttStore.isGm()) return;
+    const actor = this.vttStore.openTokenizerRosterActor();
+    const tok = this.vttStore.openTokenizerToken();
+    await this.vttStore.updateNpcFromVttSheet(
+      actor?.id ?? null,
+      tok?.id ?? null,
+      { faction: nextFaction }
+    );
+  }
+
   async closeStudio(): Promise<void> {
     await this.commitDisplayName();
     this.activeAssetPickerRequest.set(null);

@@ -48,6 +48,7 @@ import {
   DEFAULT_VTT_DARKVISION_FEET,
   DEFAULT_VTT_DIM_VISION_FEET,
   ResolvedNpcWeaponStats,
+  VttFaction,
   VttNpcStats,
   VttTokenModel,
   computeEffectiveActorSightFeet,
@@ -1772,6 +1773,45 @@ export class VttActionHudComponent {
         inventory: nextInv,
       };
     });
+  }
+
+  canUseOpeningRush(): boolean {
+    if (typeof this.vttStore.canTokenUseOpeningRush !== 'function') {
+      return false;
+    }
+    return this.vttStore.canTokenUseOpeningRush(this.token());
+  }
+
+  async onMoveTileClick(): Promise<void> {
+    if (!this.canControl()) return;
+    if (this.canUseOpeningRush()) {
+      await this.vttStore.triggerTokenOpeningRush(this.token());
+      return;
+    }
+    await this.triggerTacticalAction(
+      'Move',
+      'Moved up to ' +
+        this.token().move_feet +
+        ' ft (' +
+        this.moveTiles() +
+        ' tiles)'
+    );
+  }
+
+  async setSingleDisposition(faction: VttFaction): Promise<void> {
+    if (typeof this.vttStore.setTokenDisposition !== 'function') return;
+    await this.vttStore.setTokenDisposition(this.token().id, faction);
+  }
+
+  async setGroupDisposition(faction: VttFaction): Promise<void> {
+    if (typeof this.vttStore.setTokensDispositionBatch !== 'function') return;
+    const ids = this.controllableGroup().map((t) => t.id);
+    await this.vttStore.setTokensDispositionBatch(ids, faction);
+  }
+
+  groupAllHaveDisposition(faction: VttFaction): boolean {
+    const list = this.tokens();
+    return list.length > 0 && list.every((t) => t.faction === faction);
   }
 
   async endActiveTurn(): Promise<void> {

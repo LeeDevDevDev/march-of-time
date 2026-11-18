@@ -3317,6 +3317,55 @@
           @if (vttStore.isGm()) {
             <div class="my-1 border-t border-[#243B37] pt-1">
               <div class="px-2.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                Disposition
+              </div>
+              <div class="grid grid-cols-3 gap-1 px-1.5 py-1">
+                <button
+                  type="button"
+                  data-context-disposition="enemy"
+                  (click)="setRosterActorDispositionFromMenu(menuActor.id, 'enemy')"
+                  class="rounded-md border px-1.5 py-1 text-[10px] font-bold transition-colors"
+                  [class.border-[#F43F5E]]="menuActor.faction === 'enemy'"
+                  [class.bg-[#3B1822]]="menuActor.faction === 'enemy'"
+                  [class.text-[#FDA4AF]]="menuActor.faction === 'enemy'"
+                  [class.border-[#243B37]]="menuActor.faction !== 'enemy'"
+                  [class.bg-[#09100F]]="menuActor.faction !== 'enemy'"
+                  [class.text-[#8AB0AB]]="menuActor.faction !== 'enemy'"
+                >
+                  Hostile
+                </button>
+                <button
+                  type="button"
+                  data-context-disposition="ally"
+                  (click)="setRosterActorDispositionFromMenu(menuActor.id, 'ally')"
+                  class="rounded-md border px-1.5 py-1 text-[10px] font-bold transition-colors"
+                  [class.border-[#38B29A]]="menuActor.faction === 'ally'"
+                  [class.bg-[#102B26]]="menuActor.faction === 'ally'"
+                  [class.text-[#5EEAD4]]="menuActor.faction === 'ally'"
+                  [class.border-[#243B37]]="menuActor.faction !== 'ally'"
+                  [class.bg-[#09100F]]="menuActor.faction !== 'ally'"
+                  [class.text-[#8AB0AB]]="menuActor.faction !== 'ally'"
+                >
+                  Friendly
+                </button>
+                <button
+                  type="button"
+                  data-context-disposition="neutral"
+                  (click)="setRosterActorDispositionFromMenu(menuActor.id, 'neutral')"
+                  class="rounded-md border px-1.5 py-1 text-[10px] font-bold transition-colors"
+                  [class.border-[#F59E0B]]="menuActor.faction === 'neutral'"
+                  [class.bg-[#2B1D0E]]="menuActor.faction === 'neutral'"
+                  [class.text-[#FDE68A]]="menuActor.faction === 'neutral'"
+                  [class.border-[#243B37]]="menuActor.faction !== 'neutral'"
+                  [class.bg-[#09100F]]="menuActor.faction !== 'neutral'"
+                  [class.text-[#8AB0AB]]="menuActor.faction !== 'neutral'"
+                >
+                  Neutral
+                </button>
+              </div>
+            </div>
+            <div class="my-1 border-t border-[#243B37] pt-1">
+              <div class="px-2.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-[#8AB0AB]">
                 Assign to Player
               </div>
               <button

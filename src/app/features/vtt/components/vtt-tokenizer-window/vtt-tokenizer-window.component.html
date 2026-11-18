@@ -71,6 +71,63 @@
         </div>
       </div>
 
+      @if (vttStore.isGm()) {
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#243B37] bg-[#122220] px-3.5 py-2.5">
+          <div>
+            <span class="block font-display text-xs font-bold text-white">
+              Disposition
+            </span>
+            <p class="text-[11px] text-[#8AB0AB]">
+              Determines whether this token is treated as Hostile, Friendly, or Neutral in combat &amp; Opening Rush.
+            </p>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-tokenizer-disposition="enemy"
+              (click)="setDisposition('enemy')"
+              class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+              [class.border-[#F43F5E]]="faction() === 'enemy'"
+              [class.bg-[#3B1822]]="faction() === 'enemy'"
+              [class.text-[#FDA4AF]]="faction() === 'enemy'"
+              [class.border-[#243B37]]="faction() !== 'enemy'"
+              [class.bg-[#09100F]]="faction() !== 'enemy'"
+              [class.text-[#8AB0AB]]="faction() !== 'enemy'"
+            >
+              Hostile
+            </button>
+            <button
+              type="button"
+              data-tokenizer-disposition="ally"
+              (click)="setDisposition('ally')"
+              class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+              [class.border-[#38B29A]]="faction() === 'ally'"
+              [class.bg-[#102B26]]="faction() === 'ally'"
+              [class.text-[#5EEAD4]]="faction() === 'ally'"
+              [class.border-[#243B37]]="faction() !== 'ally'"
+              [class.bg-[#09100F]]="faction() !== 'ally'"
+              [class.text-[#8AB0AB]]="faction() !== 'ally'"
+            >
+              Friendly
+            </button>
+            <button
+              type="button"
+              data-tokenizer-disposition="neutral"
+              (click)="setDisposition('neutral')"
+              class="rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors"
+              [class.border-[#F59E0B]]="faction() === 'neutral'"
+              [class.bg-[#2B1D0E]]="faction() === 'neutral'"
+              [class.text-[#FDE68A]]="faction() === 'neutral'"
+              [class.border-[#243B37]]="faction() !== 'neutral'"
+              [class.bg-[#09100F]]="faction() !== 'neutral'"
+              [class.text-[#8AB0AB]]="faction() !== 'neutral'"
+            >
+              Neutral
+            </button>
+          </div>
+        </div>
+      }
+
       <app-tokenizer-editor
         [portraitUrl]="vis.portraitUrl"
         [tokenImageUrl]="vis.tokenImageUrl"

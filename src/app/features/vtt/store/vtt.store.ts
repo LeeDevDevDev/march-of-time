@@ -78,6 +78,7 @@ import { canNestFolderInside } from '../engine/directory-tree.engine';
 import {
   HexGridGeometry,
   SceneCanvasLayout,
+  TokenPositionLike,
   clampHexToBounds,
   clampHexToSceneLayout,
   clampWorldPointToBounds,
@@ -6269,6 +6270,166 @@ export class VttStore {
     await this.persistDetachedSheetOnActorForToken(token, updated);
   }
 
+  async setTokenDisposition(
+    tokenId: string,
+    faction: VttFaction
+  ): Promise<void> {
+    const tok = this.tokens().find((t) => t.id === tokenId);
+    if (!tok || !this.canControlToken(tok)) return;
+    if (tok.faction === faction) return;
+    const dispLabel =
+      faction === 'enemy'
+        ? 'Hostile'
+        : faction === 'ally'
+          ? 'Friendly'
+          : 'Neutral';
+    await this.recordablePatchToken(
+      tok.id,
+      { faction },
+      `Set ${tok.name} to ${dispLabel}`
+    );
+  }
+
+  async setTokensDispositionBatch(
+    tokenIds: readonly string[],
+    faction: VttFaction
+  ): Promise<void> {
+    if (tokenIds.length === 0) return;
+    const dispLabel =
+      faction === 'enemy'
+        ? 'Hostile'
+        : faction === 'ally'
+          ? 'Friendly'
+          : 'Neutral';
+    await this.recordablePatchTokensBatch(
+      tokenIds.map((tokenId) => ({ tokenId, patch: { faction } })),
+      `Set ${tokenIds.length} Tokens to ${dispLabel}`
+    );
+  }
+
+  async setRosterActorDisposition(
+    actorId: string,
+    faction: VttFaction
+  ): Promise<void> {
+    const actor = this.rosterActors().find((a) => a.id === actorId);
+    if (!actor || !this.canManageRosterActor(actor)) return;
+    if (actor.faction === faction) return;
+    await this.updateRosterActor(actorId, { faction });
+  }
+
+  getOpposingHostileTokensFor(tok: VttTokenModel): VttTokenModel[] {
+    if (tok.faction !== 'ally' && tok.faction !== 'enemy') {
+      return [];
+    }
+    const opposingFaction: VttFaction =
+      tok.faction === 'ally' ? 'enemy' : 'ally';
+    return this.sceneTokens().filter(
+      (other) =>
+        other.id !== tok.id &&
+        other.faction === opposingFaction &&
+        other.current_hp > 0 &&
+        !other.is_hidden
+    );
+  }
+
+  hasAdjacentHostile(
+    tok: VttTokenModel,
+    posOverride?: TokenPositionLike
+  ): boolean {
+    const sc = this.activeScene();
+    if (!sc) return false;
+    const geom = this.sceneLayout().geometry;
+    const gridMode = sc.grid_mode ?? 'square';
+    const origin: TokenPositionLike = posOverride ?? tok;
+    const hostiles = this.getOpposingHostileTokensFor(tok);
+    return hostiles.some(
+      (h) => getTokenDistanceFeet(origin, h, geom, gridMode) <= 5
+    );
+  }
+
+  canTokenUseOpeningRush(
+    tok: VttTokenModel | null | undefined,
+    startPosOverride?: TokenPositionLike,
+    ignoreAlreadyUsed = false
+  ): boolean {
+    const sc = this.activeScene();
+    if (!sc || !sc.combat_active || sc.round_number !== 1 || !tok) {
+      return false;
+    }
+    if (tok.current_hp <= 0) return false;
+    if (!ignoreAlreadyUsed && tok.npc_stats?.__opening_rush_used) {
+      return false;
+    }
+    const hostiles = this.getOpposingHostileTokensFor(tok);
+    if (hostiles.length === 0) return false;
+    return !this.hasAdjacentHostile(tok, startPosOverride);
+  }
+
+  doesMoveQualifyForOpeningRush(
+    tok: VttTokenModel,
+    startPos: TokenPositionLike,
+    endPos: TokenPositionLike,
+    ignoreAlreadyUsed = false
+  ): boolean {
+    const sc = this.activeScene();
+    if (
+      !sc ||
+      !this.canTokenUseOpeningRush(tok, startPos, ignoreAlreadyUsed)
+    ) {
+      return false;
+    }
+    const geom = this.sceneLayout().geometry;
+    const gridMode = sc.grid_mode ?? 'square';
+    const hostiles = this.getOpposingHostileTokensFor(tok);
+    return hostiles.some((h) => {
+      const startDist = getTokenDistanceFeet(startPos, h, geom, gridMode);
+      const endDist = getTokenDistanceFeet(endPos, h, geom, gridMode);
+      if (endDist < startDist) return true;
+      const useWorld =
+        gridMode === 'gridless' ||
+        Boolean(startPos.npc_stats?.__unsnapped) ||
+        Boolean(endPos.npc_stats?.__unsnapped);
+      if (useWorld) {
+        const startWorld = getTokenWorldCenter(startPos, geom, gridMode);
+        const endWorld = getTokenWorldCenter(endPos, geom, gridMode);
+        const hWorld = getTokenWorldCenter(h, geom, gridMode);
+        const startPx = Math.hypot(
+          hWorld.x - startWorld.x,
+          hWorld.y - startWorld.y
+        );
+        const endPx = Math.hypot(hWorld.x - endWorld.x, hWorld.y - endWorld.y);
+        return endPx + 4 < startPx;
+      }
+      return false;
+    });
+  }
+
+  async triggerTokenOpeningRush(token: VttTokenModel): Promise<void> {
+    if (!this.canControlToken(token) || !this.canTokenUseOpeningRush(token)) {
+      return;
+    }
+    this.pushUndoEntry(token.encounter_id, `Opening Rush (${token.name})`, {
+      kind: 'token_patch',
+      tokenId: token.id,
+      previousTokenPatch: {
+        npc_stats: { ...(token.npc_stats ?? {}) },
+      },
+    });
+    await this.patchToken(token.id, {
+      npc_stats: {
+        ...(token.npc_stats ?? {}),
+        __opening_rush_used: true,
+      },
+    });
+    await this.postLog({
+      kind: 'system',
+      title: `${token.name} used Opening Rush (0 AP)`,
+      detail: `Free Round 1 move (${token.move_feet} ft)`,
+      senderNameOverride: token.name,
+      payload: this.buildTokenSpeakerPayload(token),
+    });
+  }
+
   async moveTokenToHex(
     tokenId: string,
     col: number,
@@ -6310,6 +6471,15 @@ export class VttStore {
     };
 
     const axial = offsetToAxial(clamped.col, clamped.row);
+    const endPos: TokenPositionLike = {
+      x: clamped.col,
+      y: clamped.row,
+      world_x: null,
+      world_y: null,
+      npc_stats: tok.npc_stats?.__unsnapped
+        ? { ...tok.npc_stats, __unsnapped: false }
+        : tok.npc_stats,
+    };
     const patch: Partial<VttTokenModel> = {
       x: clamped.col,
       y: clamped.row,
@@ -6322,25 +6492,42 @@ export class VttStore {
         : {}),
     };
 
+    let triggeredOpeningRush = false;
     if (
       sc.combat_active &&
       this.enforceApOnMove() &&
       !freeOverride &&
       distanceFeet > 0
     ) {
+      triggeredOpeningRush = this.doesMoveQualifyForOpeningRush(
+        tok,
+        tok,
+        endPos
+      );
       const moveActionsNeeded = Math.max(
         1,
         Math.ceil(distanceFeet / Math.max(5, tok.move_feet))
       );
-      patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+      const effectiveApCost = triggeredOpeningRush
+        ? Math.max(0, moveActionsNeeded - 1)
+        : moveActionsNeeded;
+      patch.current_ap = Math.max(0, tok.current_ap - effectiveApCost);
+      if (triggeredOpeningRush) {
+        patch.npc_stats = {
+          ...(patch.npc_stats ?? tok.npc_stats ?? {}),
+          __opening_rush_used: true,
+        };
+      }
     }
 
     const roundedFeet = Math.round(distanceFeet);
-    const moveLabel = hasWaypoints
-      ? `Chained Move ${tok.name} (${roundedFeet} ft)`
-      : roundedFeet > 0
-        ? `Move ${tok.name} (${roundedFeet} ft)`
-        : `Move ${tok.name}`;
+    const moveLabel = triggeredOpeningRush
+      ? `Opening Rush ${tok.name} (${roundedFeet} ft)`
+      : hasWaypoints
+        ? `Chained Move ${tok.name} (${roundedFeet} ft)`
+        : roundedFeet > 0
+          ? `Move ${tok.name} (${roundedFeet} ft)`
+          : `Move ${tok.name}`;
 
     this.pushUndoEntry(sc.id, moveLabel, {
       kind: 'token_patch',
@@ -6350,6 +6537,15 @@ export class VttStore {
     });
 
     await this.patchToken(tokenId, patch);
+    if (triggeredOpeningRush) {
+      await this.postLog({
+        kind: 'system',
+        title: `${tok.name} used Opening Rush (0 AP)`,
+        detail: `Free Round 1 move toward enemy (${roundedFeet} ft)`,
+        senderNameOverride: tok.name,
+        payload: this.buildTokenSpeakerPayload(tok),
+      });
+    }
     if (hasWaypoints && intermediateHexes) {
       this.syncExploredFogAlongTokenWaypoints(
         tokenId,
@@ -6430,6 +6626,15 @@ export class VttStore {
     };
 
     const axial = offsetToAxial(nearestHex.col, nearestHex.row);
+    const endPos: TokenPositionLike = {
+      x: nearestHex.col,
+      y: nearestHex.row,
+      world_x: clampedWorld.x,
+      world_y: clampedWorld.y,
+      npc_stats: unsnappedOnGrid
+        ? { ...tok.npc_stats, __unsnapped: true }
+        : tok.npc_stats,
+    };
     const patch: Partial<VttTokenModel> = {
       x: nearestHex.col,
       y: nearestHex.row,
@@ -6442,25 +6647,42 @@ export class VttStore {
         : {}),
     };
 
+    let triggeredOpeningRush = false;
     if (
       sc.combat_active &&
       this.enforceApOnMove() &&
       !freeOverride &&
       distanceFeet > 0
     ) {
+      triggeredOpeningRush = this.doesMoveQualifyForOpeningRush(
+        tok,
+        tok,
+        endPos
+      );
       const moveActionsNeeded = Math.max(
         1,
         Math.ceil(distanceFeet / Math.max(5, tok.move_feet))
       );
-      patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+      const effectiveApCost = triggeredOpeningRush
+        ? Math.max(0, moveActionsNeeded - 1)
+        : moveActionsNeeded;
+      patch.current_ap = Math.max(0, tok.current_ap - effectiveApCost);
+      if (triggeredOpeningRush) {
+        patch.npc_stats = {
+          ...(patch.npc_stats ?? tok.npc_stats ?? {}),
+          __opening_rush_used: true,
+        };
+      }
     }
 
     const roundedFeet = Math.round(distanceFeet);
-    const moveLabel = hasWaypoints
-      ? `Chained Move ${tok.name} (${roundedFeet} ft)`
-      : roundedFeet > 0
-        ? `Move ${tok.name} (${roundedFeet} ft)`
-        : `Move ${tok.name}`;
+    const moveLabel = triggeredOpeningRush
+      ? `Opening Rush ${tok.name} (${roundedFeet} ft)`
+      : hasWaypoints
+        ? `Chained Move ${tok.name} (${roundedFeet} ft)`
+        : roundedFeet > 0
+          ? `Move ${tok.name} (${roundedFeet} ft)`
+          : `Move ${tok.name}`;
 
     this.pushUndoEntry(sc.id, moveLabel, {
       kind: 'token_patch',
@@ -6470,6 +6692,15 @@ export class VttStore {
     });
 
     await this.patchToken(tokenId, patch);
+    if (triggeredOpeningRush) {
+      await this.postLog({
+        kind: 'system',
+        title: `${tok.name} used Opening Rush (0 AP)`,
+        detail: `Free Round 1 move toward enemy (${roundedFeet} ft)`,
+        senderNameOverride: tok.name,
+        payload: this.buildTokenSpeakerPayload(tok),
+      });
+    }
     if (hasWaypoints && intermediateWorldPts) {
       this.syncExploredFogAlongTokenWaypoints(
         tokenId,
@@ -6592,11 +6823,30 @@ export class VttStore {
           !item.freeOverride &&
           item.distanceFeet > 0
         ) {
+          const endPos: TokenPositionLike = {
+            x: nearestHex.col,
+            y: nearestHex.row,
+            world_x: clampedWorld.x,
+            world_y: clampedWorld.y,
+            npc_stats: unsnappedOnGrid
+              ? { ...tok.npc_stats, __unsnapped: true }
+              : tok.npc_stats,
+          };
+          const usedRush = this.doesMoveQualifyForOpeningRush(tok, tok, endPos);
           const moveActionsNeeded = Math.max(
             1,
             Math.ceil(item.distanceFeet / Math.max(5, tok.move_feet))
           );
-          patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+          const effectiveApCost = usedRush
+            ? Math.max(0, moveActionsNeeded - 1)
+            : moveActionsNeeded;
+          patch.current_ap = Math.max(0, tok.current_ap - effectiveApCost);
+          if (usedRush) {
+            patch.npc_stats = {
+              ...(patch.npc_stats ?? tok.npc_stats ?? {}),
+              __opening_rush_used: true,
+            };
+          }
         }
 
         undoPatches.push({
@@ -6643,11 +6893,30 @@ export class VttStore {
           !item.freeOverride &&
           item.distanceFeet > 0
         ) {
+          const endPos: TokenPositionLike = {
+            x: clamped.col,
+            y: clamped.row,
+            world_x: null,
+            world_y: null,
+            npc_stats: tok.npc_stats?.__unsnapped
+              ? { ...tok.npc_stats, __unsnapped: false }
+              : tok.npc_stats,
+          };
+          const usedRush = this.doesMoveQualifyForOpeningRush(tok, tok, endPos);
           const moveActionsNeeded = Math.max(
             1,
             Math.ceil(item.distanceFeet / Math.max(5, tok.move_feet))
           );
-          patch.current_ap = Math.max(0, tok.current_ap - moveActionsNeeded);
+          const effectiveApCost = usedRush
+            ? Math.max(0, moveActionsNeeded - 1)
+            : moveActionsNeeded;
+          patch.current_ap = Math.max(0, tok.current_ap - effectiveApCost);
+          if (usedRush) {
+            patch.npc_stats = {
+              ...(patch.npc_stats ?? tok.npc_stats ?? {}),
+              __opening_rush_used: true,
+            };
+          }
         }
 
         undoPatches.push({
@@ -6859,13 +7128,54 @@ export class VttStore {
         !upd.freeOverride &&
         nextFeet > 0
       ) {
-        const initialAp =
-          session.initialPatchesByTokenId.get(tokenId)?.current_ap ?? 0;
+        const initialSnap = session.initialPatchesByTokenId.get(tokenId);
+        const initialAp = initialSnap?.current_ap ?? 0;
+        const currTok = this.tokens().find((t) => t.id === tokenId);
+        const alreadyUsedBeforeSession = Boolean(
+          initialSnap?.npc_stats?.__opening_rush_used
+        );
+        const startPos: TokenPositionLike = {
+          x: initialSnap?.x ?? currTok?.x ?? 0,
+          y: initialSnap?.y ?? currTok?.y ?? 0,
+          world_x: initialSnap?.world_x ?? currTok?.world_x ?? null,
+          world_y: initialSnap?.world_y ?? currTok?.world_y ?? null,
+          npc_stats: initialSnap?.npc_stats ?? currTok?.npc_stats,
+        };
+        const endPos: TokenPositionLike = {
+          x: finalStepPatch.x ?? currTok?.x ?? 0,
+          y: finalStepPatch.y ?? currTok?.y ?? 0,
+          world_x:
+            finalStepPatch.world_x !== undefined
+              ? finalStepPatch.world_x
+              : (currTok?.world_x ?? null),
+          world_y:
+            finalStepPatch.world_y !== undefined
+              ? finalStepPatch.world_y
+              : (currTok?.world_y ?? null),
+          npc_stats: finalStepPatch.npc_stats ?? currTok?.npc_stats,
+        };
+        const usedRush =
+          !alreadyUsedBeforeSession &&
+          currTok !== undefined &&
+          this.doesMoveQualifyForOpeningRush(currTok, startPos, endPos, true);
         const moveActionsNeeded = Math.max(
           1,
           Math.ceil(nextFeet / upd.moveFeet)
         );
-        finalStepPatch.current_ap = Math.max(0, initialAp - moveActionsNeeded);
+        const effectiveApCost = usedRush
+          ? Math.max(0, moveActionsNeeded - 1)
+          : moveActionsNeeded;
+        finalStepPatch.current_ap = Math.max(0, initialAp - effectiveApCost);
+        const baseNpcStats: VttNpcStats = {
+          ...(initialSnap?.npc_stats ?? currTok?.npc_stats ?? {}),
+          ...(finalStepPatch.npc_stats ?? {}),
+        };
+        if (usedRush) {
+          baseNpcStats.__opening_rush_used = true;
+        } else if (!alreadyUsedBeforeSession) {
+          delete baseNpcStats.__opening_rush_used;
+        }
+        finalStepPatch.npc_stats = baseNpcStats;
       }
 
       const mergedLatest: Partial<VttTokenModel> = {
@@ -6916,12 +7226,21 @@ export class VttStore {
     let label = `Move ${forwardEntries.length} Tokens`;
     if (forwardEntries.length === 1) {
       const onlyId = forwardEntries[0][0];
+      const onlyPatch = forwardEntries[0][1];
+      const initialSnap = session.initialPatchesByTokenId.get(onlyId);
+      const usedRush =
+        Boolean(onlyPatch.npc_stats?.__opening_rush_used) &&
+        !initialSnap?.npc_stats?.__opening_rush_used;
       const tokName =
         this.tokens().find((t) => t.id === onlyId)?.name ?? 'Token';
       const feet = Math.round(
         session.accumulatedFeetByTokenId.get(onlyId) ?? 0
       );
-      label = feet > 0 ? `Move ${tokName} (${feet} ft)` : `Move ${tokName}`;
+      label = usedRush
+        ? `Opening Rush ${tokName} (${feet} ft)`
+        : feet > 0
+          ? `Move ${tokName} (${feet} ft)`
+          : `Move ${tokName}`;
     }
 
     const coalesceKey = `kbd-move:${Array.from(
@@ -6942,6 +7261,10 @@ export class VttStore {
       forwardEntries.map(async ([tokenId, patch]) => {
         const currentTok = this.tokens().find((t) => t.id === tokenId);
         if (!currentTok) return;
+        const initialSnap = session.initialPatchesByTokenId.get(tokenId);
+        const newlyUsedRush =
+          Boolean(patch.npc_stats?.__opening_rush_used) &&
+          !initialSnap?.npc_stats?.__opening_rush_used;
         this.localTokenMoveGuardUntil.set(tokenId, Date.now() + 1200);
         const err = await this.enqueueSerializedTokenUpdate(
           tokenId,
@@ -6955,6 +7278,18 @@ export class VttStore {
         const tokenSheet = this.resolveCharacterForToken(currentTok);
         if (tokenSheet && patch.current_ap !== undefined) {
           await this.syncTokenVitalsToCharacter(currentTok, tokenSheet, patch);
+        }
+        if (newlyUsedRush) {
+          const feet = Math.round(
+            session.accumulatedFeetByTokenId.get(tokenId) ?? 0
+          );
+          await this.postLog({
+            kind: 'system',
+            title: `${currentTok.name} used Opening Rush (0 AP)`,
+            detail: `Free Round 1 move toward enemy (${feet} ft)`,
+            senderNameOverride: currentTok.name,
+            payload: this.buildTokenSpeakerPayload(currentTok),
+          });
         }
       })
     );
@@ -8594,6 +8929,7 @@ export class VttStore {
     const next: VttNpcStats = { ...(stats ?? {}) };
     delete next.__initiative;
     delete next.__initiative_mod;
+    delete next.__opening_rush_used;
     if (inCombatFlag === undefined) {
       delete next.__in_combat;
     } else {
@@ -9094,13 +9430,15 @@ export class VttStore {
       null;
 
     for (const tok of orderedCombatants) {
+      const nextStats: VttNpcStats = {
+        ...(tok.npc_stats ?? {}),
+        __in_combat: true,
+      };
+      delete nextStats.__opening_rush_used;
       await this.patchToken(tok.id, {
         current_ap: tok.max_ap,
         shield_raised: false,
-        npc_stats: {
-          ...(tok.npc_stats ?? {}),
-          __in_combat: true,
-        },
+        npc_stats: nextStats,
       });
     }
 
@@ -9293,7 +9631,8 @@ export class VttStore {
         t.shield_raised ||
         t.npc_stats?.__in_combat !== undefined ||
         t.npc_stats?.__initiative !== undefined ||
-        t.npc_stats?.__initiative_mod !== undefined
+        t.npc_stats?.__initiative_mod !== undefined ||
+        t.npc_stats?.__opening_rush_used !== undefined
     );
     for (const tok of toReset) {
       await this.patchToken(tok.id, {

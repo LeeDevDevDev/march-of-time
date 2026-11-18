@@ -295,6 +295,7 @@ export interface VttNpcStats {
   __initiative?: number;
   __initiative_mod?: number;
   __in_combat?: boolean;
+  __opening_rush_used?: boolean;
   __portrait_url?: string | null;
   __token_image_url?: string | null;
   __token_appearance?: TokenAppearanceConfig;

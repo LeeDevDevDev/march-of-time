@@ -14892,4 +14892,253 @@ describe('App', () => {
     expect(unarmedActor.npc_stats.attack_mod).toBe(6);
     expect(unarmedActor.npc_stats.flat_damage).toBe(6);
   });
+
+  it('supports Hostile/Friendly/Neutral disposition settings and grants a 0 AP Opening Rush in Round 1 when moving toward a hostile with none adjacent', async () => {
+    TestBed.resetTestingModule();
+    const activeUserSig = signal<{ id: string; email: string } | null>({
+      id: 'gm-rush-1',
+      email: 'gm-rush@marchoftime.test',
+    });
+
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateRosterActor: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-rush-${Math.random()}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeAll: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-rush-1',
+      gm_id: 'gm-rush-1',
+      name: 'Opening Rush Test',
+      cover_image_url: null,
+      invite_code: 'RUSH01',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-rush-1',
+        campaign_id: 'camp-rush-1',
+        gm_id: 'gm-rush-1',
+        folder_id: null,
+        name: 'Vanguard Field',
+        is_active_scene: true,
+        map_image_url: null,
+        background_color: '#09100F',
+        grid_mode: 'square',
+        scene_width: 1600,
+        scene_height: 1200,
+        padding: 0,
+        grid_width: 20,
+        grid_height: 15,
+        grid_size_px: 64,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: 0.25,
+        sort_order: 0,
+        combat_active: true,
+        round_number: 1,
+        active_turn_token_id: 'tok-vanguard',
+        initiative_order: ['tok-vanguard', 'tok-raider'],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-rush-1');
+    vttStore.enforceApOnMove.set(true);
+    vttStore.tokens.set([
+      {
+        id: 'tok-vanguard',
+        encounter_id: 'scene-rush-1',
+        character_id: null,
+        owner_id: 'gm-rush-1',
+        name: 'Vanguard Knight',
+        faction: 'ally',
+        x: 4,
+        y: 5,
+        q: 4,
+        r: 5,
+        size: 1,
+        icon: 'sword',
+        color: '#38B29A',
+        current_hp: 16,
+        max_hp: 16,
+        current_sp: 7,
+        max_sp: 7,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 3,
+        move_feet: 20,
+        vision_feet: 60,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: { __in_combat: true },
+      },
+      {
+        id: 'tok-raider',
+        encounter_id: 'scene-rush-1',
+        character_id: null,
+        owner_id: 'gm-rush-1',
+        name: 'Road Brigand',
+        faction: 'neutral',
+        x: 10,
+        y: 5,
+        q: 10,
+        r: 5,
+        size: 1,
+        icon: 'axe',
+        color: '#F59E0B',
+        current_hp: 14,
+        max_hp: 14,
+        current_sp: 5,
+        max_sp: 5,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 1,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 60,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: { __in_combat: true },
+      },
+    ]);
+
+    expect(
+      vttStore.canTokenUseOpeningRush(
+        vttStore.tokens().find((t) => t.id === 'tok-vanguard')
+      )
+    ).toBe(false);
+
+    await vttStore.setTokenDisposition('tok-raider', 'enemy');
+    expect(vttStore.tokens().find((t) => t.id === 'tok-raider')?.faction).toBe(
+      'enemy'
+    );
+    expect(
+      vttStore.canTokenUseOpeningRush(
+        vttStore.tokens().find((t) => t.id === 'tok-vanguard')
+      )
+    ).toBe(true);
+
+    await vttStore.moveTokenToHex('tok-vanguard', 2, 5, 10);
+    const afterRetreat = vttStore
+      .tokens()
+      .find((t) => t.id === 'tok-vanguard')!;
+    expect(afterRetreat.current_ap).toBe(3);
+    expect(afterRetreat.npc_stats.__opening_rush_used).toBeUndefined();
+
+    await vttStore.moveTokenToHex('tok-vanguard', 6, 5, 20);
+    const afterRush = vttStore.tokens().find((t) => t.id === 'tok-vanguard')!;
+    expect(afterRush.current_ap).toBe(3);
+    expect(afterRush.npc_stats.__opening_rush_used).toBe(true);
+    expect(
+      vttStore.logs().some((l) => l.title.includes('Opening Rush (0 AP)'))
+    ).toBe(true);
+
+    await vttStore.moveTokenToHex('tok-vanguard', 8, 5, 10);
+    expect(
+      vttStore.tokens().find((t) => t.id === 'tok-vanguard')?.current_ap
+    ).toBe(2);
+
+    await vttStore.moveTokenToHex('tok-raider', 9, 5, 5);
+    const raiderAfterRush = vttStore
+      .tokens()
+      .find((t) => t.id === 'tok-raider')!;
+    expect(raiderAfterRush.current_ap).toBe(4);
+    expect(raiderAfterRush.npc_stats.__opening_rush_used).toBe(true);
+
+    await vttStore.undoLastAction();
+    const raiderAfterUndo = vttStore
+      .tokens()
+      .find((t) => t.id === 'tok-raider')!;
+    expect(raiderAfterUndo.x).toBe(10);
+    expect(raiderAfterUndo.npc_stats.__opening_rush_used).toBeUndefined();
+
+    await vttStore.patchToken('tok-vanguard', { x: 9, q: 9 });
+    expect(
+      vttStore.canTokenUseOpeningRush(
+        vttStore.tokens().find((t) => t.id === 'tok-raider')
+      )
+    ).toBe(false);
+  });
 });

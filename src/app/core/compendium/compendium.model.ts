@@ -83,6 +83,13 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
       'Active while [Raise Shield] / [Guard] (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, Weapon [Guard] Base 2; no roll required, remaining damage goes to [SP]). Lowered automatically if [SP] reaches 0.',
   },
   {
+    id: 'kw-opening-rush',
+    term: 'Opening Rush',
+    category: 'Core Mechanic',
+    summary:
+      'During Round 1 of combat, if no hostile is adjacent to you (within 5 ft), moving closer to a hostile grants 1 free Move stride (0 AP, once per combatant).',
+  },
+  {
     id: 'kw-two-handed',
     term: 'Two-Handed',
     category: 'Core Mechanic',

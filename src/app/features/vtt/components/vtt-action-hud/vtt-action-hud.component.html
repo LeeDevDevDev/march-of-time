@@ -581,6 +581,58 @@
               </button>
             </div>
 
+            @if (vttStore.isGm()) {
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] px-2.5 py-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Disposition
+                </span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    data-hud-group-disposition="enemy"
+                    (click)="setGroupDisposition('enemy')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#F43F5E]]="groupAllHaveDisposition('enemy')"
+                    [class.bg-[#3B1822]]="groupAllHaveDisposition('enemy')"
+                    [class.text-[#FDA4AF]]="groupAllHaveDisposition('enemy')"
+                    [class.border-[#243B37]]="!groupAllHaveDisposition('enemy')"
+                    [class.bg-[#09100F]]="!groupAllHaveDisposition('enemy')"
+                    [class.text-[#8AB0AB]]="!groupAllHaveDisposition('enemy')"
+                  >
+                    Hostile
+                  </button>
+                  <button
+                    type="button"
+                    data-hud-group-disposition="ally"
+                    (click)="setGroupDisposition('ally')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#38B29A]]="groupAllHaveDisposition('ally')"
+                    [class.bg-[#102B26]]="groupAllHaveDisposition('ally')"
+                    [class.text-[#5EEAD4]]="groupAllHaveDisposition('ally')"
+                    [class.border-[#243B37]]="!groupAllHaveDisposition('ally')"
+                    [class.bg-[#09100F]]="!groupAllHaveDisposition('ally')"
+                    [class.text-[#8AB0AB]]="!groupAllHaveDisposition('ally')"
+                  >
+                    Friendly
+                  </button>
+                  <button
+                    type="button"
+                    data-hud-group-disposition="neutral"
+                    (click)="setGroupDisposition('neutral')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#F59E0B]]="groupAllHaveDisposition('neutral')"
+                    [class.bg-[#2B1D0E]]="groupAllHaveDisposition('neutral')"
+                    [class.text-[#FDE68A]]="groupAllHaveDisposition('neutral')"
+                    [class.border-[#243B37]]="!groupAllHaveDisposition('neutral')"
+                    [class.bg-[#09100F]]="!groupAllHaveDisposition('neutral')"
+                    [class.text-[#8AB0AB]]="!groupAllHaveDisposition('neutral')"
+                  >
+                    Neutral
+                  </button>
+                </div>
+              </div>
+            }
+
             <div class="flex flex-wrap items-center gap-1.5">
               @if (vttStore.isGm()) {
                 <button
@@ -685,6 +737,58 @@
                 </div>
               </div>
             </div>
+
+            @if (vttStore.isGm()) {
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] px-2.5 py-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#8AB0AB]">
+                  Disposition
+                </span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    data-hud-disposition="enemy"
+                    (click)="setSingleDisposition('enemy')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#F43F5E]]="tok.faction === 'enemy'"
+                    [class.bg-[#3B1822]]="tok.faction === 'enemy'"
+                    [class.text-[#FDA4AF]]="tok.faction === 'enemy'"
+                    [class.border-[#243B37]]="tok.faction !== 'enemy'"
+                    [class.bg-[#09100F]]="tok.faction !== 'enemy'"
+                    [class.text-[#8AB0AB]]="tok.faction !== 'enemy'"
+                  >
+                    Hostile
+                  </button>
+                  <button
+                    type="button"
+                    data-hud-disposition="ally"
+                    (click)="setSingleDisposition('ally')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#38B29A]]="tok.faction === 'ally'"
+                    [class.bg-[#102B26]]="tok.faction === 'ally'"
+                    [class.text-[#5EEAD4]]="tok.faction === 'ally'"
+                    [class.border-[#243B37]]="tok.faction !== 'ally'"
+                    [class.bg-[#09100F]]="tok.faction !== 'ally'"
+                    [class.text-[#8AB0AB]]="tok.faction !== 'ally'"
+                  >
+                    Friendly
+                  </button>
+                  <button
+                    type="button"
+                    data-hud-disposition="neutral"
+                    (click)="setSingleDisposition('neutral')"
+                    class="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors"
+                    [class.border-[#F59E0B]]="tok.faction === 'neutral'"
+                    [class.bg-[#2B1D0E]]="tok.faction === 'neutral'"
+                    [class.text-[#FDE68A]]="tok.faction === 'neutral'"
+                    [class.border-[#243B37]]="tok.faction !== 'neutral'"
+                    [class.bg-[#09100F]]="tok.faction !== 'neutral'"
+                    [class.text-[#8AB0AB]]="tok.faction !== 'neutral'"
+                  >
+                    Neutral
+                  </button>
+                </div>
+              </div>
+            }
 
             <div class="flex flex-wrap items-center gap-2">
               <button
@@ -1970,26 +2074,35 @@
             </div>
           </button>
 
+          @let rushReady = canUseOpeningRush();
           <button
             type="button"
             data-hud-tile="move"
-            [disabled]="!controllable || tok.current_ap < 1"
-            (click)="triggerTacticalAction('Move', 'Moved up to ' + tok.move_feet + ' ft (' + moveTiles() + ' tiles)')"
+            [disabled]="!controllable || (!rushReady && tok.current_ap < 1)"
+            (click)="onMoveTileClick()"
             (mouseenter)="setHover({
-              title: 'Move',
-              apLabel: '1 AP',
-              subtitle: 'Up to ' + tok.move_feet + ' ft (' + moveTiles() + ' tiles)',
-              description: 'Spend 1 AP to log a stride, or drag your token directly on the map.'
+              title: rushReady ? '0 AP: Opening Rush' : 'Move',
+              apLabel: rushReady ? '0 AP' : '1 AP',
+              subtitle: rushReady ? 'Free Round 1 Move · Up to ' + tok.move_feet + ' ft' : 'Up to ' + tok.move_feet + ' ft (' + moveTiles() + ' tiles)',
+              description: rushReady ? 'No adjacent hostile: drag/WASD closer to an enemy on the map to move for 0 AP, or click to log Opening Rush.' : 'Spend 1 AP to log a stride, or drag your token directly on the map.'
             })"
             (mouseleave)="setHover(null)"
-            class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border border-[#243B37] bg-[#122220] p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+            class="flex h-[84px] w-[66px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-colors hover:border-[#38B29A] disabled:opacity-40"
+            [class.border-[#38B29A]]="rushReady"
+            [class.bg-[#102B26]]="rushReady"
+            [class.border-[#243B37]]="!rushReady"
+            [class.bg-[#122220]]="!rushReady"
           >
-            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">1 AP</span>
+            <span class="w-full text-right font-mono-num text-[8px] font-bold text-[#5EEAD4]">
+              {{ rushReady ? '0 AP' : '1 AP' }}
+            </span>
             <svg class="h-5 w-5 text-[#5EEAD4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M13 4v16M7 4v16M3 8h4m6 0h8M3 16h8m6 0h4" />
             </svg>
             <div class="w-full leading-tight">
-              <div class="text-[9px] font-bold text-white">Move</div>
+              <div class="text-[9px] font-bold text-white">
+                {{ rushReady ? 'Rush' : 'Move' }}
+              </div>
               <div class="font-mono-num text-[8px] text-[#5EEAD4]">{{ tok.move_feet }} ft</div>
             </div>
           </button>

@@ -1858,6 +1858,14 @@ export class VttRoomComponent {
     void this.vttStore.reimportRosterActorFromSource(actorId);
   }
 
+  setRosterActorDispositionFromMenu(
+    actorId: string,
+    faction: VttFaction
+  ): void {
+    this.closeDirectoryContextMenu();
+    void this.vttStore.setRosterActorDisposition(actorId, faction);
+  }
+
   async reimportCharacterIntoRoster(characterId: string): Promise<void> {
     const existing = this.vttStore
       .rosterActors()

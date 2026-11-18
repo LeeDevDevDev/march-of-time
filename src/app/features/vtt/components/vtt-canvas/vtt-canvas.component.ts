@@ -4308,10 +4308,25 @@ export class VttCanvasComponent implements AfterViewInit {
           totalFeet > 0
             ? Math.ceil(totalFeet / Math.max(5, speedFeet))
             : 0;
+        const qualifiesRush =
+          movesNeeded > 0 &&
+          tok !== undefined &&
+          typeof this.vttStore.doesMoveQualifyForOpeningRush === 'function' &&
+          this.vttStore.doesMoveQualifyForOpeningRush(tok, tok, {
+            x: tok.x,
+            y: tok.y,
+            world_x: dragTok.currentWorld.x,
+            world_y: dragTok.currentWorld.y,
+            npc_stats: { ...(tok.npc_stats ?? {}), __unsnapped: true },
+          });
         const movesStr =
           movesNeeded === 0
             ? 'Free Nudge'
-            : `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
+            : qualifiesRush
+              ? movesNeeded === 1
+                ? 'Opening Rush (0 AP)'
+                : `Opening Rush + ${movesNeeded - 1} ${movesNeeded - 1 === 1 ? 'Move' : 'Moves'}`
+              : `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
         const label =
           dragTok.gridlessBlocked && !dragTok.shiftOverride
             ? priorFeet > 0
@@ -4349,7 +4364,23 @@ export class VttCanvasComponent implements AfterViewInit {
           1,
           Math.ceil(totalFeet / Math.max(5, speedFeet))
         );
-        const movesStr = `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
+        const qualifiesRush =
+          tok !== undefined &&
+          typeof this.vttStore.doesMoveQualifyForOpeningRush === 'function' &&
+          this.vttStore.doesMoveQualifyForOpeningRush(tok, tok, {
+            x: dragTok.currentHex.col,
+            y: dragTok.currentHex.row,
+            world_x: null,
+            world_y: null,
+            npc_stats: tok.npc_stats?.__unsnapped
+              ? { ...tok.npc_stats, __unsnapped: false }
+              : tok.npc_stats,
+          });
+        const movesStr = qualifiesRush
+          ? movesNeeded === 1
+            ? 'Opening Rush (0 AP)'
+            : `Opening Rush + ${movesNeeded - 1} ${movesNeeded - 1 === 1 ? 'Move' : 'Moves'}`
+          : `${movesNeeded} ${movesNeeded === 1 ? 'Move' : 'Moves'}`;
         const label =
           !pathRes.reachable && !dragTok.shiftOverride
             ? priorFeet > 0

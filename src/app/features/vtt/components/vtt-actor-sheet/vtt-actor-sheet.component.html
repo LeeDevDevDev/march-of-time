@@ -1090,20 +1090,48 @@
                   </div>
 
                   <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <div class="flex flex-col justify-between rounded-xl border border-[#243B37] bg-[#122220] p-3 space-y-2">
+                    @let pcRushReady = canUseOpeningRush();
+                    <div
+                      class="flex flex-col justify-between rounded-xl border p-3 space-y-2 transition-colors"
+                      [class.border-[#38B29A]]="pcRushReady"
+                      [class.bg-[#102B26]]="pcRushReady"
+                      [class.border-[#243B37]]="!pcRushReady"
+                      [class.bg-[#122220]]="!pcRushReady"
+                    >
                       <div>
-                        <div class="flex items-center justify-between gap-1.5">
-                          <span class="font-display text-xs font-bold text-white">Move</span>
+                        <div class="flex flex-wrap items-center justify-between gap-1.5">
+                          <div class="flex items-center gap-1.5">
+                            <span class="font-display text-xs font-bold text-white">Move</span>
+                            @if (pcRushReady) {
+                              <span class="rounded bg-[#38B29A] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#09100F]">
+                                Opening Rush Ready
+                              </span>
+                            }
+                          </div>
                           <span class="rounded border border-[#225C50] bg-[#102B26] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
-                            1 AP &middot; {{ stats.moveFeet }} ft
+                            {{ pcRushReady ? '0 AP Rush · ' : '1 AP · ' }}{{ stats.moveFeet }} ft
                           </span>
                         </div>
                         <p class="mt-1 text-[10px] text-[#8AB0AB]">
-                          Stride up to <strong>{{ stats.moveFeet }} ft ({{ stats.moveTiles }} tiles)</strong> per 1 AP spent, or drag your token on the map.
+                          @if (pcRushReady) {
+                            Round 1 with no adjacent hostile: drag/WASD closer to an enemy for <strong>0 AP ({{ stats.moveFeet }} ft)</strong>, or log Opening Rush below.
+                          } @else {
+                            Stride up to <strong>{{ stats.moveFeet }} ft ({{ stats.moveTiles }} tiles)</strong> per 1 AP spent, or drag your token on the map.
+                          }
                         </p>
                       </div>
-                      <div class="flex items-center justify-end border-t border-[#243B37] pt-2">
+                      <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[#243B37] pt-2">
                         @if (editable) {
+                          @if (pcRushReady) {
+                            <button
+                              type="button"
+                              data-vtt-action="opening-rush"
+                              (click)="useOpeningRush()"
+                              class="rounded-lg border border-[#38B29A] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#5EEAD4] hover:bg-[#143731]"
+                            >
+                              0 AP: Opening Rush
+                            </button>
+                          }
                           <button
                             type="button"
                             data-vtt-action="move"
@@ -2522,15 +2550,15 @@
 
                   @if (vttStore.isGm()) {
                     <label class="block space-y-1">
-                      <span class="font-semibold text-[#EBF5F3]">Faction</span>
+                      <span class="font-semibold text-[#EBF5F3]">Disposition</span>
                       <select
                         [ngModel]="getDisplayFaction()"
                         (ngModelChange)="patchSheetActorOrToken({ faction: $event })"
                         class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none"
                       >
-                        <option value="ally">Ally</option>
+                        <option value="ally">Friendly</option>
                         <option value="neutral">Neutral</option>
-                        <option value="enemy">Enemy</option>
+                        <option value="enemy">Hostile</option>
                       </select>
                     </label>
                   }
@@ -3051,20 +3079,48 @@
                   Other Actions
                 </span>
                 <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div class="flex flex-col justify-between rounded-xl border border-[#243B37] bg-[#122220] p-3 space-y-2">
+                  @let npcRushReady = canUseOpeningRush();
+                  <div
+                    class="flex flex-col justify-between rounded-xl border p-3 space-y-2 transition-colors"
+                    [class.border-[#38B29A]]="npcRushReady"
+                    [class.bg-[#102B26]]="npcRushReady"
+                    [class.border-[#243B37]]="!npcRushReady"
+                    [class.bg-[#122220]]="!npcRushReady"
+                  >
                     <div>
-                      <div class="flex items-center justify-between gap-1.5">
-                        <span class="font-display text-xs font-bold text-white">Move</span>
+                      <div class="flex flex-wrap items-center justify-between gap-1.5">
+                        <div class="flex items-center gap-1.5">
+                          <span class="font-display text-xs font-bold text-white">Move</span>
+                          @if (npcRushReady) {
+                            <span class="rounded bg-[#38B29A] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#09100F]">
+                              Opening Rush Ready
+                            </span>
+                          }
+                        </div>
                         <span class="rounded border border-[#225C50] bg-[#102B26] px-1.5 py-0.5 font-mono-num text-[9px] font-bold text-[#5EEAD4]">
-                          1 AP &middot; {{ npcMoveFt }} ft
+                          {{ npcRushReady ? '0 AP Rush · ' : '1 AP · ' }}{{ npcMoveFt }} ft
                         </span>
                       </div>
                       <p class="mt-1 text-[10px] text-[#8AB0AB]">
-                        Stride up to <strong>{{ npcMoveFt }} ft ({{ getNpcMoveTiles() }} tiles)</strong> per 1 AP spent, or drag the token on the map.
+                        @if (npcRushReady) {
+                          Round 1 with no adjacent hostile: drag/WASD closer to an enemy for <strong>0 AP ({{ npcMoveFt }} ft)</strong>, or log Opening Rush below.
+                        } @else {
+                          Stride up to <strong>{{ npcMoveFt }} ft ({{ getNpcMoveTiles() }} tiles)</strong> per 1 AP spent, or drag the token on the map.
+                        }
                       </p>
                     </div>
-                    <div class="flex items-center justify-end border-t border-[#243B37] pt-2">
+                    <div class="flex flex-wrap items-center justify-end gap-1.5 border-t border-[#243B37] pt-2">
                       @if (editable) {
+                        @if (npcRushReady) {
+                          <button
+                            type="button"
+                            data-vtt-action="opening-rush"
+                            (click)="useOpeningRush()"
+                            class="rounded-lg border border-[#38B29A] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#5EEAD4] hover:bg-[#143731]"
+                          >
+                            0 AP: Opening Rush
+                          </button>
+                        }
                         <button
                           type="button"
                           data-vtt-action="move"
@@ -4152,21 +4208,60 @@
               *ngTemplateOutlet="tokenVisualSummaryCard; context: { displayName: getNpcName() }"
             />
 
-            <div class="grid grid-cols-2 gap-2.5 border-t border-[#243B37] pt-3 sm:grid-cols-4">
-              <label class="block space-y-1">
-                <span class="font-semibold text-[#EBF5F3]">Faction</span>
-                <select
-                  [ngModel]="getDisplayFaction()"
-                  (ngModelChange)="patchSheetActorOrToken({ faction: $event })"
-                  [disabled]="!editable"
-                  class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                >
-                  <option value="enemy">Enemy</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="ally">Ally</option>
-                </select>
-              </label>
+            <div class="space-y-2 border-t border-[#243B37] pt-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-semibold text-[#EBF5F3]">Disposition</span>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    data-npc-disposition="enemy"
+                    [disabled]="!editable"
+                    (click)="patchSheetActorOrToken({ faction: 'enemy' })"
+                    class="rounded-lg border px-3 py-1 text-xs font-bold transition-colors disabled:opacity-50"
+                    [class.border-[#F43F5E]]="getDisplayFaction() === 'enemy'"
+                    [class.bg-[#3B1822]]="getDisplayFaction() === 'enemy'"
+                    [class.text-[#FDA4AF]]="getDisplayFaction() === 'enemy'"
+                    [class.border-[#243B37]]="getDisplayFaction() !== 'enemy'"
+                    [class.bg-[#09100F]]="getDisplayFaction() !== 'enemy'"
+                    [class.text-[#8AB0AB]]="getDisplayFaction() !== 'enemy'"
+                  >
+                    Hostile
+                  </button>
+                  <button
+                    type="button"
+                    data-npc-disposition="ally"
+                    [disabled]="!editable"
+                    (click)="patchSheetActorOrToken({ faction: 'ally' })"
+                    class="rounded-lg border px-3 py-1 text-xs font-bold transition-colors disabled:opacity-50"
+                    [class.border-[#38B29A]]="getDisplayFaction() === 'ally'"
+                    [class.bg-[#102B26]]="getDisplayFaction() === 'ally'"
+                    [class.text-[#5EEAD4]]="getDisplayFaction() === 'ally'"
+                    [class.border-[#243B37]]="getDisplayFaction() !== 'ally'"
+                    [class.bg-[#09100F]]="getDisplayFaction() !== 'ally'"
+                    [class.text-[#8AB0AB]]="getDisplayFaction() !== 'ally'"
+                  >
+                    Friendly
+                  </button>
+                  <button
+                    type="button"
+                    data-npc-disposition="neutral"
+                    [disabled]="!editable"
+                    (click)="patchSheetActorOrToken({ faction: 'neutral' })"
+                    class="rounded-lg border px-3 py-1 text-xs font-bold transition-colors disabled:opacity-50"
+                    [class.border-[#F59E0B]]="getDisplayFaction() === 'neutral'"
+                    [class.bg-[#2B1D0E]]="getDisplayFaction() === 'neutral'"
+                    [class.text-[#FDE68A]]="getDisplayFaction() === 'neutral'"
+                    [class.border-[#243B37]]="getDisplayFaction() !== 'neutral'"
+                    [class.bg-[#09100F]]="getDisplayFaction() !== 'neutral'"
+                    [class.text-[#8AB0AB]]="getDisplayFaction() !== 'neutral'"
+                  >
+                    Neutral
+                  </button>
+                </div>
+              </div>
+            </div>
 
+            <div class="grid grid-cols-1 gap-2.5 border-t border-[#243B37] pt-3 sm:grid-cols-3">
               <label class="block space-y-1">
                 <span class="font-semibold text-[#EBF5F3]">Token Size</span>
                 <select
