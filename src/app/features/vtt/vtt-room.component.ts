@@ -3013,8 +3013,15 @@ export class VttRoomComponent {
     const rawChoice = payload['defense_choice'];
     const choice: VttDefenseChoice =
       rawChoice === 'parry' || rawChoice === 'dodge' ? rawChoice : 'take_hit';
+    const guardBlocked = Boolean(payload['guard_blocked']);
     const defenseLabel =
-      choice === 'parry' ? 'Parry' : choice === 'dodge' ? 'Dodge' : 'Take Hit';
+      choice === 'parry'
+        ? 'Parry'
+        : choice === 'dodge'
+          ? 'Dodge'
+          : guardBlocked
+            ? 'Block'
+            : 'Take Hit';
     const defenseTotal =
       typeof payload['defense_total'] === 'number' &&
       Number.isFinite(payload['defense_total'])
@@ -3036,7 +3043,12 @@ export class VttRoomComponent {
       defenseLabel,
       defenseTotal,
       hitLanded,
-      statusLabel: formatClashOutcomeStatus(choice, hitLanded, flawless),
+      statusLabel: formatClashOutcomeStatus(
+        choice,
+        hitLanded,
+        flawless,
+        guardBlocked
+      ),
       flatDamage,
     };
   }
@@ -3064,6 +3076,7 @@ export class VttRoomComponent {
         : 'take_hit';
     const hitLanded = Boolean(payload['hit_landed']);
     const flawless = Boolean(payload['flawless']);
+    const guardBlocked = Boolean(payload['guard_blocked']);
     const spDamage = Math.max(0, Math.round(Number(payload['sp_damage'] ?? 0)));
     const hpDamage = Math.max(0, Math.round(Number(payload['hp_damage'] ?? 0)));
     const counterSp = Math.max(
@@ -3079,7 +3092,12 @@ export class VttRoomComponent {
       defenderName,
       actionName,
       hitLanded,
-      statusLabel: formatClashOutcomeStatus(reaction, hitLanded, flawless),
+      statusLabel: formatClashOutcomeStatus(
+        reaction,
+        hitLanded,
+        flawless,
+        guardBlocked
+      ),
       spDamage,
       hpDamage,
       counterSp,

@@ -1040,7 +1040,7 @@
                           <button
                             type="button"
                             data-vtt-action="raise-guard"
-                            [disabled]="!pcGuardRaised && pcCurrAp < 1"
+                            [disabled]="!pcGuardRaised && (pcCurrAp < 1 || (stats.maxSp > 0 && pcCurrSp <= 0))"
                             (click)="toggleCharacterRaiseGuard(char, stats)"
                             class="rounded-lg px-2.5 py-1 font-mono-num text-[10px] font-bold transition-colors disabled:opacity-40"
                             [class.btn-copper]="!pcGuardRaised"
@@ -1069,7 +1069,7 @@
                           SP {{ pcCurrSp }}/{{ stats.maxSp }} &middot; Armor DR {{ stats.armorDr }}
                         </div>
                         <p class="mt-1 text-[10px] text-[#8AB0AB]">
-                          {{ stats.equippedArmorLabel }}: incoming hits deplete SP first; overflow strikes HP reduced by {{ stats.armorDr }} DR.
+                          {{ stats.equippedArmorLabel }}: defended hits deplete SP first; undefended hits &amp; SP overflow strike HP reduced by {{ stats.armorDr }} DR.
                         </p>
                       </div>
                       <div class="flex items-center justify-end border-t border-[#243B37] pt-2 font-mono-num text-[10px] text-[#5EEAD4]">
@@ -2652,7 +2652,7 @@
         }
       } @else {
         @let npcStats = getNpcStats();
-        <div class="grid grid-cols-5 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:text-[11px]">
+        <div class="grid grid-cols-2 gap-1 border-b border-[#243B37] bg-[#122220] p-1 text-[10px] font-bold sm:grid-cols-4 sm:text-[11px]">
           <button
             type="button"
             data-vtt-npc-tab="actions"
@@ -2663,17 +2663,6 @@
             [class.text-[#8AB0AB]]="npcTab() !== 'actions'"
           >
             Actions
-          </button>
-          <button
-            type="button"
-            data-vtt-npc-tab="statblock"
-            (click)="npcTab.set('statblock')"
-            class="rounded-lg px-1.5 py-1.5 transition-colors"
-            [class.bg-[#09100F]]="npcTab() === 'statblock'"
-            [class.text-white]="npcTab() === 'statblock'"
-            [class.text-[#8AB0AB]]="npcTab() !== 'statblock'"
-          >
-            Statblock
           </button>
           <button
             type="button"
@@ -2741,14 +2730,15 @@
                     </button>
                     <button
                       type="button"
-                      (click)="npcTab.set('statblock')"
+                      (click)="npcTab.set('skills')"
                       class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-semibold text-[#8AB0AB] hover:border-[#C4491A] hover:text-white"
                     >
-                      Edit Statblock
+                      Attributes &amp; Skills
                     </button>
                   </div>
                 </div>
 
+                @let npcWepStats = getEffectiveNpcWeaponStats();
                 <div class="rounded-xl border border-[#C4491A] bg-[#122220] p-3 space-y-2.5">
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="flex items-center gap-2">
@@ -2762,7 +2752,7 @@
                       <div>
                         <div class="flex flex-wrap items-center gap-1.5">
                           <span class="font-display text-xs font-bold text-white">
-                            {{ npcStats.weapon_name || 'Unarmed' }}
+                            {{ npcWepStats.weaponName }}
                           </span>
                           <span class="rounded bg-[#C4491A] px-1.5 py-0.5 font-mono-num text-[9px] font-bold uppercase text-white">
                             Equipped
@@ -2774,7 +2764,7 @@
                           }
                         </div>
                         <div class="font-mono-num text-[10px] text-[#8AB0AB]">
-                          {{ npcStats.attack_ap ?? 1 }} AP &middot; Reach {{ npcStats.reach_feet ?? 5 }} ft
+                          {{ npcWepStats.attackAp }} AP &middot; Reach {{ npcWepStats.reachFeet }} ft
                         </div>
                       </div>
                     </div>
@@ -2782,15 +2772,15 @@
                     <div class="flex items-center gap-1.5">
                       <button
                         type="button"
-                        (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Unarmed') + ' Attack', npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' DMG')"
+                        (click)="rollSheetCheck(getNpcName(), npcWepStats.weaponName + ' Attack', npcWepStats.attackMod, npcWepStats.flatDamage + ' DMG')"
                         class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                       >
-                        Roll {{ formatRollFormulaFromMod(npcStats.attack_mod ?? 2) }}
+                        Roll {{ formatRollFormulaFromMod(npcWepStats.attackMod) }}
                       </button>
                       @if (tok && vttStore.canControlToken(tok)) {
                         <button
                           type="button"
-                          [disabled]="npcCurrAp < (npcStats.attack_ap ?? 1)"
+                          [disabled]="npcCurrAp < npcWepStats.attackAp"
                           (click)="targetWeaponOnMap(null)"
                           class="btn-copper rounded-lg px-2.5 py-1 text-[10px] font-bold disabled:opacity-40"
                         >
@@ -2803,11 +2793,17 @@
                   <div class="grid grid-cols-2 gap-1.5 font-mono-num text-[10px]">
                     <div class="rounded-lg border border-[#C4491A]/40 bg-[#27160E]/60 px-2.5 py-1.5">
                       <div class="text-[9px] uppercase text-[#FDBA74]">Roll Formula</div>
-                      <div class="font-bold text-white">{{ formatRollFormulaFromMod(npcStats.attack_mod ?? 2) }}</div>
+                      <div class="font-bold text-white">{{ formatRollFormulaFromMod(npcWepStats.attackMod) }}</div>
+                      @if (npcWepStats.formula) {
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ npcWepStats.formula.rollBreakdown }}</div>
+                      }
                     </div>
                     <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5">
-                      <div class="text-[9px] uppercase text-[#8AB0AB]">Flat Damage</div>
-                      <div class="font-bold text-white">{{ npcStats.flat_damage ?? 3 }} DMG</div>
+                      <div class="text-[9px] uppercase text-[#8AB0AB]">Damage</div>
+                      <div class="font-bold text-white">{{ npcWepStats.flatDamage }} DMG</div>
+                      @if (npcWepStats.formula) {
+                        <div class="truncate text-[9px] text-[#8AB0AB]">{{ npcWepStats.formula.damageBreakdown }}</div>
+                      }
                     </div>
                   </div>
                 </div>
@@ -2819,8 +2815,8 @@
                     </span>
                     @for (nArt of npcArts; track nArt.id) {
                       @let nVis = getNodeVisuals(nArt);
-                      @let nArtMod = (npcStats.attack_mod ?? 2) + getNodeBonusAttack(nArt);
-                      @let nArtDmg = (npcStats.flat_damage ?? 3) + getNodeBonusDamage(nArt);
+                      @let nArtMod = npcWepStats.attackMod + getNodeBonusAttack(nArt);
+                      @let nArtDmg = npcWepStats.flatDamage + getNodeBonusDamage(nArt);
                       <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] p-2.5">
                         <div class="flex min-w-0 items-center gap-2">
                           <span
@@ -2877,6 +2873,8 @@
               </div>
 
               <div data-vtt-actions-section="defenses" class="space-y-2 border-t border-[#243B37] pt-3">
+                @let npcParryMod = getNpcParryMod();
+                @let npcDodgeMod = getNpcDodgeMod();
                 <span class="font-display text-xs font-bold uppercase tracking-wider text-[#7DD3FC]">
                   Defensive Actions
                 </span>
@@ -2890,8 +2888,8 @@
                         </span>
                       </div>
                       <div class="mt-1 font-mono-num text-[11px] font-bold text-[#7DD3FC]">
-                        Roll {{ formatRollFormulaFromMod(npcStats.parry_mod ?? 1) }}
-                        @if (npcStats.enables_martial_parry) {
+                        Roll {{ formatRollFormulaFromMod(npcParryMod) }}
+                        @if (hasNpcMartialParry()) {
                           <span class="ml-1 rounded border border-[#C4491A]/60 bg-[#27160E] px-1.5 py-0.5 text-[9px] text-[#FDBA74]">
                             Martial Parry
                           </span>
@@ -2904,7 +2902,7 @@
                     <div class="flex items-center justify-end gap-1.5 border-t border-[#243B37] pt-2">
                       <button
                         type="button"
-                        (click)="rollSheetCheck(getNpcName(), 'Parry Check', npcStats.parry_mod ?? 1)"
+                        (click)="rollSheetCheck(getNpcName(), 'Parry Check', npcParryMod)"
                         class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#7DD3FC] hover:border-[#38BDF8]"
                       >
                         Roll
@@ -2936,7 +2934,7 @@
                       </div>
                       <div class="mt-1 font-mono-num text-[11px] font-bold text-[#5EEAD4]">
                         @if (npcStats.can_dodge !== false) {
-                          Roll {{ formatRollFormulaFromMod(npcStats.dodge_mod ?? 1) }}
+                          Roll {{ formatRollFormulaFromMod(npcDodgeMod) }}
                         } @else {
                           Disabled
                         }
@@ -2945,7 +2943,7 @@
                         @if (npcStats.can_dodge !== false) {
                           Shifts 5 ft &middot; Flawless (&ge; +5) refunds 1 AP. Cannot Dodge Sweeping.
                         } @else {
-                          Dodge disabled on this NPC statblock.
+                          Dodge disabled on this NPC.
                         }
                       </p>
                     </div>
@@ -2953,7 +2951,7 @@
                       <button
                         type="button"
                         [disabled]="npcStats.can_dodge === false"
-                        (click)="rollSheetCheck(getNpcName(), 'Dodge Check', npcStats.dodge_mod ?? 1)"
+                        (click)="rollSheetCheck(getNpcName(), 'Dodge Check', npcDodgeMod)"
                         class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-40"
                       >
                         Roll
@@ -3009,7 +3007,7 @@
                         <button
                           type="button"
                           data-vtt-action="raise-guard"
-                          [disabled]="!npcGuardUp && tok !== null && npcCurrAp < 1"
+                          [disabled]="!npcGuardUp && tok !== null && (npcCurrAp < 1 || (npcMaxSp > 0 && npcCurrSp <= 0))"
                           (click)="toggleNpcRaiseGuard()"
                           class="rounded-lg px-2.5 py-1 font-mono-num text-[10px] font-bold transition-colors disabled:opacity-40"
                           [class.btn-copper]="!npcGuardUp"
@@ -3038,7 +3036,7 @@
                         SP {{ npcCurrSp }}/{{ npcMaxSp }} &middot; Armor DR {{ npcDrVal }}
                       </div>
                       <p class="mt-1 text-[10px] text-[#8AB0AB]">
-                        Incoming hits deplete SP first; overflow to HP is reduced by {{ npcDrVal }} Armor DR.
+                        Defended hits deplete SP first; undefended hits &amp; SP overflow strike HP reduced by {{ npcDrVal }} Armor DR.
                       </p>
                     </div>
                     <div class="flex items-center justify-end border-t border-[#243B37] pt-2 font-mono-num text-[10px] text-[#5EEAD4]">
@@ -3165,386 +3163,120 @@
             </div>
           }
 
-          @if (npcTab() === 'statblock') {
-            <div class="space-y-2">
-              <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                Vitals &amp; Defense
-              </span>
-              <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Max HP</span>
-                  <input
-                    type="number"
-                    min="1"
-                    [ngModel]="getNpcMaxVital('max_hp')"
-                    (ngModelChange)="patchSheetActorOrToken({ max_hp: +$event || 1 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Max SP</span>
-                  <input
-                    type="number"
-                    min="0"
-                    [ngModel]="getNpcMaxVital('max_sp')"
-                    (ngModelChange)="patchSheetActorOrToken({ max_sp: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Max AP</span>
-                  <input
-                    type="number"
-                    min="1"
-                    [ngModel]="getNpcMaxVital('max_ap')"
-                    (ngModelChange)="patchSheetActorOrToken({ max_ap: +$event || 1 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Armor DR</span>
-                  <input
-                    type="number"
-                    min="0"
-                    [ngModel]="getNpcArmorOrMove('armor_dr')"
-                    (ngModelChange)="patchSheetActorOrToken({ armor_dr: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Shield Block</span>
-                  <input
-                    type="number"
-                    min="0"
-                    [ngModel]="getNpcArmorOrMove('shield_block')"
-                    (ngModelChange)="patchSheetActorOrToken({ shield_block: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Move (ft)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="5"
-                    [ngModel]="getNpcArmorOrMove('move_feet')"
-                    (ngModelChange)="patchSheetActorOrToken({ move_feet: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div class="space-y-2.5 border-t border-[#243B37] pt-3">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                  Attack &amp; Reactions
-                </span>
-                @if (editable && getAllCompendiumWeapons().length > 0) {
-                  <select
-                    [ngModel]="''"
-                    (ngModelChange)="applyCompendiumWeaponToNpc($event)"
-                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
-                  >
-                    <option value="">Quick-Fill from Compendium Weapon...</option>
-                    @for (wep of getAllCompendiumWeapons(); track wep.id) {
-                      <option [value]="wep.id">{{ wep.name }} ({{ wep.base_damage }} DMG)</option>
-                    }
-                  </select>
-                }
-              </div>
-
-              <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <label class="col-span-2 block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Attack / Weapon Name</span>
-                  <input
-                    type="text"
-                    [ngModel]="npcStats.weapon_name || 'Unarmed'"
-                    (ngModelChange)="patchNpcStatsField({ weapon_name: $event })"
-                    [disabled]="!editable"
-                    placeholder="Attack"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">AP Cost</span>
-                  <input
-                    type="number"
-                    min="1"
-                    [ngModel]="npcStats.attack_ap ?? 1"
-                    (ngModelChange)="patchNpcStatsField({ attack_ap: +$event || 1 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Combat Tag</span>
-                  <select
-                    [ngModel]="npcStats.combat_tag || 'None'"
-                    (ngModelChange)="patchNpcStatsField({ combat_tag: $event })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 text-xs font-semibold text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  >
-                    @for (tag of combatTagOptions; track tag) {
-                      <option [value]="tag">{{ tag }}</option>
-                    }
-                  </select>
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Attack Mod</span>
-                  <input
-                    type="number"
-                    [ngModel]="npcStats.attack_mod ?? 2"
-                    (ngModelChange)="patchNpcStatsField({ attack_mod: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Flat Damage</span>
-                  <input
-                    type="number"
-                    min="0"
-                    [ngModel]="npcStats.flat_damage ?? 3"
-                    (ngModelChange)="patchNpcStatsField({ flat_damage: +$event || 0 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Reach (ft)</span>
-                  <input
-                    type="number"
-                    min="5"
-                    step="5"
-                    [ngModel]="npcStats.reach_feet ?? 5"
-                    (ngModelChange)="patchNpcStatsField({ reach_feet: +$event || 5 })"
-                    [disabled]="!editable"
-                    class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label class="block space-y-1">
-                  <span class="text-[10px] font-semibold text-[#8AB0AB]">Parry / Dodge</span>
-                  <div class="grid grid-cols-2 gap-1">
-                    <input
-                      type="number"
-                      [ngModel]="npcStats.parry_mod ?? 1"
-                      (ngModelChange)="patchNpcStatsField({ parry_mod: +$event || 0 })"
-                      [disabled]="!editable"
-                      title="Parry Mod"
-                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                    />
-                    <input
-                      type="number"
-                      [ngModel]="npcStats.dodge_mod ?? 1"
-                      (ngModelChange)="patchNpcStatsField({ dodge_mod: +$event || 0 })"
-                      [disabled]="!editable"
-                      title="Dodge Mod"
-                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-1.5 py-1.5 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
-                    />
-                  </div>
-                </label>
-              </div>
-
-              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#243B37] bg-[#122220] px-3 py-2">
-                <div class="flex flex-wrap items-center gap-3">
-                  <label class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white">
-                    <input
-                      type="checkbox"
-                      [ngModel]="npcStats.can_dodge !== false"
-                      (ngModelChange)="patchNpcStatsField({ can_dodge: $event })"
-                      [disabled]="!editable"
-                      class="accent-[#C4491A]"
-                    />
-                    <span>Can Dodge</span>
-                  </label>
-                  <label class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white">
-                    <input
-                      type="checkbox"
-                      [ngModel]="!!npcStats.enables_martial_parry"
-                      (ngModelChange)="patchNpcStatsField({ enables_martial_parry: $event })"
-                      [disabled]="!editable"
-                      class="accent-[#C4491A]"
-                    />
-                    <span>Martial Parry</span>
-                  </label>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    (click)="rollSheetCheck(getNpcName(), (npcStats.weapon_name || 'Attack'), npcStats.attack_mod ?? 2, (npcStats.flat_damage ?? 3) + ' DMG')"
-                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
-                  >
-                    Roll Attack (+{{ npcStats.attack_mod ?? 2 }})
-                  </button>
-                  <button
-                    type="button"
-                    (click)="rollSheetCheck(getNpcName(), 'Parry Reaction', npcStats.parry_mod ?? 1)"
-                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#7DD3FC] hover:border-[#38BDF8]"
-                  >
-                    Parry (+{{ npcStats.parry_mod ?? 1 }})
-                  </button>
-                  <button
-                    type="button"
-                    [disabled]="npcStats.can_dodge === false"
-                    (click)="rollSheetCheck(getNpcName(), 'Dodge Reaction', npcStats.dodge_mod ?? 1)"
-                    class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-40"
-                  >
-                    Dodge (+{{ npcStats.dodge_mod ?? 1 }})
-                  </button>
-                  @if (tok && vttStore.canControlToken(tok)) {
-                    <button
-                      type="button"
-                      (click)="targetWeaponOnMap(null)"
-                      class="btn-copper rounded-lg px-2.5 py-1 text-[10px] font-bold"
-                    >
-                      Target on Map
-                    </button>
-                  }
-                </div>
-              </div>
-            </div>
-
-            @let npcStandaloneNodes = getNpcStandaloneNodes();
-            @if (npcStandaloneNodes.length > 0 || (editable && canGrantStandalone())) {
-              <div
-                data-npc-standalone-section="true"
-                class="space-y-2 border-t border-[#243B37] pt-3"
-              >
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                    Standalone Skills &amp; Arts
-                  </span>
-                  @if (editable && canGrantStandalone() && getStandaloneOptions().length > 0) {
-                    <select
-                      [ngModel]="''"
-                      (ngModelChange)="grantNpcStandaloneSkill($event)"
-                      class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
-                    >
-                      <option value="">+ Grant Standalone Skill...</option>
-                      @for (nodeOpt of getStandaloneOptions(); track nodeOpt.id) {
-                        <option [value]="nodeOpt.id">
-                          {{ nodeOpt.name }} ({{ nodeOpt.node_type === 'combat_art' ? 'Art' : 'Passive' }})
-                        </option>
-                      }
-                    </select>
-                  }
-                </div>
-
-                @if (npcStandaloneNodes.length === 0) {
-                  <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-3 text-center text-[11px] text-[#8AB0AB]">
-                    Drag skills from the Compendium Skills window onto this sheet to grant special arts &amp; passives.
-                  </div>
-                } @else {
-                  <div class="space-y-2">
-                    @for (node of npcStandaloneNodes; track node.id) {
-                      <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
-                        <div class="flex flex-wrap items-start justify-between gap-2">
-                          <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-1.5">
-                              @if (node.node_type === 'combat_art') {
-                                <span class="rounded bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#FDBA74]">
-                                  Combat Art
-                                </span>
-                                <span class="font-mono-num text-[10px] text-[#8AB0AB]">
-                                  {{ node.ap_cost ?? 1 }} AP &middot; {{ node.cooldown_rounds ?? 0 }}R CD
-                                </span>
-                                @if (node.combat_tag && node.combat_tag !== 'None') {
-                                  <span
-                                    class="rounded border px-1.5 py-0.25 text-[9px] font-bold"
-                                    [class]="getCombatTagBadgeClass(node.combat_tag)"
-                                  >
-                                    {{ node.combat_tag }}
-                                  </span>
-                                }
-                              } @else {
-                                <span class="badge-jade rounded border px-1.5 py-0.25 font-mono-num text-[9px] font-bold">
-                                  Passive
-                                </span>
-                              }
-                              <span class="font-display text-xs font-bold text-white">
-                                {{ node.name }}
-                              </span>
-                            </div>
-                            <p class="mt-1 text-[11px] text-[#8AB0AB]">
-                              {{ node.description }}
-                            </p>
-                            @let hookBadges = getHookBadges(node);
-                            @if (hookBadges.length > 0) {
-                              <div class="mt-1 flex flex-wrap gap-1">
-                                @for (badge of hookBadges; track badge) {
-                                  <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] text-[#A7F3D0]">
-                                    {{ badge }}
-                                  </span>
-                                }
-                              </div>
-                            }
-                          </div>
-
-                          <div class="flex shrink-0 items-center gap-1.5">
-                            @if (node.node_type === 'combat_art') {
-                              <button
-                                type="button"
-                                (click)="rollSheetCheck(getNpcName(), node.name, (npcStats.attack_mod ?? 2) + getNodeBonusAttack(node), ((npcStats.flat_damage ?? 3) + getNodeBonusDamage(node)) + ' DMG')"
-                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
-                              >
-                                Roll (+{{ (npcStats.attack_mod ?? 2) + getNodeBonusAttack(node) }})
-                              </button>
-                              @if (tok && vttStore.canControlToken(tok)) {
-                                <button
-                                  type="button"
-                                  [disabled]="tok.current_ap < (node.ap_cost ?? 1)"
-                                  (click)="targetNpcStandaloneArtOnMap(node)"
-                                  class="btn-copper rounded-lg px-2 py-1 text-[10px] font-bold disabled:opacity-40"
-                                >
-                                  Target
-                                </button>
-                              }
-                            }
-                            @if (editable) {
-                              <button
-                                type="button"
-                                (click)="removeNpcStandaloneSkill(node.id)"
-                                title="Remove Standalone Skill"
-                                class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
-                              >
-                                &times;
-                              </button>
-                            }
-                          </div>
-                        </div>
-                      </div>
-                    }
-                  </div>
-                }
-              </div>
-            }
-          }
-
           @if (npcTab() === 'skills') {
             @let npcAttrs = getNpcAttributes();
             @let npcCombatSkills = getNpcCombatSkills();
             @let npcFsTotals = getNpcFieldSkillTotals();
+            @let npcSkillWepStats = getEffectiveNpcWeaponStats();
+            @let npcSkillParryMod = getNpcParryMod();
+            @let npcSkillDodgeMod = getNpcDodgeMod();
+            @let npcStandaloneNodes = getNpcStandaloneNodes();
             <div data-vtt-npc-skills="true" class="space-y-3">
-              <div data-npc-attributes-section="true" class="space-y-2">
+              <div data-npc-vitals-section="true" class="space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Vitals &amp; Defense
+                  </span>
+                  <div class="flex flex-wrap items-center gap-3">
+                    <label class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white">
+                      <input
+                        type="checkbox"
+                        [ngModel]="npcStats.can_dodge !== false"
+                        (ngModelChange)="patchNpcStatsField({ can_dodge: $event })"
+                        [disabled]="!editable"
+                        class="accent-[#C4491A]"
+                      />
+                      <span>Can Dodge</span>
+                    </label>
+                    <label class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white">
+                      <input
+                        type="checkbox"
+                        [ngModel]="!!npcStats.enables_martial_parry"
+                        (ngModelChange)="patchNpcStatsField({ enables_martial_parry: $event })"
+                        [disabled]="!editable"
+                        class="accent-[#C4491A]"
+                      />
+                      <span>Martial Parry</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Max HP</span>
+                    <input
+                      type="number"
+                      min="1"
+                      [ngModel]="getNpcMaxVital('max_hp')"
+                      (ngModelChange)="patchSheetActorOrToken({ max_hp: +$event || 1 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Max SP</span>
+                    <input
+                      type="number"
+                      min="0"
+                      [ngModel]="getNpcMaxVital('max_sp')"
+                      (ngModelChange)="patchSheetActorOrToken({ max_sp: +$event || 0 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Max AP</span>
+                    <input
+                      type="number"
+                      min="1"
+                      [ngModel]="getNpcMaxVital('max_ap')"
+                      (ngModelChange)="patchSheetActorOrToken({ max_ap: +$event || 1 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Armor DR</span>
+                    <input
+                      type="number"
+                      min="0"
+                      [ngModel]="getNpcArmorOrMove('armor_dr')"
+                      (ngModelChange)="patchSheetActorOrToken({ armor_dr: +$event || 0 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Shield Block</span>
+                    <input
+                      type="number"
+                      min="0"
+                      [ngModel]="getNpcArmorOrMove('shield_block')"
+                      (ngModelChange)="patchSheetActorOrToken({ shield_block: +$event || 0 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label class="block space-y-1">
+                    <span class="text-[10px] font-semibold text-[#8AB0AB]">Move (ft)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="5"
+                      [ngModel]="getNpcArmorOrMove('move_feet')"
+                      (ngModelChange)="patchSheetActorOrToken({ move_feet: +$event || 0 })"
+                      [disabled]="!editable"
+                      class="w-full rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-xs text-white focus:border-[#C4491A] focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div data-npc-attributes-section="true" class="space-y-2 border-t border-[#243B37] pt-3">
                 <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
                   Attributes
                 </div>
@@ -3593,8 +3325,27 @@
               </div>
 
               <div class="space-y-2 border-t border-[#243B37] pt-3">
-                <div class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
-                  Combat Skills
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                    Combat Skills
+                  </span>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      (click)="rollSheetCheck(getNpcName(), 'Parry Reaction', npcSkillParryMod, 'Technique ' + (npcAttrs.Technique >= 0 ? '+' + npcAttrs.Technique : npcAttrs.Technique) + ', Parry +' + npcCombatSkills.Parry)"
+                      class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[#7DD3FC] hover:border-[#38BDF8]"
+                    >
+                      Roll Parry ({{ npcSkillParryMod >= 0 ? '+' + npcSkillParryMod : npcSkillParryMod }})
+                    </button>
+                    <button
+                      type="button"
+                      [disabled]="npcStats.can_dodge === false"
+                      (click)="rollSheetCheck(getNpcName(), 'Dodge Reaction', npcSkillDodgeMod, 'Agility ' + (npcAttrs.Agility >= 0 ? '+' + npcAttrs.Agility : npcAttrs.Agility) + ', Dodge +' + npcCombatSkills.Dodge)"
+                      class="rounded-md border border-[#243B37] bg-[#122220] px-2 py-0.5 font-mono-num text-[10px] font-bold text-[#5EEAD4] hover:border-[#38B29A] disabled:opacity-40"
+                    >
+                      Roll Dodge ({{ npcSkillDodgeMod >= 0 ? '+' + npcSkillDodgeMod : npcSkillDodgeMod }})
+                    </button>
+                  </div>
                 </div>
                 <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
                   @for (cs of combatSkillList; track cs.name) {
@@ -3689,6 +3440,122 @@
                   }
                 </div>
               </div>
+
+              @if (npcStandaloneNodes.length > 0 || (editable && canGrantStandalone())) {
+                <div
+                  data-npc-standalone-section="true"
+                  class="space-y-2 border-t border-[#243B37] pt-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-display text-xs font-bold uppercase tracking-wider text-[#FDBA74]">
+                      Standalone Skills &amp; Arts
+                    </span>
+                    @if (editable && canGrantStandalone() && getStandaloneOptions().length > 0) {
+                      <select
+                        [ngModel]="''"
+                        (ngModelChange)="grantNpcStandaloneSkill($event)"
+                        class="rounded-lg border border-[#243B37] bg-[#09100F] px-2.5 py-1 text-[11px] font-semibold text-[#8AB0AB] focus:border-[#C4491A] focus:outline-none"
+                      >
+                        <option value="">+ Grant Standalone Skill...</option>
+                        @for (nodeOpt of getStandaloneOptions(); track nodeOpt.id) {
+                          <option [value]="nodeOpt.id">
+                            {{ nodeOpt.name }} ({{ nodeOpt.node_type === 'combat_art' ? 'Art' : 'Passive' }})
+                          </option>
+                        }
+                      </select>
+                    }
+                  </div>
+
+                  @if (npcStandaloneNodes.length === 0) {
+                    <div class="rounded-xl border border-dashed border-[#243B37] bg-[#09100F] px-3 py-3 text-center text-[11px] text-[#8AB0AB]">
+                      Drag skills from the Compendium Skills window onto this sheet to grant special arts &amp; passives.
+                    </div>
+                  } @else {
+                    <div class="space-y-2">
+                      @for (node of npcStandaloneNodes; track node.id) {
+                        <div class="rounded-xl border border-[#243B37] bg-[#122220] p-2.5 space-y-1.5">
+                          <div class="flex flex-wrap items-start justify-between gap-2">
+                            <div class="min-w-0">
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                @if (node.node_type === 'combat_art') {
+                                  <span class="rounded bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] font-bold text-[#FDBA74]">
+                                    Combat Art
+                                  </span>
+                                  <span class="font-mono-num text-[10px] text-[#8AB0AB]">
+                                    {{ node.ap_cost ?? 1 }} AP &middot; {{ node.cooldown_rounds ?? 0 }}R CD
+                                  </span>
+                                  @if (node.combat_tag && node.combat_tag !== 'None') {
+                                    <span
+                                      class="rounded border px-1.5 py-0.25 text-[9px] font-bold"
+                                      [class]="getCombatTagBadgeClass(node.combat_tag)"
+                                    >
+                                      {{ node.combat_tag }}
+                                    </span>
+                                  }
+                                } @else {
+                                  <span class="badge-jade rounded border px-1.5 py-0.25 font-mono-num text-[9px] font-bold">
+                                    Passive
+                                  </span>
+                                }
+                                <span class="font-display text-xs font-bold text-white">
+                                  {{ node.name }}
+                                </span>
+                              </div>
+                              <p class="mt-1 text-[11px] text-[#8AB0AB]">
+                                {{ node.description }}
+                              </p>
+                              @let hookBadges = getHookBadges(node);
+                              @if (hookBadges.length > 0) {
+                                <div class="mt-1 flex flex-wrap gap-1">
+                                  @for (badge of hookBadges; track badge) {
+                                    <span class="rounded border border-[#243B37] bg-[#09100F] px-1.5 py-0.25 font-mono-num text-[9px] text-[#A7F3D0]">
+                                      {{ badge }}
+                                    </span>
+                                  }
+                                </div>
+                              }
+                            </div>
+
+                            <div class="flex shrink-0 items-center gap-1.5">
+                              @if (node.node_type === 'combat_art') {
+                                @let nNodeMod = npcSkillWepStats.attackMod + getNodeBonusAttack(node);
+                                @let nNodeDmg = npcSkillWepStats.flatDamage + getNodeBonusDamage(node);
+                                <button
+                                  type="button"
+                                  (click)="rollSheetCheck(getNpcName(), node.name, nNodeMod, nNodeDmg + ' DMG')"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                                >
+                                  Roll ({{ nNodeMod >= 0 ? '+' + nNodeMod : nNodeMod }})
+                                </button>
+                                @if (tok && vttStore.canControlToken(tok)) {
+                                  <button
+                                    type="button"
+                                    [disabled]="tok.current_ap < (node.ap_cost ?? 1)"
+                                    (click)="targetNpcStandaloneArtOnMap(node)"
+                                    class="btn-copper rounded-lg px-2 py-1 text-[10px] font-bold disabled:opacity-40"
+                                  >
+                                    Target
+                                  </button>
+                                }
+                              }
+                              @if (editable) {
+                                <button
+                                  type="button"
+                                  (click)="removeNpcStandaloneSkill(node.id)"
+                                  title="Remove Standalone Skill"
+                                  class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 text-[10px] font-bold text-[#8AB0AB] hover:border-[#F43F5E] hover:text-[#FDA4AF]"
+                                >
+                                  &times;
+                                </button>
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
             </div>
           }
 
@@ -3699,6 +3566,7 @@
             @let npcGear = getNpcInventoryGearItems();
             @let npcTotal = npcWeapons.length + npcArmors.length + npcGear.length;
             @let eqNpcArm = getEquippedNpcArmor();
+            @let npcLoadoutWep = getEffectiveNpcWeaponStats();
 
             <div
               data-npc-active-loadout="true"
@@ -3710,15 +3578,15 @@
                     Equipped Weapon
                   </span>
                   <span class="font-mono-num text-[9px] text-[#8AB0AB]">
-                    {{ npcStats.attack_ap ?? 1 }} AP &middot; {{ npcStats.reach_feet ?? 5 }} ft
+                    {{ npcLoadoutWep.attackAp }} AP &middot; {{ npcLoadoutWep.reachFeet }} ft
                   </span>
                 </div>
                 <div class="truncate font-bold text-white">
-                  {{ npcStats.weapon_name || 'Unarmed' }}
+                  {{ npcLoadoutWep.weaponName }}
                 </div>
                 <div class="font-mono-num text-[10px] text-[#8AB0AB]">
-                  Roll: <strong class="text-[#FDBA74]">2d10 {{ (npcStats.attack_mod ?? 2) >= 0 ? '+ ' + (npcStats.attack_mod ?? 2) : '- ' + (-(npcStats.attack_mod ?? 2)) }}</strong>
-                  &middot; Damage: <strong class="text-white">{{ npcStats.flat_damage ?? 3 }} DMG</strong>
+                  Roll: <strong class="text-[#FDBA74]">{{ formatRollFormulaFromMod(npcLoadoutWep.attackMod) }}</strong>
+                  &middot; Damage: <strong class="text-white">{{ npcLoadoutWep.flatDamage }} DMG</strong>
                 </div>
               </div>
 
@@ -3733,7 +3601,7 @@
                   </div>
                 </div>
                 <div class="truncate font-bold text-white">
-                  {{ eqNpcArm ? eqNpcArm.name : (getNpcArmorOrMove('armor_dr') > 0 ? 'Statblock Armor' : 'Unarmored') }}
+                  {{ eqNpcArm ? eqNpcArm.name : (getNpcArmorOrMove('armor_dr') > 0 ? 'Base Armor' : 'Unarmored') }}
                 </div>
                 <div class="font-mono-num text-[10px] text-[#8AB0AB]">
                   {{ npcStats.can_dodge !== false ? 'Allows Dodge' : 'Disables Dodge' }}
@@ -3894,7 +3762,7 @@
                     } @else {
                       @for (wItem of npcWeapons; track wItem.id) {
                         @let nwVis = getInventoryWeaponVisuals(wItem);
-                        @let nwDmg = getNpcWeaponDamage(wItem);
+                        @let nwf = getNpcWeaponFormula(wItem);
                         @let isNpcWepEq = isNpcWeaponEquipped(wItem);
                         <div
                           class="rounded-xl border bg-[#122220] p-2.5 space-y-2"
@@ -3927,7 +3795,7 @@
                             <div class="flex flex-wrap items-center gap-1">
                               <button
                                 type="button"
-                                (click)="rollSheetCheck(getNpcName(), (wItem.name || 'Weapon') + ' Attack', getNpcWeaponMod(wItem), nwDmg + ' DMG')"
+                                (click)="rollSheetCheck(getNpcName(), (wItem.name || 'Weapon') + ' Attack', nwf.attackMod, nwf.flatDamage + ' DMG')"
                                 class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1 font-mono-num text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
                               >
                                 Roll
@@ -3972,16 +3840,42 @@
                           <div class="grid grid-cols-2 gap-1.5 font-mono-num text-[10px]">
                             <div class="rounded-lg border border-[#C4491A]/35 bg-[#27160E]/60 px-2 py-1">
                               <span class="text-[#FDBA74]">Roll:</span>
-                              <strong class="ml-1 text-white">{{ getNpcWeaponRollFormula(wItem) }}</strong>
+                              <strong class="ml-1 text-white">{{ nwf.rollFormula }}</strong>
+                              <span class="ml-1 text-[9px] text-[#8AB0AB]">({{ nwf.rollBreakdown }})</span>
                             </div>
                             <div class="rounded-lg border border-[#243B37] bg-[#09100F] px-2 py-1">
                               <span class="text-[#8AB0AB]">Damage:</span>
-                              <strong class="ml-1 text-white">{{ nwDmg }} DMG</strong>
+                              <strong class="ml-1 text-white">{{ nwf.damageFormula }}</strong>
+                              <span class="ml-1 text-[9px] text-[#8AB0AB]">({{ nwf.damageBreakdown }})</span>
                             </div>
                           </div>
 
                           @if (editable && !wItem.compendium_id) {
-                            <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                            <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-6">
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Attribute
+                                <select
+                                  [ngModel]="wItem.gov_attribute || 'Brawn'"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { gov_attribute: $event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                >
+                                  @for (at of attributeList; track at) {
+                                    <option [ngValue]="at">{{ at }}</option>
+                                  }
+                                </select>
+                              </label>
+                              <label class="block text-[10px] text-[#8AB0AB]">
+                                Skill
+                                <select
+                                  [ngModel]="wItem.gov_skill || 'Strike'"
+                                  (ngModelChange)="patchNpcInventoryItem(wItem.id, { gov_skill: $event })"
+                                  class="mt-0.5 w-full rounded border border-[#243B37] bg-[#09100F] px-1.5 py-1 text-[11px] font-semibold text-white"
+                                >
+                                  @for (sk of combatSkillList; track sk) {
+                                    <option [ngValue]="sk">{{ sk }}</option>
+                                  }
+                                </select>
+                              </label>
                               <label class="block text-[10px] text-[#8AB0AB]">
                                 Base DMG
                                 <input

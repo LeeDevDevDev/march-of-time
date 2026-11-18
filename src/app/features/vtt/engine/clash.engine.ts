@@ -105,7 +105,10 @@ export function getLegalDefenderReactions(
   }
 
   const blockActive =
-    defender.shieldRaised && defender.shieldBlock > 0 && !noBlockTag;
+    defender.shieldRaised &&
+    defender.shieldBlock > 0 &&
+    defender.currentSp > 0 &&
+    !noBlockTag;
 
   return {
     canParry: parryDisabledReason === null,
@@ -114,7 +117,10 @@ export function getLegalDefenderReactions(
     dodgeDisabledReason,
     blockActive,
     blockDisabledByPiercing:
-      defender.shieldRaised && defender.shieldBlock > 0 && noBlockTag,
+      defender.shieldRaised &&
+      defender.shieldBlock > 0 &&
+      defender.currentSp > 0 &&
+      noBlockTag,
     effectiveBlockMitigation: blockActive ? defender.shieldBlock : 0,
   };
 }
@@ -139,7 +145,7 @@ export function computeHitDamageCascade(
 } {
   const blockAllowed = !clash.disallowedDefenses.includes('Block');
   const effectiveBlock =
-    defender.shieldRaised && blockAllowed
+    defender.shieldRaised && defender.currentSp > 0 && blockAllowed
       ? Math.max(0, defender.shieldBlock)
       : 0;
   const rawDmg = Math.max(0, clash.rawFlatDamage);
@@ -172,14 +178,42 @@ export function computeHitDamageCascade(
   };
 }
 
+export function computeUndefendedHitDamage(
+  clash: Pick<VttPendingClash, 'rawFlatDamage' | 'ignoreArmorDr'>,
+  defender: Pick<DefenderClashCapabilities, 'armorDr'>
+): {
+  spDamageToDefender: number;
+  hpDamageToDefender: number;
+  shieldMitigated: number;
+  armorMitigated: number;
+} {
+  const rawDmg = Math.max(0, clash.rawFlatDamage);
+  const effectiveArmorDr = Math.max(
+    0,
+    defender.armorDr - Math.max(0, clash.ignoreArmorDr)
+  );
+  const armorMitigated =
+    rawDmg > 0 ? Math.min(rawDmg, effectiveArmorDr) : 0;
+  const hpDamageToDefender = Math.max(0, rawDmg - effectiveArmorDr);
+
+  return {
+    spDamageToDefender: 0,
+    hpDamageToDefender,
+    shieldMitigated: 0,
+    armorMitigated,
+  };
+}
+
 export function formatClashOutcomeStatus(
   reaction: VttDefenseChoice,
   hitLanded: boolean,
-  flawless = false
+  flawless = false,
+  blocked = false
 ): string {
   if (hitLanded) {
     if (reaction === 'parry') return 'Attack Succeeded · Parry Failed';
     if (reaction === 'dodge') return 'Attack Succeeded · Dodge Failed';
+    if (blocked) return 'Attack Succeeded · Guard Blocked';
     return 'Attack Succeeded';
   }
   if (reaction === 'parry') {
@@ -227,6 +261,12 @@ export function resolveClashReaction(
   const uniqueStatuses = Array.from(
     new Set(clash.inflictStatuses ?? [])
   ) as Exclude<CombatStatusEffect, 'None'>[];
+  const willBreakGuard = (spDamage: number): boolean =>
+    Boolean(
+      defender.shieldRaised &&
+        (defender.currentSp <= 0 ||
+          (spDamage > 0 && defender.currentSp - spDamage <= 0))
+    );
 
   if (reaction === 'parry') {
     const defRoll =
@@ -244,9 +284,11 @@ export function resolveClashReaction(
         !flawless && clash.defendedSpChip > 0
           ? Math.min(defender.currentSp, clash.defendedSpChip)
           : 0;
+      const guardBroken = willBreakGuard(chipSp);
       const parts = [
         formatClashOutcomeStatus('parry', false, flawless),
         ...formatClashDamageParts(chipSp, 0, counterSp),
+        ...(guardBroken ? ['Guard Lowered'] : []),
       ];
 
       return {
@@ -260,6 +302,7 @@ export function resolveClashReaction(
         counterSpToAttacker: counterSp,
         shieldMitigated: 0,
         armorMitigated: 0,
+        defenderGuardBroken: guardBroken,
         inflictedStatuses: [],
         pushFeet: 0,
         shiftDefenderFeet: 0,
@@ -269,6 +312,7 @@ export function resolveClashReaction(
     }
 
     const cascade = computeHitDamageCascade(clash, defender);
+    const guardBroken = willBreakGuard(cascade.spDamageToDefender);
     const dmgParts = formatClashDamageParts(
       cascade.spDamageToDefender,
       cascade.hpDamageToDefender
@@ -284,6 +328,7 @@ export function resolveClashReaction(
       counterSpToAttacker: 0,
       shieldMitigated: cascade.shieldMitigated,
       armorMitigated: cascade.armorMitigated,
+      defenderGuardBroken: guardBroken,
       inflictedStatuses: uniqueStatuses,
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 0,
@@ -291,6 +336,7 @@ export function resolveClashReaction(
       summary: [
         formatClashOutcomeStatus('parry', true, false),
         ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+        ...(guardBroken ? ['Guard Lowered'] : []),
       ].join(' · '),
     };
   }
@@ -315,6 +361,7 @@ export function resolveClashReaction(
         counterSpToAttacker: 0,
         shieldMitigated: 0,
         armorMitigated: 0,
+        defenderGuardBroken: false,
         inflictedStatuses: [],
         pushFeet: 0,
         shiftDefenderFeet: 5,
@@ -324,6 +371,7 @@ export function resolveClashReaction(
     }
 
     const cascade = computeHitDamageCascade(clash, defender);
+    const guardBroken = willBreakGuard(cascade.spDamageToDefender);
     const dmgParts = formatClashDamageParts(
       cascade.spDamageToDefender,
       cascade.hpDamageToDefender
@@ -339,6 +387,7 @@ export function resolveClashReaction(
       counterSpToAttacker: 0,
       shieldMitigated: cascade.shieldMitigated,
       armorMitigated: cascade.armorMitigated,
+      defenderGuardBroken: guardBroken,
       inflictedStatuses: uniqueStatuses,
       pushFeet: clash.pushFeet ?? 0,
       shiftDefenderFeet: 5,
@@ -346,11 +395,24 @@ export function resolveClashReaction(
       summary: [
         formatClashOutcomeStatus('dodge', true, false),
         ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+        ...(guardBroken ? ['Guard Lowered'] : []),
       ].join(' · '),
     };
   }
 
-  const cascade = computeHitDamageCascade(clash, defender);
+  const blockAllowed = !clash.disallowedDefenses.includes('Block');
+  const blockActive =
+    defender.shieldRaised &&
+    defender.shieldBlock > 0 &&
+    defender.currentSp > 0 &&
+    blockAllowed;
+
+  const cascade = blockActive
+    ? computeHitDamageCascade(clash, defender)
+    : computeUndefendedHitDamage(clash, defender);
+  const guardBroken = blockActive
+    ? willBreakGuard(cascade.spDamageToDefender)
+    : Boolean(defender.shieldRaised && defender.currentSp <= 0);
   const dmgParts = formatClashDamageParts(
     cascade.spDamageToDefender,
     cascade.hpDamageToDefender
@@ -367,13 +429,15 @@ export function resolveClashReaction(
     counterSpToAttacker: 0,
     shieldMitigated: cascade.shieldMitigated,
     armorMitigated: cascade.armorMitigated,
+    defenderGuardBroken: guardBroken,
     inflictedStatuses: uniqueStatuses,
     pushFeet: clash.pushFeet ?? 0,
     shiftDefenderFeet: 0,
     shiftAttackerFeet: clash.selfShiftFeet ?? 0,
     summary: [
-      formatClashOutcomeStatus('take_hit', true, false),
+      formatClashOutcomeStatus('take_hit', true, false, blockActive),
       ...(dmgParts.length > 0 ? dmgParts : ['0 DMG']),
+      ...(guardBroken ? ['Guard Lowered'] : []),
     ].join(' · '),
   };
 }

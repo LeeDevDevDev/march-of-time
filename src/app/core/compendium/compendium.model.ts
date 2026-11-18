@@ -73,14 +73,14 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'Raise Shield',
     category: 'Active Defense',
     summary:
-      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn.',
+      '1 AP Action on your turn (Medium/Standard Shield, Heavy/Tower Shield, or [Guard] Weapon): Activates your [Shield Block] mitigation (Shield or Weapon [Guard] Base + Block Skill, no roll required) against all non-[Piercing] attacks until your next turn or until your [SP] is depleted.',
   },
   {
     id: 'kw-shield-block',
     term: 'Shield Block',
     category: 'Active Defense',
     summary:
-      'Active while [Raise Shield] / [Guard] (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, Weapon [Guard] Base 2; no roll required, remaining damage goes to [SP]).',
+      'Active while [Raise Shield] / [Guard] (1 AP action) is up. Automatically mitigates incoming non-[Piercing] damage by Base + Block Skill (Standard Shield Base 3, Tower Shield Base 5, Weapon [Guard] Base 2; no roll required, remaining damage goes to [SP]). Lowered automatically if [SP] reaches 0.',
   },
   {
     id: 'kw-two-handed',
@@ -143,7 +143,7 @@ export const DEFAULT_KEYWORDS: KeywordDefinition[] = [
     term: 'SP',
     category: 'Core Mechanic',
     summary:
-      'Stamina & Poise (5 + Iron + Armor SP). All attacks deplete SP first; once SP reaches 0, overflow damage strikes [HP]. Spend 1 AP on [Stance Recovery] to restore 2 + Iron SP.',
+      'Stamina & Poise (5 + Iron + Armor SP). Absorbs damage when you actively defend ([Parry], [Dodge], or [Shield Block]); undefended hits bypass SP and strike [HP] directly (after [Armor DR]). Spend 1 AP on [Stance Recovery] to restore 2 + Iron SP.',
   },
   {
     id: 'kw-hp',

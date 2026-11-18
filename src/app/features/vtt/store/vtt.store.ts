@@ -110,6 +110,7 @@ import {
   DEFAULT_VTT_SCENE_WIDTH_PX,
   CollectionActorModel,
   HexCoord,
+  ResolvedNpcWeaponStats,
   VttActorKind,
   VttClashResolution,
   VttDefenseChoice,
@@ -146,6 +147,8 @@ import {
   parseCollectionActorIdFromUrlOrInput,
   resolveActorDarkvisionFeet,
   resolveActorTokenDisplayName,
+  resolveEffectiveNpcDefenseMods,
+  resolveEffectiveNpcWeaponStats,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
@@ -1685,7 +1688,7 @@ export class VttStore {
     }
 
     const npc = token.npc_stats ?? {};
-    const parryMod = Number(npc.parry_mod ?? 2);
+    const defMods = this.resolveTokenNpcDefenseMods(token);
     return {
       currentSp: token.current_sp,
       currentHp: token.current_hp,
@@ -1693,11 +1696,11 @@ export class VttStore {
       armorDr: token.armor_dr,
       shieldBlock: token.shield_block,
       shieldRaised: token.shield_raised,
-      parryMod,
-      dodgeMod: Number(npc.dodge_mod ?? 2),
+      parryMod: defMods.parryMod,
+      dodgeMod: defMods.dodgeMod,
       canDodge: npc.can_dodge !== false,
-      enablesMartialParry: Boolean(npc.enables_martial_parry),
-      flawlessCounterSp: 2 + parryMod,
+      enablesMartialParry: defMods.enablesMartialParry,
+      flawlessCounterSp: 2 + defMods.parryMod,
     };
   }
 
@@ -5272,6 +5275,15 @@ export class VttStore {
         ? normalizeTokenAppearance(mutated.token_appearance)
         : normalizeTokenAppearance(current.token_appearance);
 
+    const clampedSp = Math.max(
+      0,
+      Math.min(nextDerived.maxSp, mutated.current_sp + spGrowth)
+    );
+    const clampedCooldowns = { ...(mutated.active_cooldowns ?? {}) };
+    if (clampedSp <= 0 && nextDerived.maxSp > 0) {
+      delete clampedCooldowns['__shield_raised'];
+    }
+
     const clamped: CharacterModel = cloneDetachedVttCharacterSheet(
       {
         ...mutated,
@@ -5281,11 +5293,9 @@ export class VttStore {
           0,
           Math.min(nextDerived.maxHp, mutated.current_hp + hpGrowth)
         ),
-        current_sp: Math.max(
-          0,
-          Math.min(nextDerived.maxSp, mutated.current_sp + spGrowth)
-        ),
+        current_sp: clampedSp,
         current_ap: Math.max(0, Math.min(8, mutated.current_ap ?? 4)),
+        active_cooldowns: clampedCooldowns,
         inventory: normalizedInv,
         notes: mutated.notes ?? current.notes ?? '',
         portrait_url: normalizedPortrait,
@@ -5907,10 +5917,18 @@ export class VttStore {
     const existing = this.tokens().find((t) => t.id === tokenId);
     if (!existing) return;
 
+    const effectivePatch: Partial<VttTokenModel> =
+      patch.current_sp !== undefined &&
+      patch.current_sp <= 0 &&
+      existing.shield_raised &&
+      patch.shield_raised === undefined
+        ? { ...patch, shield_raised: false }
+        : patch;
+
     const previousTokenPatch: Partial<VttTokenModel> = {};
     let hasChange = false;
-    for (const key of Object.keys(patch) as (keyof VttTokenModel)[]) {
-      const nextVal = patch[key];
+    for (const key of Object.keys(effectivePatch) as (keyof VttTokenModel)[]) {
+      const nextVal = effectivePatch[key];
       const prevVal = existing[key];
       if (nextVal !== prevVal) {
         hasChange = true;
@@ -5928,11 +5946,11 @@ export class VttStore {
     if (!hasChange) return;
 
     const affectsVisibility =
-      patch.light_bright_feet !== undefined ||
-      patch.light_dim_feet !== undefined ||
-      patch.vision_feet !== undefined ||
-      patch.darkvision_feet !== undefined ||
-      patch.is_hidden !== undefined;
+      effectivePatch.light_bright_feet !== undefined ||
+      effectivePatch.light_dim_feet !== undefined ||
+      effectivePatch.vision_feet !== undefined ||
+      effectivePatch.darkvision_feet !== undefined ||
+      effectivePatch.is_hidden !== undefined;
     const sc = this.scenes().find((s) => s.id === existing.encounter_id);
     const prevFog =
       affectsVisibility && sc ? cloneExploredFog(sc.explored_fog) : undefined;
@@ -5944,7 +5962,7 @@ export class VttStore {
       previousExploredFog: prevFog,
     });
 
-    await this.patchToken(tokenId, patch);
+    await this.patchToken(tokenId, effectivePatch);
     if (affectsVisibility) {
       this.syncExploredFogFromObservers();
     }
@@ -5978,10 +5996,18 @@ export class VttStore {
       const existing = this.tokens().find((t) => t.id === entry.tokenId);
       if (!existing || !this.canControlToken(existing)) continue;
 
+      const effectivePatch: Partial<VttTokenModel> =
+        entry.patch.current_sp !== undefined &&
+        entry.patch.current_sp <= 0 &&
+        existing.shield_raised &&
+        entry.patch.shield_raised === undefined
+          ? { ...entry.patch, shield_raised: false }
+          : entry.patch;
+
       const previousTokenPatch: Partial<VttTokenModel> = {};
       let hasChange = false;
-      for (const key of Object.keys(entry.patch) as (keyof VttTokenModel)[]) {
-        const nextVal = entry.patch[key];
+      for (const key of Object.keys(effectivePatch) as (keyof VttTokenModel)[]) {
+        const nextVal = effectivePatch[key];
         const prevVal = existing[key];
         if (nextVal !== prevVal) {
           hasChange = true;
@@ -5999,17 +6025,17 @@ export class VttStore {
       if (!hasChange) continue;
 
       if (
-        entry.patch.light_bright_feet !== undefined ||
-        entry.patch.light_dim_feet !== undefined ||
-        entry.patch.vision_feet !== undefined ||
-        entry.patch.darkvision_feet !== undefined ||
-        entry.patch.is_hidden !== undefined
+        effectivePatch.light_bright_feet !== undefined ||
+        effectivePatch.light_dim_feet !== undefined ||
+        effectivePatch.vision_feet !== undefined ||
+        effectivePatch.darkvision_feet !== undefined ||
+        effectivePatch.is_hidden !== undefined
       ) {
         affectsVisibility = true;
       }
 
       undoPatches.push({ tokenId: existing.id, previousTokenPatch });
-      toApply.push({ tok: existing, patch: entry.patch });
+      toApply.push({ tok: existing, patch: effectivePatch });
     }
 
     if (toApply.length === 0) return;
@@ -6077,22 +6103,30 @@ export class VttStore {
     const existing = this.tokens().find((t) => t.id === tokenId);
     if (!existing) return;
 
+    const effectivePatch: Partial<VttTokenModel> =
+      patch.current_sp !== undefined &&
+      patch.current_sp <= 0 &&
+      existing.shield_raised &&
+      patch.shield_raised === undefined
+        ? { ...patch, shield_raised: false }
+        : patch;
+
     if (
-      patch.x !== undefined ||
-      patch.y !== undefined ||
-      patch.world_x !== undefined ||
-      patch.world_y !== undefined
+      effectivePatch.x !== undefined ||
+      effectivePatch.y !== undefined ||
+      effectivePatch.world_x !== undefined ||
+      effectivePatch.world_y !== undefined
     ) {
       this.localTokenMoveGuardUntil.set(tokenId, Date.now() + 1200);
     }
 
     this.tokens.update((curr) =>
-      curr.map((t) => (t.id === tokenId ? { ...t, ...patch } : t))
+      curr.map((t) => (t.id === tokenId ? { ...t, ...effectivePatch } : t))
     );
 
     const err = await this.enqueueSerializedTokenUpdate(
       tokenId,
-      patch,
+      effectivePatch,
       existing
     );
     if (err) {
@@ -6103,12 +6137,12 @@ export class VttStore {
     const tokenSheet = this.resolveCharacterForToken(existing);
     if (
       tokenSheet &&
-      (patch.current_hp !== undefined ||
-        patch.current_sp !== undefined ||
-        patch.current_ap !== undefined ||
-        patch.shield_raised !== undefined)
+      (effectivePatch.current_hp !== undefined ||
+        effectivePatch.current_sp !== undefined ||
+        effectivePatch.current_ap !== undefined ||
+        effectivePatch.shield_raised !== undefined)
     ) {
-      await this.syncTokenVitalsToCharacter(existing, tokenSheet, patch);
+      await this.syncTokenVitalsToCharacter(existing, tokenSheet, effectivePatch);
     }
   }
 
@@ -7616,7 +7650,12 @@ export class VttStore {
       await this.patchToken(token.id, { shield_raised: false });
       return;
     }
-    if (token.current_ap < 1) return;
+    if (
+      token.current_ap < 1 ||
+      (token.max_sp > 0 && token.current_sp <= 0)
+    ) {
+      return;
+    }
     this.pushUndoEntry(token.encounter_id, `Raise Guard (${token.name})`, {
       kind: 'token_patch',
       tokenId: token.id,
@@ -7695,6 +7734,54 @@ export class VttStore {
     });
   }
 
+  resolveTokenNpcWeaponStats(token: VttTokenModel): ResolvedNpcWeaponStats {
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    const actor = this.resolveRosterActorForToken(token);
+    const mergedStats: VttNpcStats = {
+      ...(actor?.npc_stats ?? {}),
+      ...(token.npc_stats ?? {}),
+      __inventory:
+        token.npc_stats?.__inventory !== undefined
+          ? token.npc_stats.__inventory
+          : actor?.npc_stats?.__inventory,
+    };
+    return resolveEffectiveNpcWeaponStats(
+      mergedStats,
+      this.getNpcStandaloneNodes(token),
+      allWeapons,
+      { weaponName: 'Melee Strike', attackMod: 3, flatDamage: 4 }
+    );
+  }
+
+  resolveTokenNpcDefenseMods(token: VttTokenModel): {
+    parryMod: number;
+    dodgeMod: number;
+    enablesMartialParry: boolean;
+  } {
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    const actor = this.resolveRosterActorForToken(token);
+    const mergedStats: VttNpcStats = {
+      ...(actor?.npc_stats ?? {}),
+      ...(token.npc_stats ?? {}),
+      __inventory:
+        token.npc_stats?.__inventory !== undefined
+          ? token.npc_stats.__inventory
+          : actor?.npc_stats?.__inventory,
+    };
+    return resolveEffectiveNpcDefenseMods(
+      mergedStats,
+      this.getNpcStandaloneNodes(token),
+      allWeapons,
+      { parryMod: 2, dodgeMod: 2 }
+    );
+  }
+
   beginWeaponTargetSelection(
     token: VttTokenModel,
     weapon?: WeaponModel | null,
@@ -7732,6 +7819,8 @@ export class VttStore {
     }
 
     const npc = token.npc_stats ?? {};
+    const eff = this.resolveTokenNpcWeaponStats(token);
+    const wepHooks = eff.compendiumWeapon?.rule_hooks ?? {};
     const tag =
       npc.combat_tag && npc.combat_tag !== 'None' ? [npc.combat_tag] : [];
     const disallow: ('Parry' | 'Dodge' | 'Block')[] = [];
@@ -7742,18 +7831,18 @@ export class VttStore {
     this.pendingTargetAction.set({
       attackerTokenId: token.id,
       kind: 'weapon',
-      actionName: npc.weapon_name || 'Melee Strike',
-      apCost: Number(npc.attack_ap ?? 1),
+      actionName: eff.weaponName || 'Melee Strike',
+      apCost: eff.attackAp,
       cooldownRounds: 0,
       perkId: null,
-      reachFeet: Number(npc.reach_feet ?? 5),
-      attackMod: Number(npc.attack_mod ?? 3),
-      flatDamage: Number(npc.flat_damage ?? 4),
+      reachFeet: eff.reachFeet,
+      attackMod: eff.attackMod,
+      flatDamage: eff.flatDamage,
       combatTags: tag,
       disallowedDefenses: disallow,
       bonusSpDamage: 0,
-      ignoreArmorDr: 0,
-      defendedSpChip: 0,
+      ignoreArmorDr: Number(wepHooks['ignore_armor_dr'] ?? 0),
+      defendedSpChip: Number(wepHooks['defended_sp_damage'] ?? 0),
       pushFeet: 0,
       selfShiftFeet: 0,
       inflictStatuses: [],
@@ -7853,7 +7942,8 @@ export class VttStore {
     token: VttTokenModel,
     node: PerkNodeModel
   ): void {
-    const npc = token.npc_stats ?? {};
+    const eff = this.resolveTokenNpcWeaponStats(token);
+    const wepHooks = eff.compendiumWeapon?.rule_hooks ?? {};
     const hooks = node.rule_hooks ?? {};
     const apCost = Math.max(1, Number(node.ap_cost ?? 1));
     const bonusAtk = Number(hooks.bonus_attack_mod ?? 0);
@@ -7870,9 +7960,10 @@ export class VttStore {
         : [];
 
     const rangeMode = resolveCombatArtRangeMode(node);
-    const npcBaseReach = Math.max(5, Number(npc.reach_feet ?? 5));
-    const npcReachFeet =
-      rangeMode === 'custom_feet'
+    const npcBaseReach = eff.reachFeet;
+    const npcReachFeet = eff.compendiumWeapon
+      ? computeCombatArtReachFeet(node, eff.compendiumWeapon)
+      : rangeMode === 'custom_feet'
         ? computeCombatArtReachFeet(node)
         : rangeMode === 'melee_reach' && npcBaseReach > 10
           ? 5
@@ -7886,13 +7977,15 @@ export class VttStore {
       cooldownRounds: Math.max(0, Number(node.cooldown_rounds ?? 0)),
       perkId: node.id,
       reachFeet: npcReachFeet,
-      attackMod: Number(npc.attack_mod ?? 3) + bonusAtk,
-      flatDamage: Number(npc.flat_damage ?? 4) + bonusDmg,
+      attackMod: eff.attackMod + bonusAtk,
+      flatDamage: eff.flatDamage + bonusDmg,
       combatTags,
       disallowedDefenses,
       bonusSpDamage: Number(hooks.bonus_sp_damage ?? 0),
-      ignoreArmorDr: Number(hooks.ignore_armor_dr ?? 0),
-      defendedSpChip: 0,
+      ignoreArmorDr:
+        Number(hooks.ignore_armor_dr ?? 0) +
+        Number(wepHooks['ignore_armor_dr'] ?? 0),
+      defendedSpChip: Number(wepHooks['defended_sp_damage'] ?? 0),
       pushFeet: Math.round(Number(hooks.push_tiles ?? 0) * 5),
       selfShiftFeet: Math.round(Number(hooks.self_shift_tiles ?? 0) * 5),
       inflictStatuses,
@@ -8183,6 +8276,12 @@ export class VttStore {
     const attackerTok = this.sceneTokens().find(
       (t) => t.id === clash.attackerTokenId
     );
+    const guardBlockedOnRoll =
+      reaction === 'take_hit' &&
+      caps.shieldRaised &&
+      caps.shieldBlock > 0 &&
+      caps.currentSp > 0 &&
+      !clash.disallowedDefenses.includes('Block');
     await this.postLog({
       kind: 'roll',
       title: `${clash.attackerName} vs ${defender.name} · ${clash.actionName}`,
@@ -8198,6 +8297,7 @@ export class VttStore {
         defense_total: resolution.defenseRoll?.total ?? null,
         hit_landed: resolution.hitLanded,
         flawless: resolution.flawlessDefense,
+        guard_blocked: guardBlockedOnRoll,
         flat_damage: clash.rawFlatDamage,
         roll: attackRoll,
         chips: builtAttack.chips,
@@ -8236,7 +8336,24 @@ export class VttStore {
       ...overrides,
     };
 
+    const guardBlocked =
+      res.reaction === 'take_hit' &&
+      (res.shieldMitigated > 0 ||
+        Boolean(
+          defender?.shield_raised &&
+            defender.shield_block > 0 &&
+            defender.current_sp > 0 &&
+            !clash.disallowedDefenses.includes('Block')
+        ));
+    let defenderGuardLowered = false;
+
     if (defender) {
+      const nextDefSp = Math.max(0, defender.current_sp - res.spDamageToDefender);
+      defenderGuardLowered = Boolean(
+        defender.shield_raised &&
+          (res.defenderGuardBroken ||
+            nextDefSp <= 0)
+      );
       const mergedStatuses = res.hitLanded
         ? Array.from(
             new Set([...(defender.statuses ?? []), ...res.inflictedStatuses])
@@ -8245,8 +8362,9 @@ export class VttStore {
 
       await this.patchToken(defender.id, {
         current_ap: Math.max(0, defender.current_ap - res.defenderApSpent),
-        current_sp: Math.max(0, defender.current_sp - res.spDamageToDefender),
+        current_sp: nextDefSp,
         current_hp: Math.max(0, defender.current_hp - res.hpDamageToDefender),
+        ...(defenderGuardLowered ? { shield_raised: false } : {}),
         statuses: mergedStatuses,
       });
     }
@@ -8260,17 +8378,24 @@ export class VttStore {
     const statusLabel = formatClashOutcomeStatus(
       res.reaction,
       res.hitLanded,
-      res.flawlessDefense
+      res.flawlessDefense,
+      guardBlocked
     );
     const dmgParts = formatClashDamageParts(
       res.spDamageToDefender,
       res.hpDamageToDefender,
       res.counterSpToAttacker
     );
+    const extraParts = defenderGuardLowered ? ['Guard Lowered'] : [];
     const detailText =
       res.hitLanded && dmgParts.length === 0
-        ? `${statusLabel} · 0 DMG`
-        : [statusLabel, ...dmgParts].join(' · ');
+        ? [statusLabel, '0 DMG', ...extraParts].join(' · ')
+        : [statusLabel, ...dmgParts, ...extraParts].join(' · ');
+
+    const outcomeBadges = [
+      ...(res.hitLanded ? res.inflictedStatuses : []),
+      ...(defenderGuardLowered ? ['Guard Lowered'] : []),
+    ];
 
     await this.patchScene(sc.id, { pending_clash: null });
     await this.postLog({
@@ -8286,10 +8411,12 @@ export class VttStore {
         reaction: res.reaction,
         hit_landed: res.hitLanded,
         flawless: res.flawlessDefense,
+        guard_blocked: guardBlocked,
+        guard_lowered: defenderGuardLowered,
         sp_damage: res.spDamageToDefender,
         hp_damage: res.hpDamageToDefender,
         counter_sp: res.counterSpToAttacker,
-        statuses: res.hitLanded ? res.inflictedStatuses : [],
+        statuses: outcomeBadges,
         ...(attacker ? this.buildTokenSpeakerPayload(attacker) : {}),
       },
     });

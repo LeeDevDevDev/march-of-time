@@ -94,6 +94,7 @@ import { CharacterStore } from '../../../characters/store/character.store';
 import {
   DEFAULT_VTT_DARKVISION_FEET,
   DEFAULT_VTT_DIM_VISION_FEET,
+  ResolvedNpcWeaponStats,
   TokenAppearanceConfig,
   VTT_COMPENDIUM_DRAG_MIME,
   VttCompendiumDragPayload,
@@ -102,6 +103,7 @@ import {
   VttRosterActorModel,
   VttTokenModel,
   computeNpcFieldSkillTotals,
+  computeNpcWeaponFormula,
   hasCustomTokenAppearance,
   hasRosterActorExternalSource,
   normalizeNpcAttributes,
@@ -109,6 +111,7 @@ import {
   normalizeNpcFieldSkills,
   resolveActorDarkvisionFeet,
   resolveActorTokenDisplayName,
+  resolveEffectiveNpcWeaponStats,
   resolveEntityPortraitUrl,
   resolveEntityTokenAppearance,
   resolveEntityTokenImageUrl,
@@ -124,7 +127,6 @@ export type VttPcSheetTab =
   | 'token';
 export type VttNpcSheetTab =
   | 'actions'
-  | 'statblock'
   | 'skills'
   | 'inventory'
   | 'token';
@@ -1670,7 +1672,8 @@ export class VttActorSheetComponent {
     }
 
     const currAp = this.getCharacterCurrentAp(char);
-    if (currAp < 1) return;
+    const currSp = this.getCharacterCurrentSp(char);
+    if (currAp < 1 || (stats.maxSp > 0 && currSp <= 0)) return;
     await this.vttStore.updateCharacterFromVttSheet(char.id, (c) => ({
       ...c,
       current_ap: Math.max(0, currAp - 1),
@@ -1776,10 +1779,10 @@ export class VttActorSheetComponent {
     }
     const name = this.getPublicSpeakerName();
     if (kind === 'parry') {
-      const mod = npcStats.parry_mod ?? 1;
+      const mod = this.getNpcParryMod();
       await this.rollSheetCheck(name, 'Parry Reaction', mod);
     } else {
-      const mod = npcStats.dodge_mod ?? 1;
+      const mod = this.getNpcDodgeMod();
       await this.rollSheetCheck(name, 'Dodge Reaction', mod);
     }
   }
@@ -1902,16 +1905,146 @@ export class VttActorSheetComponent {
     return computeNpcFieldSkillTotals(this.getNpcStats());
   }
 
+  getNpcParryMod(): number {
+    const stats = this.getNpcStats();
+    const attrs = normalizeNpcAttributes(stats.attributes);
+    const skills = normalizeNpcCombatSkills(stats.combat_skills);
+    const eff = this.getEffectiveNpcWeaponStats();
+    const rapierBonus = Number(
+      eff.compendiumWeapon?.rule_hooks?.['parry_roll_bonus'] ?? 0
+    );
+    let perkParry = 0;
+    for (const p of this.getNpcStandaloneNodes()) {
+      if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+        perkParry += Number(p.rule_hooks?.bonus_parry_mod ?? 0);
+      }
+    }
+    if (stats.attributes || stats.combat_skills) {
+      return (attrs.Technique ?? 0) + (skills.Parry ?? 0) + rapierBonus + perkParry;
+    }
+    return Number(stats.parry_mod ?? 1);
+  }
+
+  getNpcDodgeMod(): number {
+    const stats = this.getNpcStats();
+    const attrs = normalizeNpcAttributes(stats.attributes);
+    const skills = normalizeNpcCombatSkills(stats.combat_skills);
+    let perkDodge = 0;
+    for (const p of this.getNpcStandaloneNodes()) {
+      if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+        perkDodge += Number(p.rule_hooks?.bonus_dodge_mod ?? 0);
+      }
+    }
+    if (stats.attributes || stats.combat_skills) {
+      return (attrs.Agility ?? 0) + (skills.Dodge ?? 0) + perkDodge;
+    }
+    return Number(stats.dodge_mod ?? 1);
+  }
+
+  hasNpcMartialParry(): boolean {
+    const stats = this.getNpcStats();
+    const eff = this.getEffectiveNpcWeaponStats();
+    return Boolean(
+      stats.enables_martial_parry ||
+        eff.compendiumWeapon?.rule_hooks?.['enables_martial_parry']
+    );
+  }
+
+  private syncActiveNpcWeaponToStats(draftStats: VttNpcStats): VttNpcStats {
+    const attrs = normalizeNpcAttributes(draftStats.attributes);
+    const skills = normalizeNpcCombatSkills(draftStats.combat_skills);
+    const nodes = this.getNpcStandaloneNodes();
+    const eff = resolveEffectiveNpcWeaponStats(
+      draftStats,
+      nodes,
+      this.getAllCompendiumWeapons(),
+      { weaponName: 'Unarmed', attackMod: 2, flatDamage: 3 }
+    );
+    const rapierBonus = Number(
+      eff.compendiumWeapon?.rule_hooks?.['parry_roll_bonus'] ?? 0
+    );
+    let perkParry = 0;
+    let perkDodge = 0;
+    let perkAtk = 0;
+    let perkDmg = 0;
+    for (const p of nodes) {
+      if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+        perkParry += Number(p.rule_hooks?.bonus_parry_mod ?? 0);
+        perkDodge += Number(p.rule_hooks?.bonus_dodge_mod ?? 0);
+        perkAtk += Number(p.rule_hooks?.bonus_attack_mod ?? 0);
+        perkDmg += Number(p.rule_hooks?.bonus_flat_damage ?? 0);
+      }
+    }
+    const nextParryMod =
+      (attrs.Technique ?? 0) + (skills.Parry ?? 0) + rapierBonus + perkParry;
+    const nextDodgeMod = (attrs.Agility ?? 0) + (skills.Dodge ?? 0) + perkDodge;
+
+    if (eff.formula) {
+      return {
+        ...draftStats,
+        weapon_name: eff.weaponName,
+        attack_ap: eff.attackAp,
+        attack_mod: eff.attackMod,
+        flat_damage: eff.flatDamage,
+        reach_feet: eff.reachFeet,
+        parry_mod: nextParryMod,
+        dodge_mod: nextDodgeMod,
+      };
+    }
+
+    const isUnarmed =
+      (draftStats.weapon_name ?? 'Unarmed').trim().toLowerCase() === 'unarmed';
+    return {
+      ...draftStats,
+      ...(isUnarmed
+        ? {
+            attack_mod: (attrs.Brawn ?? 0) + (skills.Strike ?? 0) + perkAtk,
+            flat_damage: 2 + (attrs.Brawn ?? 0) + perkDmg,
+          }
+        : {}),
+      parry_mod: nextParryMod,
+      dodge_mod: nextDodgeMod,
+    };
+  }
+
+  private computeNpcUnarmedWeaponPatch(
+    stats: VttNpcStats
+  ): Pick<
+    VttNpcStats,
+    'weapon_name' | 'attack_ap' | 'attack_mod' | 'flat_damage' | 'reach_feet'
+  > {
+    const attrs = normalizeNpcAttributes(stats.attributes);
+    const skills = normalizeNpcCombatSkills(stats.combat_skills);
+    let perkAtk = 0;
+    let perkDmg = 0;
+    for (const p of this.getNpcStandaloneNodes()) {
+      if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+        perkAtk += Number(p.rule_hooks?.bonus_attack_mod ?? 0);
+        perkDmg += Number(p.rule_hooks?.bonus_flat_damage ?? 0);
+      }
+    }
+    return {
+      weapon_name: 'Unarmed',
+      attack_ap: 1,
+      attack_mod: (attrs.Brawn ?? 0) + (skills.Strike ?? 0) + perkAtk,
+      flat_damage: 2 + (attrs.Brawn ?? 0) + perkDmg,
+      reach_feet: 5,
+    };
+  }
+
   async adjustNpcAttribute(attr: AttributeName, delta: number): Promise<void> {
     if (!this.canEdit()) return;
+    const currStats = this.getNpcStats();
     const curr = this.getNpcAttributes();
     const nextVal = Math.max(-2, Math.min(8, (curr[attr] ?? 0) + delta));
-    await this.patchNpcStatsField({
+    const nextDraft = this.syncActiveNpcWeaponToStats({
+      ...currStats,
       attributes: {
         ...curr,
         [attr]: nextVal,
       },
     });
+    await this.patchNpcStatsField(nextDraft);
   }
 
   async adjustNpcCombatSkill(
@@ -1919,14 +2052,17 @@ export class VttActorSheetComponent {
     delta: number
   ): Promise<void> {
     if (!this.canEdit()) return;
+    const currStats = this.getNpcStats();
     const curr = this.getNpcCombatSkills();
     const nextVal = Math.max(0, Math.min(6, (curr[skill] ?? 0) + delta));
-    await this.patchNpcStatsField({
+    const nextDraft = this.syncActiveNpcWeaponToStats({
+      ...currStats,
       combat_skills: {
         ...curr,
         [skill]: nextVal,
       },
     });
+    await this.patchNpcStatsField(nextDraft);
   }
 
   async adjustNpcFieldSkill(
@@ -1991,20 +2127,36 @@ export class VttActorSheetComponent {
     );
   }
 
+  getNpcWeaponFormula(
+    target: ActorInventoryItem | WeaponModel
+  ): CharacterWeaponFormulaSummary {
+    return computeNpcWeaponFormula(
+      this.getNpcStats(),
+      target,
+      this.getNpcStandaloneNodes(),
+      this.getAllCompendiumWeapons()
+    );
+  }
+
+  getEffectiveNpcWeaponStats(): ResolvedNpcWeaponStats {
+    return resolveEffectiveNpcWeaponStats(
+      this.getNpcStats(),
+      this.getNpcStandaloneNodes(),
+      this.getAllCompendiumWeapons(),
+      { weaponName: 'Unarmed', attackMod: 2, flatDamage: 3 }
+    );
+  }
+
   getNpcWeaponMod(item: ActorInventoryItem): number {
-    const baseMod = Number(this.getNpcStats().attack_mod ?? 2);
-    const bonus = Number(item.attack_bonus ?? 0);
-    return baseMod + bonus;
+    return this.getNpcWeaponFormula(item).attackMod;
   }
 
   getNpcWeaponRollFormula(item: ActorInventoryItem): string {
-    const mod = this.getNpcWeaponMod(item);
-    return mod >= 0 ? `2d10 + ${mod}` : `2d10 - ${Math.abs(mod)}`;
+    return this.getNpcWeaponFormula(item).rollFormula;
   }
 
   getNpcWeaponDamage(item: ActorInventoryItem): number {
-    if (typeof item.base_damage === 'number') return item.base_damage;
-    return Number(this.getNpcStats().flat_damage ?? 3);
+    return this.getNpcWeaponFormula(item).flatDamage;
   }
 
   getArmorItemSp(item: ActorInventoryItem): number {
@@ -2150,24 +2302,40 @@ export class VttActorSheetComponent {
     if (!this.canEdit() || !weaponId) return;
     const wep = this.getAllCompendiumWeapons().find((w) => w.id === weaponId);
     if (!wep) return;
-    const reachFeet = Math.max(5, Math.round((wep.reach_tiles ?? 1) * 5));
+    const f = this.getNpcWeaponFormula(wep);
+    const reachFeet = Math.max(
+      (wep.reach_tiles ?? 1) * 5,
+      (wep.thrown_range_tiles ?? 0) * 5,
+      5
+    );
     const currInv = this.getNpcInventory();
     const matchIdx = currInv.findIndex(
       (it) =>
         getInventoryItemCategory(it) === 'weapon' &&
         it.compendium_id === weaponId
     );
-    const nextInv = currInv.map((it, idx) =>
-      getInventoryItemCategory(it) === 'weapon'
-        ? { ...it, equipped: idx === matchIdx }
-        : it
-    );
+    const nextInv =
+      matchIdx >= 0
+        ? currInv.map((it, idx) =>
+            getInventoryItemCategory(it) === 'weapon'
+              ? { ...it, equipped: idx === matchIdx }
+              : it
+          )
+        : [
+            ...currInv.map((it) =>
+              getInventoryItemCategory(it) === 'weapon'
+                ? { ...it, equipped: false }
+                : it
+            ),
+            { ...buildWeaponInventoryEntry(wep, 1), equipped: true },
+          ];
     await this.patchNpcStatsField({
       weapon_name: wep.name,
-      attack_ap: wep.ap_cost ?? 1,
-      flat_damage: wep.base_damage ?? 3,
+      attack_ap: f.apCost,
+      attack_mod: f.attackMod,
+      flat_damage: f.flatDamage,
       reach_feet: reachFeet,
-      ...(currInv.length > 0 ? { __inventory: nextInv } : {}),
+      __inventory: nextInv,
     });
   }
 
@@ -2176,12 +2344,15 @@ export class VttActorSheetComponent {
     const compWep = item.compendium_id
       ? this.getAllCompendiumWeapons().find((w) => w.id === item.compendium_id)
       : null;
+    const f = this.getNpcWeaponFormula(item);
     const weaponName = compWep?.name || item.name || 'Strike';
-    const attackAp = compWep?.ap_cost ?? item.ap_cost ?? 1;
-    const flatDamage = compWep?.base_damage ?? item.base_damage ?? 3;
     const reachFeet = compWep
-      ? Math.max(5, Math.round((compWep.reach_tiles ?? 1) * 5))
-      : Math.max(5, item.reach_feet ?? 5);
+      ? Math.max(
+          (compWep.reach_tiles ?? 1) * 5,
+          (compWep.thrown_range_tiles ?? 0) * 5,
+          5
+        )
+      : f.reachFeet;
     const nextInv = this.getNpcInventory().map((it) =>
       getInventoryItemCategory(it) === 'weapon'
         ? { ...it, equipped: it.id === item.id }
@@ -2189,14 +2360,15 @@ export class VttActorSheetComponent {
     );
     await this.patchNpcStatsField({
       weapon_name: weaponName,
-      attack_ap: attackAp,
-      flat_damage: flatDamage,
+      attack_ap: f.apCost,
+      attack_mod: f.attackMod,
+      flat_damage: f.flatDamage,
       reach_feet: reachFeet,
       __inventory: nextInv,
     });
     this.notifications.success(
       'Weapon Equipped',
-      `${this.getNpcName()} equipped ${weaponName} (${flatDamage} DMG · ${reachFeet} ft).`
+      `${this.getNpcName()} equipped ${weaponName} (${f.rollFormula} · ${f.flatDamage} DMG · ${reachFeet} ft).`
     );
   }
 
@@ -2208,10 +2380,7 @@ export class VttActorSheetComponent {
         : it
     );
     await this.patchNpcStatsField({
-      weapon_name: 'Unarmed',
-      attack_ap: 1,
-      flat_damage: 2,
-      reach_feet: 5,
+      ...this.computeNpcUnarmedWeaponPatch(this.getNpcStats()),
       __inventory: nextInv,
     });
   }
@@ -2347,11 +2516,18 @@ export class VttActorSheetComponent {
       wasWepEquipped &&
       getInventoryItemCategory(updatedTarget) === 'weapon'
     ) {
+      const f = computeNpcWeaponFormula(
+        currStats,
+        updatedTarget,
+        this.getNpcStandaloneNodes(),
+        this.getAllCompendiumWeapons()
+      );
       await this.patchNpcStatsField({
         weapon_name: updatedTarget.name || 'Strike',
-        attack_ap: updatedTarget.ap_cost ?? 1,
-        flat_damage: updatedTarget.base_damage ?? 3,
-        reach_feet: Math.max(5, updatedTarget.reach_feet ?? 5),
+        attack_ap: f.apCost,
+        attack_mod: f.attackMod,
+        flat_damage: f.flatDamage,
+        reach_feet: f.reachFeet,
         __inventory: nextInv,
       });
       return;
@@ -2392,10 +2568,7 @@ export class VttActorSheetComponent {
       this.isNpcWeaponEquipped(removed)
     ) {
       await this.patchNpcStatsField({
-        weapon_name: 'Unarmed',
-        attack_ap: 1,
-        flat_damage: 2,
-        reach_feet: 5,
+        ...this.computeNpcUnarmedWeaponPatch(this.getNpcStats()),
         __inventory: nextInv,
       });
       return;
@@ -2750,10 +2923,11 @@ export class VttActorSheetComponent {
       }
 
       await this.applyCompendiumWeaponToNpc(wep.id);
-      this.npcTab.set('statblock');
+      const armedFormula = this.getNpcWeaponFormula(wep);
+      this.npcTab.set('inventory');
       this.notifications.success(
-        'NPC Weapon Updated',
-        `${this.getNpcName()} armed with ${wep.name} (${wep.base_damage} DMG).`
+        'NPC Weapon Equipped',
+        `${this.getNpcName()} armed with ${wep.name} (${armedFormula.rollFormula} · ${armedFormula.flatDamage} DMG).`
       );
       return;
     }
@@ -2916,7 +3090,7 @@ export class VttActorSheetComponent {
       }
 
       await this.grantNpcStandaloneSkill(node.id);
-      this.npcTab.set('statblock');
+      this.npcTab.set('skills');
     }
   }
 }

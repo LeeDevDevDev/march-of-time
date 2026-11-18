@@ -47,13 +47,18 @@ import {
 import {
   DEFAULT_VTT_DARKVISION_FEET,
   DEFAULT_VTT_DIM_VISION_FEET,
+  ResolvedNpcWeaponStats,
+  VttNpcStats,
   VttTokenModel,
   computeEffectiveActorSightFeet,
   computeNpcFieldSkillTotals,
+  computeNpcWeaponFormula,
   normalizeNpcAttributes,
   normalizeNpcCombatSkills,
   normalizeTokenRotation,
   resolveActorDarkvisionFeet,
+  resolveEffectiveNpcDefenseMods,
+  resolveEffectiveNpcWeaponStats,
 } from '../../models/vtt.model';
 import { VttSettingsStore } from '../../../../core/settings/vtt-settings.store';
 import { VttStore } from '../../store/vtt.store';
@@ -745,14 +750,38 @@ export class VttActionHudComponent {
     const ch = this.vttStore.resolveCharacterForToken(tok);
     const st = this.vttStore.computeDerivedForCharacter(ch);
     if (st) return st.parryMod;
-    return Number(tok.npc_stats?.parry_mod ?? 1);
+    if (typeof this.vttStore.resolveTokenNpcDefenseMods === 'function') {
+      return this.vttStore.resolveTokenNpcDefenseMods(tok).parryMod;
+    }
+    const actor = this.vttStore.resolveRosterActorForToken?.(tok);
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    return resolveEffectiveNpcDefenseMods(
+      { ...(actor?.npc_stats ?? {}), ...(tok.npc_stats ?? {}) },
+      this.vttStore.getNpcStandaloneNodes?.(tok) ?? [],
+      allWeapons
+    ).parryMod;
   }
 
   getTokenDodgeMod(tok: VttTokenModel): number {
     const ch = this.vttStore.resolveCharacterForToken(tok);
     const st = this.vttStore.computeDerivedForCharacter(ch);
     if (st) return st.dodgeMod;
-    return Number(tok.npc_stats?.dodge_mod ?? 1);
+    if (typeof this.vttStore.resolveTokenNpcDefenseMods === 'function') {
+      return this.vttStore.resolveTokenNpcDefenseMods(tok).dodgeMod;
+    }
+    const actor = this.vttStore.resolveRosterActorForToken?.(tok);
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    return resolveEffectiveNpcDefenseMods(
+      { ...(actor?.npc_stats ?? {}), ...(tok.npc_stats ?? {}) },
+      this.vttStore.getNpcStandaloneNodes?.(tok) ?? [],
+      allWeapons
+    ).dodgeMod;
   }
 
   canTokenDodge(tok: VttTokenModel): boolean {
@@ -1195,6 +1224,36 @@ export class VttActionHudComponent {
       });
   }
 
+  readonly npcWeaponStats = computed<ResolvedNpcWeaponStats>(() => {
+    const tok = this.token();
+    if (typeof this.vttStore.resolveTokenNpcWeaponStats === 'function') {
+      return this.vttStore.resolveTokenNpcWeaponStats(tok);
+    }
+    const actor = this.linkedActor();
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    const merged: VttNpcStats = {
+      ...(actor?.npc_stats ?? {}),
+      ...(tok.npc_stats ?? {}),
+      __inventory:
+        tok.npc_stats?.__inventory !== undefined
+          ? tok.npc_stats.__inventory
+          : actor?.npc_stats?.__inventory,
+    };
+    const standaloneNodes =
+      typeof this.vttStore.getNpcStandaloneNodes === 'function'
+        ? this.vttStore.getNpcStandaloneNodes(tok)
+        : [];
+    return resolveEffectiveNpcWeaponStats(
+      merged,
+      standaloneNodes,
+      allWeapons,
+      { weaponName: 'Melee Strike', attackMod: 3, flatDamage: 4 }
+    );
+  });
+
   triggerActiveWeapon(): void {
     const tok = this.token();
     if (!this.canControl()) return;
@@ -1205,14 +1264,13 @@ export class VttActionHudComponent {
       this.vttStore.beginWeaponTargetSelection(tok, st.activeWeapon, st);
       return;
     }
-    const npcAp = Number(tok.npc_stats?.attack_ap ?? 1);
-    if (tok.current_ap < npcAp) return;
+    const npcWep = this.npcWeaponStats();
+    if (tok.current_ap < npcWep.attackAp) return;
     this.vttStore.beginWeaponTargetSelection(tok);
   }
 
   async rollActiveWeaponCheck(event?: MouseEvent): Promise<void> {
     event?.stopPropagation();
-    const tok = this.token();
     const st = this.stats();
     if (st) {
       const wepName = st.activeWeapon?.name || 'Unarmed';
@@ -1223,10 +1281,80 @@ export class VttActionHudComponent {
       );
       return;
     }
-    const npcWep = tok.npc_stats?.weapon_name || 'Melee Strike';
-    const npcMod = Number(tok.npc_stats?.attack_mod ?? 3);
-    const npcDmg = Number(tok.npc_stats?.flat_damage ?? 4);
-    await this.rollHudCheck(`${npcWep} Attack`, npcMod, `${npcDmg} DMG`);
+    const npcWep = this.npcWeaponStats();
+    await this.rollHudCheck(
+      `${npcWep.weaponName} Attack`,
+      npcWep.attackMod,
+      `${npcWep.flatDamage} DMG`
+    );
+  }
+
+  getNpcCarriedWeaponSummary(item: ActorInventoryItem): string {
+    const tok = this.token();
+    const actor = this.linkedActor();
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    const merged: VttNpcStats = {
+      ...(actor?.npc_stats ?? {}),
+      ...(tok.npc_stats ?? {}),
+    };
+    const f = computeNpcWeaponFormula(merged, item, [], allWeapons);
+    return `${this.formatSignedMod(f.attackMod)} · ${f.flatDamage} DMG`;
+  }
+
+  isNpcCarriedWeaponEquipped(item: ActorInventoryItem): boolean {
+    const eff = this.npcWeaponStats();
+    if (eff.inventoryWeapon) {
+      return eff.inventoryWeapon.id === item.id;
+    }
+    return Boolean(item.equipped);
+  }
+
+  async equipNpcCarriedWeapon(item: ActorInventoryItem): Promise<void> {
+    if (!this.canControl() || this.char()) return;
+    const tok = this.token();
+    const actor = this.linkedActor();
+    const allWeapons =
+      typeof this.compendiumStore.allWeapons === 'function'
+        ? this.compendiumStore.allWeapons()
+        : [];
+    const baseStats: VttNpcStats = {
+      ...(actor?.npc_stats ?? {}),
+      ...(tok.npc_stats ?? {}),
+    };
+    const compWep = item.compendium_id
+      ? (allWeapons.find((w) => w.id === item.compendium_id) ?? null)
+      : null;
+    const standaloneNodes =
+      typeof this.vttStore.getNpcStandaloneNodes === 'function'
+        ? this.vttStore.getNpcStandaloneNodes(tok)
+        : [];
+    const f = computeNpcWeaponFormula(baseStats, item, standaloneNodes, allWeapons);
+    const reachFeet = compWep
+      ? Math.max(
+          (compWep.reach_tiles ?? 1) * 5,
+          (compWep.thrown_range_tiles ?? 0) * 5,
+          5
+        )
+      : f.reachFeet;
+    const nextInv = this.inventoryItems().map((it) =>
+      getInventoryItemCategory(it) === 'weapon'
+        ? { ...it, equipped: it.id === item.id }
+        : it
+    );
+    await this.vttStore.updateNpcFromVttSheet(actor?.id ?? null, tok.id, {
+      npc_stats: {
+        ...baseStats,
+        weapon_name: compWep?.name || item.name || 'Strike',
+        attack_ap: f.apCost,
+        attack_mod: f.attackMod,
+        flat_damage: f.flatDamage,
+        reach_feet: reachFeet,
+        __inventory: nextInv,
+      },
+    });
   }
 
   async swapWeaponSlot(): Promise<void> {
@@ -1274,7 +1402,10 @@ export class VttActionHudComponent {
         return;
       }
       const toRaise = eligible.filter(
-        (t) => !t.shield_raised && t.current_ap >= 1
+        (t) =>
+          !t.shield_raised &&
+          t.current_ap >= 1 &&
+          (t.max_sp <= 0 || t.current_sp > 0)
       );
       if (toRaise.length === 0) return;
       await this.vttStore.recordablePatchTokensBatch(

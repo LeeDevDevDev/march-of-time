@@ -1645,9 +1645,10 @@ describe('App', () => {
     const directHit = resolveClashReaction(baseClash, 'take_hit', defenderCaps);
     expect(directHit.hitLanded).toBe(true);
     expect(directHit.shieldMitigated).toBe(0);
-    expect(directHit.spDamageToDefender).toBe(3);
+    expect(directHit.spDamageToDefender).toBe(0);
     expect(directHit.armorMitigated).toBe(2);
-    expect(directHit.hpDamageToDefender).toBe(3);
+    expect(directHit.hpDamageToDefender).toBe(6);
+    expect(directHit.defenderGuardBroken).toBe(false);
     expect(directHit.inflictedStatuses).toEqual(['Staggered']);
 
     const flawlessDodge = resolveClashReaction(
@@ -1669,6 +1670,19 @@ describe('App', () => {
     const sweepLegal = getLegalDefenderReactions(parryableClash, defenderCaps);
     expect(sweepLegal.canParry).toBe(true);
     expect(sweepLegal.canDodge).toBe(false);
+    expect(sweepLegal.blockActive).toBe(true);
+
+    const guardBlockedHit = resolveClashReaction(
+      parryableClash,
+      'take_hit',
+      defenderCaps
+    );
+    expect(guardBlockedHit.hitLanded).toBe(true);
+    expect(guardBlockedHit.shieldMitigated).toBe(4);
+    expect(guardBlockedHit.spDamageToDefender).toBe(3);
+    expect(guardBlockedHit.armorMitigated).toBe(1);
+    expect(guardBlockedHit.hpDamageToDefender).toBe(0);
+    expect(guardBlockedHit.defenderGuardBroken).toBe(true);
 
     const flawlessParry = resolveClashReaction(
       parryableClash,
@@ -14217,5 +14231,587 @@ describe('App', () => {
     } finally {
       baseEl.remove();
     }
+  });
+
+  it('routes undefended Take Hit damage straight to HP after Armor DR while Guard Block absorbs via SP and lowers Guard when SP is depleted', async () => {
+    TestBed.resetTestingModule();
+    let logSeq = 1;
+    const activeUserSig = signal<{ id: string; email: string } | null>({
+      id: 'gm-def-1',
+      email: 'gm-def@marchoftime.test',
+    });
+
+    await TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([]),
+            weapons: signal([]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: `log-def-${logSeq++}`,
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-def-1',
+      gm_id: 'gm-def-1',
+      name: 'Defense Rule Campaign',
+      cover_image_url: null,
+      invite_code: 'DEFRUL',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-def-1',
+        campaign_id: 'camp-def-1',
+        gm_id: 'gm-def-1',
+        folder_id: null,
+        name: 'Bastion',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: 1000,
+        scene_height: 800,
+        padding: 0.2,
+        grid_width: 20,
+        grid_height: 16,
+        grid_size_px: 50,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: true,
+        round_number: 1,
+        active_turn_token_id: 'tok-atk',
+        initiative_order: ['tok-atk', 'tok-def'],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-def-1');
+    vttStore.tokens.set([
+      {
+        id: 'tok-atk',
+        encounter_id: 'scene-def-1',
+        character_id: null,
+        owner_id: 'gm-def-1',
+        name: 'HeavyExecutioner',
+        faction: 'enemy',
+        x: 4,
+        y: 4,
+        q: 4,
+        r: 4,
+        size: 1,
+        icon: 'axe',
+        color: '#EF4444',
+        current_hp: 20,
+        max_hp: 20,
+        current_sp: 6,
+        max_sp: 6,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          weapon_name: 'Greatcleaver',
+          attack_ap: 1,
+          attack_mod: 4,
+          flat_damage: 8,
+          reach_feet: 5,
+        },
+      },
+      {
+        id: 'tok-def',
+        encounter_id: 'scene-def-1',
+        character_id: null,
+        owner_id: 'gm-def-1',
+        name: 'Shield Warden',
+        faction: 'ally',
+        x: 5,
+        y: 4,
+        q: 5,
+        r: 4,
+        size: 1,
+        icon: 'bastion-shield',
+        color: '#38B29A',
+        current_hp: 16,
+        max_hp: 16,
+        current_sp: 5,
+        max_sp: 5,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 3,
+        move_feet: 20,
+        vision_feet: 30,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          parry_mod: 3,
+          dodge_mod: 2,
+          can_dodge: true,
+        },
+      },
+    ]);
+
+    vttStore.manualRollOverride.set(15);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    await vttStore.declareClashReaction('take_hit');
+    await vttStore.applyPendingClashOutcome();
+
+    const defAfterUndefended = vttStore.tokens().find(
+      (t) => t.id === 'tok-def'
+    )!;
+    expect(defAfterUndefended.current_sp).toBe(5);
+    expect(defAfterUndefended.current_hp).toBe(10);
+
+    await vttStore.toggleTokenRaiseShield(defAfterUndefended);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised).toBe(
+      true
+    );
+
+    vttStore.manualRollOverride.set(16);
+    vttStore.beginWeaponTargetSelection(vttStore.tokens()[0]);
+    await vttStore.launchClashAgainstTarget('tok-def');
+    await vttStore.declareClashReaction('take_hit');
+    await vttStore.applyPendingClashOutcome();
+
+    const defAfterGuardBreak = vttStore.tokens().find(
+      (t) => t.id === 'tok-def'
+    )!;
+    expect(defAfterGuardBreak.current_sp).toBe(0);
+    expect(defAfterGuardBreak.current_hp).toBe(10);
+    expect(defAfterGuardBreak.shield_raised).toBe(false);
+
+    await vttStore.toggleTokenRaiseShield(defAfterGuardBreak);
+    expect(vttStore.tokens().find((t) => t.id === 'tok-def')?.shield_raised).toBe(
+      false
+    );
+  });
+
+  it('calculates NPC inventory and equipped weapon rolls and damage from governing attributes and combat skills identically to Player Characters', async () => {
+    TestBed.resetTestingModule();
+    const activeUserSig = signal<{ id: string; email: string } | null>({
+      id: 'gm-npc-wep-1',
+      email: 'gm-npc-wep@marchoftime.test',
+    });
+
+    const broadsword: WeaponModel = {
+      id: 'wep-npc-broadsword',
+      slug: 'iron-broadsword',
+      name: 'Iron Broadsword',
+      category: 'Martial',
+      gov_attribute: 'Brawn',
+      gov_skill: 'Strike',
+      ap_cost: 1,
+      base_damage: 4,
+      reach_tiles: 1,
+      thrown_range_tiles: null,
+      requires_aim: false,
+      trait_name: '',
+      trait_description: '',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    const warbow: WeaponModel = {
+      id: 'wep-npc-warbow',
+      slug: 'ash-warbow',
+      name: 'Ash Warbow',
+      category: 'Ranged',
+      gov_attribute: 'Agility',
+      gov_skill: 'Shoot',
+      ap_cost: 2,
+      base_damage: 5,
+      reach_tiles: 12,
+      thrown_range_tiles: null,
+      requires_aim: true,
+      trait_name: '',
+      trait_description: '',
+      rule_hooks: {},
+      is_active: true,
+    };
+
+    await TestBed.configureTestingModule({
+      imports: [VttRoomComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: AuthStore,
+          useValue: {
+            user: activeUserSig,
+            isAdmin: () => true,
+            displayName: () => 'Game Master',
+            handle: () => 'gm',
+          },
+        },
+        {
+          provide: CompendiumStore,
+          useValue: {
+            allWeapons: signal([broadsword, warbow]),
+            weapons: signal([broadsword, warbow]),
+            allArmors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            armors: signal(DEFAULT_COMPENDIUM_ARMORS),
+            allItems: signal(DEFAULT_COMPENDIUM_ITEMS),
+            items: signal(DEFAULT_COMPENDIUM_ITEMS),
+            allPerkNodes: signal([]),
+            perkNodes: signal([]),
+            standaloneNodes: signal([]),
+            allStandaloneNodes: signal([]),
+            allSkillTrees: signal([]),
+            skillTrees: signal([]),
+            isLoading: signal(false),
+            ensureLoaded: async () => undefined,
+          },
+        },
+        {
+          provide: CharacterStore,
+          useValue: {
+            characters: signal([]),
+            ensureUserCharactersLoaded: async () => undefined,
+            getCharacterById: () => undefined,
+            upsertRealtimeCharacter: () => undefined,
+          },
+        },
+        {
+          provide: CollectionsStore,
+          useValue: {
+            folders: signal([]),
+            actors: signal([]),
+            isLoading: signal(false),
+            loadCollections: async () => undefined,
+          },
+        },
+        {
+          provide: VttService,
+          useValue: {
+            updateToken: async () => null,
+            updateRosterActor: async () => null,
+            updateScene: async () => ({ error: null, needsMigration: false }),
+            insertLog: async (entry: Record<string, unknown>) => ({
+              ...entry,
+              id: 'log-npc-wep-1',
+              created_at: new Date().toISOString(),
+            }),
+            unsubscribeChannel: () => undefined,
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const vttStore = TestBed.inject(VttStore);
+    vttStore.isLoading.set(false);
+    vttStore.campaign.set({
+      id: 'camp-npc-wep-1',
+      gm_id: 'gm-npc-wep-1',
+      name: 'NPC Weapon Scaling Campaign',
+      cover_image_url: null,
+      invite_code: 'NPCWEP',
+      last_played_at: null,
+      created_at: new Date().toISOString(),
+    });
+    vttStore.scenes.set([
+      {
+        id: 'scene-npc-wep-1',
+        campaign_id: 'camp-npc-wep-1',
+        gm_id: 'gm-npc-wep-1',
+        folder_id: null,
+        name: 'Garrison',
+        is_active_scene: true,
+        map_image_url: null,
+        grid_mode: 'square',
+        background_color: '#09100F',
+        scene_width: 1000,
+        scene_height: 800,
+        padding: 0.2,
+        grid_width: 20,
+        grid_height: 16,
+        grid_size_px: 50,
+        grid_offset_x: 0,
+        grid_offset_y: 0,
+        grid_opacity: DEFAULT_VTT_GRID_OPACITY,
+        sort_order: 0,
+        combat_active: false,
+        round_number: 1,
+        active_turn_token_id: null,
+        initiative_order: [],
+        token_vision: false,
+        fog_enabled: false,
+        global_illumination: true,
+        darkness_level: 0,
+        walls: [],
+        lights: [],
+        explored_fog: { cells: [], revealed_all: false },
+        pending_clash: null,
+      },
+    ]);
+    vttStore.activeSceneId.set('scene-npc-wep-1');
+
+    const swordInv = buildWeaponInventoryEntry(broadsword, 1);
+    const bowInv = buildWeaponInventoryEntry(warbow, 1);
+
+    vttStore.rosterActors.set([
+      {
+        id: 'actor-npc-captain',
+        campaign_id: 'camp-npc-wep-1',
+        folder_id: null,
+        character_id: null,
+        collection_actor_id: null,
+        owner_id: null,
+        actor_kind: 'npc',
+        is_unique: true,
+        name: 'Garrison Captain',
+        faction: 'enemy',
+        size: 1,
+        icon: 'sword',
+        color: '#EF4444',
+        portrait_url: null,
+        token_image_url: null,
+        token_appearance: { ...DEFAULT_TOKEN_APPEARANCE },
+        max_hp: 18,
+        max_sp: 8,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 60,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        npc_stats: {
+          weapon_name: 'Unarmed',
+          attack_ap: 1,
+          attack_mod: 1,
+          flat_damage: 2,
+          attributes: {
+            Brawn: 3,
+            Agility: 1,
+            Technique: 2,
+            Iron: 2,
+            Cunning: 1,
+          },
+          combat_skills: {
+            Strike: 2,
+            Shoot: 0,
+            Parry: 2,
+            Dodge: 1,
+            Block: 0,
+          },
+          __inventory: [swordInv, bowInv],
+        },
+        notes: '',
+        sort_order: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vttStore.tokens.set([
+      {
+        id: 'tok-npc-captain',
+        encounter_id: 'scene-npc-wep-1',
+        character_id: null,
+        owner_id: null,
+        name: 'Garrison Captain',
+        faction: 'enemy',
+        x: 4,
+        y: 4,
+        q: 4,
+        r: 4,
+        size: 1,
+        icon: 'sword',
+        color: '#EF4444',
+        current_hp: 18,
+        max_hp: 18,
+        current_sp: 8,
+        max_sp: 8,
+        current_ap: 4,
+        max_ap: 4,
+        armor_dr: 2,
+        shield_block: 0,
+        move_feet: 20,
+        vision_feet: 60,
+        darkvision_feet: 10,
+        light_bright_feet: 0,
+        light_dim_feet: 0,
+        light_color: '#FF9B42',
+        shield_raised: false,
+        is_hidden: false,
+        statuses: [],
+        npc_stats: {
+          __roster_actor_id: 'actor-npc-captain',
+          weapon_name: 'Unarmed',
+          attack_ap: 1,
+          attack_mod: 1,
+          flat_damage: 2,
+        },
+      },
+    ]);
+
+    const fixture = TestBed.createComponent(VttRoomComponent);
+    vttStore.openTokenSheet('tok-npc-captain');
+    fixture.detectChanges();
+
+    const sheetComp = fixture.debugElement.children
+      .flatMap((d) => d.queryAll(() => true))
+      .map((d) => d.componentInstance)
+      .find(
+        (inst): inst is VttActorSheetComponent =>
+          inst instanceof VttActorSheetComponent
+      )!;
+    expect(sheetComp).toBeTruthy();
+
+    const hostEl = fixture.nativeElement as HTMLElement;
+    expect(
+      hostEl.querySelector('button[data-vtt-npc-tab="statblock"]')
+    ).toBeNull();
+    const npcTabButtons = Array.from(
+      hostEl.querySelectorAll('button[data-vtt-npc-tab]')
+    ).map((btn) => btn.getAttribute('data-vtt-npc-tab'));
+    expect(npcTabButtons).toEqual(['actions', 'skills', 'inventory', 'token']);
+
+    sheetComp.npcTab.set('skills');
+    fixture.detectChanges();
+    expect(
+      hostEl.querySelector('[data-npc-vitals-section="true"]')
+    ).toBeTruthy();
+    expect(
+      hostEl.querySelector('[data-npc-attributes-section="true"]')
+    ).toBeTruthy();
+    expect(
+      hostEl.querySelector('[data-npc-standalone-section="true"]')
+    ).toBeTruthy();
+
+    expect(sheetComp.getNpcParryMod()).toBe(4);
+    await sheetComp.adjustNpcCombatSkill('Parry', 1);
+    fixture.detectChanges();
+    expect(sheetComp.getNpcParryMod()).toBe(5);
+    expect(
+      vttStore.resolveTokenNpcDefenseMods(
+        vttStore.tokens().find((t) => t.id === 'tok-npc-captain')!
+      ).parryMod
+    ).toBe(5);
+
+    expect(sheetComp.getNpcWeaponMod(swordInv)).toBe(5);
+    expect(sheetComp.getNpcWeaponDamage(swordInv)).toBe(7);
+    expect(sheetComp.getNpcWeaponRollFormula(swordInv)).toBe('2d10 + 5');
+
+    expect(sheetComp.getNpcWeaponMod(bowInv)).toBe(1);
+    expect(sheetComp.getNpcWeaponDamage(bowInv)).toBe(6);
+    expect(sheetComp.getNpcWeaponRollFormula(bowInv)).toBe('2d10 + 1');
+
+    await sheetComp.equipNpcInventoryWeapon(swordInv);
+    fixture.detectChanges();
+
+    const equippedActor = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-npc-captain')!;
+    expect(equippedActor.npc_stats.weapon_name).toBe('Iron Broadsword');
+    expect(equippedActor.npc_stats.attack_mod).toBe(5);
+    expect(equippedActor.npc_stats.flat_damage).toBe(7);
+
+    await sheetComp.adjustNpcAttribute('Brawn', 1);
+    fixture.detectChanges();
+
+    const boostedActor = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-npc-captain')!;
+    expect(boostedActor.npc_stats.attack_mod).toBe(6);
+    expect(boostedActor.npc_stats.flat_damage).toBe(8);
+
+    vttStore.beginWeaponTargetSelection(
+      vttStore.tokens().find((t) => t.id === 'tok-npc-captain')!
+    );
+    expect(vttStore.pendingTargetAction()?.attackMod).toBe(6);
+    expect(vttStore.pendingTargetAction()?.flatDamage).toBe(8);
+    vttStore.cancelTargetSelection();
+
+    await sheetComp.unequipNpcInventoryWeapon();
+    fixture.detectChanges();
+
+    const unarmedActor = vttStore
+      .rosterActors()
+      .find((a) => a.id === 'actor-npc-captain')!;
+    expect(unarmedActor.npc_stats.weapon_name).toBe('Unarmed');
+    expect(unarmedActor.npc_stats.attack_mod).toBe(6);
+    expect(unarmedActor.npc_stats.flat_damage).toBe(6);
   });
 });

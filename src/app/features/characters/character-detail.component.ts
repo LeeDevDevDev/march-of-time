@@ -527,7 +527,7 @@ export class CharacterDetailComponent {
           active_cooldowns: nextCooldowns,
         };
       }
-      if (c.current_ap < 1) return c;
+      if (c.current_ap < 1 || c.current_sp <= 0) return c;
       nextCooldowns['__shield_raised'] = 1;
       return {
         ...c,

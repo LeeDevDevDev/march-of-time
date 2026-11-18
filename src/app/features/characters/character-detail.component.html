@@ -1005,7 +1005,7 @@
                       type="button"
                       data-char-action="raise-guard"
                       (click)="toggleRaiseShield(char.id)"
-                      [disabled]="!isShieldRaised(char) && char.current_ap < 1"
+                      [disabled]="!isShieldRaised(char) && (char.current_ap < 1 || char.current_sp <= 0)"
                       class="rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold transition-colors disabled:opacity-40"
                       [class.btn-copper]="!isShieldRaised(char)"
                       [class.border]="isShieldRaised(char)"
@@ -1364,7 +1364,7 @@
                   <button
                     type="button"
                     (click)="toggleRaiseShield(char.id)"
-                    [disabled]="!isShieldRaised(char) && char.current_ap < 1"
+                    [disabled]="!isShieldRaised(char) && (char.current_ap < 1 || char.current_sp <= 0)"
                     class="shrink-0 rounded-lg px-3 py-1.5 font-mono-num text-xs font-bold transition-colors disabled:opacity-40"
                     [class.btn-copper]="!isShieldRaised(char)"
                     [class.border]="isShieldRaised(char)"

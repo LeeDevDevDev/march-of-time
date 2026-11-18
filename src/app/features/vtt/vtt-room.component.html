@@ -793,14 +793,16 @@
                       (click)="chooseClashReaction('take_hit')"
                       class="flex flex-col items-start rounded-xl border border-[#243B37] bg-[#142220] p-2.5 text-left transition-colors hover:border-[#F59E0B]"
                     >
-                      <span class="font-bold text-white">0 AP: Take Hit</span>
+                      <span class="font-bold text-white">
+                        {{ legal.blockActive ? '0 AP: Guard Block' : '0 AP: Take Hit' }}
+                      </span>
                       <span class="mt-0.5 text-[10px] text-[#8AB0AB]">
                         @if (legal.blockActive) {
-                          Shield Block &minus;{{ legal.effectiveBlockMitigation }} DMG active
+                          Shield Block &minus;{{ legal.effectiveBlockMitigation }} DMG &rarr; SP (lowers Guard if SP hits 0)
                         } @else if (legal.blockDisabledByPiercing) {
-                          Piercing bypasses Shield Block!
+                          Piercing bypasses Block! Skips SP &rarr; Armor DR &rarr; HP
                         } @else {
-                          Absorb via Poise (SP) &rarr; Armor DR &rarr; HP
+                          Undefended &middot; Skips SP &rarr; Armor DR &rarr; HP
                         }
                       </span>
                     </button>

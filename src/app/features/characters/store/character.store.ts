@@ -468,10 +468,17 @@ export class CharacterStore {
       this.resolveArmorsForStats()
     );
 
+    const clampedSp = Math.min(updated.current_sp, derived.maxSp);
+    const nextCooldowns = { ...(updated.active_cooldowns ?? {}) };
+    if (current.current_sp > 0 && clampedSp <= 0) {
+      delete nextCooldowns['__shield_raised'];
+    }
+
     const clamped: CharacterModel = {
       ...updated,
       current_hp: Math.min(updated.current_hp, derived.maxHp),
-      current_sp: Math.min(updated.current_sp, derived.maxSp),
+      current_sp: clampedSp,
+      active_cooldowns: nextCooldowns,
       inventory: normalizeInventoryItems(updated.inventory),
       notes: updated.notes ?? current.notes ?? '',
       portrait_url:

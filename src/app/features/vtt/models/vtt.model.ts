@@ -3,10 +3,14 @@ import {
   AttributeName,
   CombatSkillName,
   CombatStatusEffect,
+  PerkNodeModel,
+  WeaponModel,
+  isCombatArtUpgradeNode,
 } from '../../../core/compendium/compendium.model';
 import {
   ActorInventoryItem,
   CharacterModel,
+  CharacterWeaponFormulaSummary,
   DEFAULT_TOKEN_APPEARANCE,
   FIELD_SKILL_LIST,
   FieldSkillName,
@@ -14,6 +18,8 @@ import {
   TokenFramePresetId,
   TokenShape,
   buildTokenImagePanZoomTransform,
+  computeCharacterWeaponFormula,
+  getInventoryItemCategory,
   hasCustomTokenAppearance,
   normalizeInventoryItems,
   normalizeTokenAppearance,
@@ -381,6 +387,161 @@ export function computeNpcFieldSkillTotals(
   return totals;
 }
 
+export interface ResolvedNpcWeaponStats {
+  weaponName: string;
+  attackAp: number;
+  attackMod: number;
+  flatDamage: number;
+  reachFeet: number;
+  compendiumWeapon: WeaponModel | null;
+  inventoryWeapon: ActorInventoryItem | null;
+  formula: CharacterWeaponFormulaSummary | null;
+}
+
+export function computeNpcWeaponFormula(
+  npcStats: VttNpcStats | null | undefined,
+  target: WeaponModel | ActorInventoryItem,
+  standaloneNodes: PerkNodeModel[] = [],
+  allWeapons: WeaponModel[] = []
+): CharacterWeaponFormulaSummary {
+  return computeCharacterWeaponFormula(
+    {
+      attributes: normalizeNpcAttributes(npcStats?.attributes),
+      combat_skills: normalizeNpcCombatSkills(npcStats?.combat_skills),
+    },
+    target,
+    standaloneNodes,
+    allWeapons
+  );
+}
+
+export function resolveEffectiveNpcWeaponStats(
+  npcStats: VttNpcStats | null | undefined,
+  standaloneNodes: PerkNodeModel[] = [],
+  allWeapons: WeaponModel[] = [],
+  defaults: {
+    weaponName?: string;
+    attackMod?: number;
+    flatDamage?: number;
+  } = {}
+): ResolvedNpcWeaponStats {
+  const stats = npcStats ?? {};
+  const invWeapons = normalizeInventoryItems(stats.__inventory).filter(
+    (it) => getInventoryItemCategory(it) === 'weapon'
+  );
+  const rawName = (stats.weapon_name ?? '').trim();
+  const activeLower = rawName.toLowerCase();
+
+  let inventoryWeapon: ActorInventoryItem | null = null;
+  if (invWeapons.some((it) => it.equipped)) {
+    inventoryWeapon = invWeapons.find((it) => it.equipped) ?? null;
+  } else if (activeLower && activeLower !== 'unarmed') {
+    inventoryWeapon =
+      invWeapons.find(
+        (it) => (it.name ?? '').trim().toLowerCase() === activeLower
+      ) ?? null;
+  }
+
+  const compendiumWeapon = inventoryWeapon?.compendium_id
+    ? (allWeapons.find((w) => w.id === inventoryWeapon.compendium_id) ?? null)
+    : activeLower && activeLower !== 'unarmed'
+      ? (allWeapons.find(
+          (w) => w.name.trim().toLowerCase() === activeLower
+        ) ?? null)
+      : null;
+
+  const target = inventoryWeapon ?? compendiumWeapon;
+  if (target) {
+    const formula = computeNpcWeaponFormula(
+      stats,
+      target,
+      standaloneNodes,
+      allWeapons
+    );
+    const reachFeet = compendiumWeapon
+      ? Math.max(
+          (compendiumWeapon.reach_tiles ?? 1) * 5,
+          (compendiumWeapon.thrown_range_tiles ?? 0) * 5,
+          5
+        )
+      : formula.reachFeet;
+    return {
+      weaponName:
+        compendiumWeapon?.name ||
+        inventoryWeapon?.name ||
+        rawName ||
+        defaults.weaponName ||
+        'Unarmed',
+      attackAp: formula.apCost,
+      attackMod: formula.attackMod,
+      flatDamage: formula.flatDamage,
+      reachFeet,
+      compendiumWeapon,
+      inventoryWeapon,
+      formula,
+    };
+  }
+
+  return {
+    weaponName: rawName || defaults.weaponName || 'Unarmed',
+    attackAp: Math.max(1, Number(stats.attack_ap ?? 1)),
+    attackMod: Number(stats.attack_mod ?? defaults.attackMod ?? 2),
+    flatDamage: Number(stats.flat_damage ?? defaults.flatDamage ?? 3),
+    reachFeet: Math.max(5, Number(stats.reach_feet ?? 5)),
+    compendiumWeapon: null,
+    inventoryWeapon: null,
+    formula: null,
+  };
+}
+
+export function resolveEffectiveNpcDefenseMods(
+  npcStats: VttNpcStats | null | undefined,
+  standaloneNodes: PerkNodeModel[] = [],
+  allWeapons: WeaponModel[] = [],
+  defaults: { parryMod?: number; dodgeMod?: number } = {}
+): {
+  parryMod: number;
+  dodgeMod: number;
+  enablesMartialParry: boolean;
+} {
+  const stats = npcStats ?? {};
+  const effWep = resolveEffectiveNpcWeaponStats(
+    stats,
+    standaloneNodes,
+    allWeapons
+  );
+  const enablesMartialParry = Boolean(
+    stats.enables_martial_parry ||
+      effWep.compendiumWeapon?.rule_hooks?.['enables_martial_parry']
+  );
+  if (stats.attributes || stats.combat_skills) {
+    const attrs = normalizeNpcAttributes(stats.attributes);
+    const skills = normalizeNpcCombatSkills(stats.combat_skills);
+    const rapierBonus = Number(
+      effWep.compendiumWeapon?.rule_hooks?.['parry_roll_bonus'] ?? 0
+    );
+    let perkParry = 0;
+    let perkDodge = 0;
+    for (const p of standaloneNodes) {
+      if (p.node_type === 'passive_upgrade' && !isCombatArtUpgradeNode(p)) {
+        perkParry += Number(p.rule_hooks?.bonus_parry_mod ?? 0);
+        perkDodge += Number(p.rule_hooks?.bonus_dodge_mod ?? 0);
+      }
+    }
+    return {
+      parryMod:
+        (attrs.Technique ?? 0) + (skills.Parry ?? 0) + rapierBonus + perkParry,
+      dodgeMod: (attrs.Agility ?? 0) + (skills.Dodge ?? 0) + perkDodge,
+      enablesMartialParry,
+    };
+  }
+  return {
+    parryMod: Number(stats.parry_mod ?? defaults.parryMod ?? 1),
+    dodgeMod: Number(stats.dodge_mod ?? defaults.dodgeMod ?? 1),
+    enablesMartialParry,
+  };
+}
+
 export interface VisualBearingEntity {
   portrait_url?: string | null;
   token_image_url?: string | null;
@@ -493,6 +654,7 @@ export interface VttClashResolution {
   counterSpToAttacker: number;
   shieldMitigated: number;
   armorMitigated: number;
+  defenderGuardBroken?: boolean;
   inflictedStatuses: Exclude<CombatStatusEffect, 'None'>[];
   pushFeet: number;
   shiftDefenderFeet: number;

@@ -394,10 +394,10 @@
               </div>
             }
 
-            @if (carriedWeapons().length > 0 && ch) {
+            @if (carriedWeapons().length > 0) {
               <div class="space-y-1.5 border-t border-[#243B37] pt-2">
                 <div class="font-mono-num text-[10px] font-bold uppercase text-[#8AB0AB]">
-                  Stowed Pack Weapons
+                  {{ ch ? 'Stowed Pack Weapons' : 'Inventory Weapons' }}
                 </div>
                 @for (wItem of carriedWeapons(); track wItem.id) {
                   @let wVis = getCarriedWeaponVisuals(wItem);
@@ -411,9 +411,16 @@
                           sizeClass="h-3.5 w-3.5"
                         />
                       </span>
-                      <span class="truncate text-[11px] font-bold text-white">{{ wItem.name }}</span>
+                      <div class="min-w-0">
+                        <div class="truncate text-[11px] font-bold text-white">{{ wItem.name }}</div>
+                        @if (!ch) {
+                          <div class="font-mono-num text-[9px] text-[#FDBA74]">
+                            {{ getNpcCarriedWeaponSummary(wItem) }}
+                          </div>
+                        }
+                      </div>
                     </div>
-                    @if (controllable && wItem.compendium_id) {
+                    @if (controllable && ch && wItem.compendium_id) {
                       <div class="flex items-center gap-1">
                         <button
                           type="button"
@@ -430,6 +437,20 @@
                           Equip S2
                         </button>
                       </div>
+                    } @else if (controllable && !ch) {
+                      @if (isNpcCarriedWeaponEquipped(wItem)) {
+                        <span class="rounded bg-[#27160E] px-2 py-0.5 font-mono-num text-[9px] font-bold uppercase text-[#FDBA74]">
+                          Equipped
+                        </span>
+                      } @else {
+                        <button
+                          type="button"
+                          (click)="equipNpcCarriedWeapon(wItem)"
+                          class="rounded-lg border border-[#C4491A]/50 bg-[#27160E] px-2 py-1 text-[10px] font-bold text-[#FDBA74] hover:border-[#C4491A]"
+                        >
+                          Equip
+                        </button>
+                      }
                     }
                   </div>
                 }
@@ -1734,10 +1755,11 @@
             </button>
           </div>
         } @else {
-          @let npcAp = tok.npc_stats.attack_ap ?? 1;
-          @let npcMod = tok.npc_stats.attack_mod ?? 3;
-          @let npcDmg = tok.npc_stats.flat_damage ?? 4;
-          @let npcWepName = tok.npc_stats.weapon_name || 'Melee Strike';
+          @let npcWep = npcWeaponStats();
+          @let npcAp = npcWep.attackAp;
+          @let npcMod = npcWep.attackMod;
+          @let npcDmg = npcWep.flatDamage;
+          @let npcWepName = npcWep.weaponName;
 
           <div data-hud-section="weapons" class="flex items-stretch gap-1.5">
             <div
@@ -1746,8 +1768,8 @@
               (mouseenter)="setHover({
                 title: npcWepName,
                 apLabel: npcAp + ' AP',
-                subtitle: formatFormula(npcMod) + ' · ' + npcDmg + ' Flat DMG · Reach ' + (tok.npc_stats.reach_feet ?? 5) + ' ft',
-                description: 'Click to select a target on the battlemap.'
+                subtitle: formatFormula(npcMod) + ' · ' + npcDmg + ' DMG · Reach ' + npcWep.reachFeet + ' ft',
+                description: npcWep.formula ? npcWep.formula.rollBreakdown + ' · ' + npcWep.formula.damageBreakdown : 'Click to select a target on the battlemap.'
               })"
               (mouseleave)="setHover(null)"
             >
@@ -1839,13 +1861,13 @@
             <button
               type="button"
               data-hud-tile="raise-guard"
-              [disabled]="!controllable || (!tok.shield_raised && tok.current_ap < 1)"
+              [disabled]="!controllable || (!tok.shield_raised && (tok.current_ap < 1 || (tok.max_sp > 0 && tok.current_sp <= 0)))"
               (click)="toggleRaiseGuard()"
               (mouseenter)="setHover({
                 title: tok.shield_raised ? 'Lower Guard / Shield' : 'Raise Guard / Shield',
                 apLabel: tok.shield_raised ? '0 AP' : '1 AP',
                 subtitle: 'Mitigates ' + tok.shield_block + ' DMG vs non-Piercing attacks',
-                description: 'Remains active until the start of your next turn.'
+                description: 'Remains active until the start of your next turn or until SP is depleted.'
               })"
               (mouseleave)="setHover(null)"
               class="flex h-[84px] w-[68px] flex-col items-center justify-between rounded-xl border p-1.5 text-center transition-colors disabled:opacity-40"
